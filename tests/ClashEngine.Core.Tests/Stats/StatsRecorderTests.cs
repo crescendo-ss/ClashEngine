@@ -1,0 +1,652 @@
+using ClashEngine.Core.Identity;
+using ClashEngine.Core.Stats;
+
+namespace ClashEngine.Core.Tests.Stats;
+
+public class StatsRecorderTests
+{
+    private static PlayerKey K(string n) => new(n);
+
+    private static WeaponEnergyConfig SimpleEnergy() => new(
+        new Dictionary<WeaponKind, (int, int)>
+        {
+            [WeaponKind.Bullet] = (100, 50),
+            [WeaponKind.Bomb] = (500, 0),
+            [WeaponKind.Mine] = (1000, 0),
+        },
+        multifireBulletEnergy: 30);
+
+    /// <summary>Two-team registration: A,B on team 0; C,D on team 1. Max energy = 1000 each.</summary>
+    private static StatsRecorder Make4Player(double recharge = 0.0, uint atTick = 0)
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, recharge, energy, atTick);
+        r.RegisterPlayer(K("B"), 0, 1000, recharge, energy, atTick);
+        r.RegisterPlayer(K("C"), 1, 1000, recharge, energy, atTick);
+        r.RegisterPlayer(K("D"), 1, 1000, recharge, energy, atTick);
+        return r;
+    }
+
+    // --- registration ---
+
+    [Fact]
+    public void Register_creates_player_stats()
+    {
+        var r = Make4Player();
+        Assert.Equal(4, r.Stats.Count);
+        Assert.Equal(K("A"), r.Stats[K("A")].Player);
+    }
+
+    [Fact]
+    public void Register_twice_throws()
+    {
+        var r = new StatsRecorder(new DamageDecay());
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), atTick: 0);
+        Assert.Throws<InvalidOperationException>(() =>
+            r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), atTick: 0));
+    }
+
+    // --- damage routing ---
+
+    [Fact]
+    public void Enemy_damage_routes_to_damage_dealt_and_taken()
+    {
+        var r = Make4Player();
+        r.OnDamage(victim: K("C"), attacker: K("A"), amount: 200, WeaponKind.Bullet, empDurationTicks: 0, atTick: 100);
+        Assert.Equal(200, r.Stats[K("A")].DamageDealt);
+        Assert.Equal(200, r.Stats[K("C")].DamageTaken);
+        Assert.Equal(0, r.Stats[K("A")].TeamDamageDealt);
+    }
+
+    [Fact]
+    public void Team_damage_routes_to_team_counters_only()
+    {
+        var r = Make4Player();
+        r.OnDamage(victim: K("B"), attacker: K("A"), amount: 200, WeaponKind.Bomb, 0, atTick: 100);
+        Assert.Equal(0, r.Stats[K("A")].DamageDealt);
+        Assert.Equal(0, r.Stats[K("B")].DamageTaken);
+        Assert.Equal(200, r.Stats[K("A")].TeamDamageDealt);
+        Assert.Equal(200, r.Stats[K("B")].TeamDamageTaken);
+    }
+
+    [Fact]
+    public void Self_damage_routes_to_self_counter_and_does_not_enter_recovery()
+    {
+        var r = Make4Player();
+        r.OnDamage(victim: K("A"), attacker: K("A"), amount: 50, WeaponKind.Bomb, 0, atTick: 100);
+        Assert.Equal(50, r.Stats[K("A")].SelfDamage);
+        Assert.Equal(0, r.Stats[K("A")].DamageTaken);
+        Assert.Equal(0, r.Stats[K("A")].Recovery.Count);
+    }
+
+    [Fact]
+    public void Enemy_damage_appends_to_victim_recovery_state()
+    {
+        var r = Make4Player();
+        r.OnDamage(K("C"), K("A"), 200, WeaponKind.Bullet, 0, 100);
+        var snap = r.Stats[K("C")].Recovery.Snapshot(currentTick: 100);
+        Assert.Single(snap);
+        Assert.Equal(K("A"), snap[0].Attacker);
+    }
+
+    [Fact]
+    public void Splash_weapon_increments_attacker_hit_count_per_damage_event()
+    {
+        // One bomb that splashes A and B should yield two damage events → two hits on the bomb counter.
+        var r = Make4Player();
+        r.OnDamage(K("A"), K("C"), 100, WeaponKind.Bomb, 0, 100);
+        r.OnDamage(K("B"), K("C"), 100, WeaponKind.Bomb, 0, 100);
+        Assert.Equal(2, r.Stats[K("C")].PerWeapon[WeaponKind.Bomb].HitCount);
+    }
+
+    [Fact]
+    public void Untracked_weapon_does_not_increment_per_weapon()
+    {
+        var r = Make4Player();
+        r.OnDamage(K("C"), K("A"), 50, WeaponKind.Shrapnel, 0, 100);
+        r.OnDamage(K("C"), K("A"), 50, WeaponKind.Burst, 0, 100);
+        Assert.Empty(r.Stats[K("A")].PerWeapon);
+        Assert.Equal(100, r.Stats[K("A")].DamageDealt); // raw still credited
+    }
+
+    // --- weapon fired ---
+
+    [Fact]
+    public void Weapon_fire_records_shot_and_energy_at_level_one()
+    {
+        var r = Make4Player();
+        r.OnWeaponFired(K("A"), WeaponKind.Bullet, level: 1, multifire: false, atTick: 100);
+        var stats = r.Stats[K("A")].PerWeapon[WeaponKind.Bullet];
+        Assert.Equal(1, stats.FireCount);
+        Assert.Equal(100, stats.EnergySpent);
+    }
+
+    [Fact]
+    public void Weapon_fire_uses_multifire_cost_ladder_when_multifire_set()
+    {
+        var r = Make4Player();
+        r.OnWeaponFired(K("A"), WeaponKind.Bullet, level: 3, multifire: true, atTick: 100);
+        // Multifire is a separate projectile: 3 * 30 = 90. Bullet base/upgrade is bypassed.
+        Assert.Equal(90, r.Stats[K("A")].PerWeapon[WeaponKind.Bullet].EnergySpent);
+    }
+
+    [Fact]
+    public void Weapon_fire_uses_bullet_cost_ladder_when_multifire_clear()
+    {
+        var r = Make4Player();
+        r.OnWeaponFired(K("A"), WeaponKind.Bullet, level: 3, multifire: false, atTick: 100);
+        // Single-fire: 100 + (3-1)*50 = 200.
+        Assert.Equal(200, r.Stats[K("A")].PerWeapon[WeaponKind.Bullet].EnergySpent);
+    }
+
+    [Fact]
+    public void Weapon_fire_is_ignored_for_untracked_kinds()
+    {
+        var r = Make4Player();
+        r.OnWeaponFired(K("A"), WeaponKind.Burst, 1, false, 100);
+        r.OnWeaponFired(K("A"), WeaponKind.Shrapnel, 1, false, 100);
+        Assert.Empty(r.Stats[K("A")].PerWeapon);
+    }
+
+    // --- kill flow ---
+
+    [Fact]
+    public void Kill_credits_killer_and_records_victim_death()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnDamage(K("C"), K("A"), 800, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnKill(victim: K("C"), killer: K("A"), atTick: 110);
+
+        Assert.Equal(1, r.Stats[K("A")].Kills);
+        Assert.Equal(1, r.Stats[K("C")].Deaths);
+    }
+
+    [Fact]
+    public void Kill_attributes_raw_damage_and_decay_weighted_credit()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnDamage(K("C"), K("A"), 600, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnDamage(K("C"), K("B"), 200, WeaponKind.Bullet, 0, atTick: 110);
+        r.OnKill(K("C"), K("A"), atTick: 110);
+
+        // KillDamage is the raw (non-decay-weighted) recovery-adjusted contribution.
+        Assert.Equal(600.0, r.Stats[K("A")].KillDamage, precision: 6);
+        Assert.Equal(200.0, r.Stats[K("B")].KillDamage, precision: 6);
+
+        // KillCredit is the decay-weighted share normalized so the event distributes 1.0 total.
+        // Decay half-life=200. At tick 110, A's damage at 100 is 10 ticks old → weight 0.5^(10/200).
+        // B's at tick 110 → weight 1.0.
+        double aWeighted = 600 * Math.Pow(0.5, 10.0 / 200);
+        double bWeighted = 200.0;
+        double total = aWeighted + bWeighted;
+        Assert.Equal(aWeighted / total, r.Stats[K("A")].KillCredit, precision: 6);
+        Assert.Equal(bWeighted / total, r.Stats[K("B")].KillCredit, precision: 6);
+        Assert.Equal(1.0, r.Stats[K("A")].KillCredit + r.Stats[K("B")].KillCredit, precision: 6);
+    }
+
+    [Fact]
+    public void Kill_grants_assist_to_non_killer_above_threshold()
+    {
+        // Threshold = 25% of 1000 = 250. B contributed 300 → assist. D contributed 100 → no assist.
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnDamage(K("C"), K("B"), 300, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnDamage(K("C"), K("A"), 600, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnDamage(K("C"), K("D"), 100, WeaponKind.Bullet, 0, atTick: 100); // teammate of victim — never assists
+        r.OnKill(K("C"), K("A"), atTick: 100);
+
+        Assert.Equal(0, r.Stats[K("A")].Assists);  // killer doesn't get an assist
+        Assert.Equal(1, r.Stats[K("B")].Assists);  // above threshold
+        Assert.Equal(0, r.Stats[K("D")].Assists);  // would be teammate-of-victim — not eligible
+    }
+
+    [Fact]
+    public void Teamkill_increments_killer_teamkill_counter_not_kill()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("B"), atTick: 0);
+        r.OnDamage(K("B"), K("A"), 800, WeaponKind.Bomb, 0, atTick: 100);
+        r.OnKill(victim: K("B"), killer: K("A"), atTick: 100);
+        Assert.Equal(0, r.Stats[K("A")].Kills);
+        Assert.Equal(1, r.Stats[K("A")].Teamkills);
+        Assert.Equal(1, r.Stats[K("B")].Deaths);
+    }
+
+    [Fact]
+    public void Self_kill_no_killer_attribution_no_kill_credit()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("A"), atTick: 0);
+        r.OnDamage(K("A"), K("A"), 800, WeaponKind.Bomb, 0, atTick: 100); // self-splash
+        r.OnKill(victim: K("A"), killer: K("A"), atTick: 100);
+        Assert.Equal(0, r.Stats[K("A")].Kills);
+        Assert.Equal(1, r.Stats[K("A")].Deaths);
+        Assert.Equal(0.0, r.Stats[K("A")].KillDamage);
+    }
+
+    [Fact]
+    public void Knockout_flag_increments_knockout_counter()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnDamage(K("C"), K("A"), 800, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnKill(K("C"), K("A"), atTick: 100, isKnockout: true);
+        Assert.Equal(1, r.Stats[K("C")].Knockouts);
+    }
+
+    [Fact]
+    public void Kill_closes_victim_life_with_knockout_by()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnKill(K("C"), K("A"), atTick: 100);
+        var life = r.Stats[K("C")].Lives.Single();
+        Assert.True(life.IsClosed);
+        Assert.Equal(LifeEndReason.KilledByEnemy, life.EndReason);
+        Assert.Equal(K("A"), life.KnockoutBy);
+    }
+
+    [Fact]
+    public void Kill_clears_victim_recovery_state()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnDamage(K("C"), K("A"), 800, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnKill(K("C"), K("A"), atTick: 100);
+        Assert.Equal(0, r.Stats[K("C")].Recovery.Count);
+    }
+
+    [Fact]
+    public void Friendly_fire_damage_still_counts_in_kill_attribution_denominator()
+    {
+        // Per agreed semantics: teammate friendly fire shows up in killDamage attribution.
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnDamage(K("C"), K("A"), 400, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnDamage(K("C"), K("D"), 200, WeaponKind.Bullet, 0, atTick: 100); // D is C's teammate
+        r.OnKill(K("C"), K("A"), atTick: 100);
+        // D still gets killDamage credit for their friendly fire on C. Only assists are gated.
+        Assert.Equal(200.0, r.Stats[K("D")].KillDamage, precision: 6);
+        Assert.Equal(0, r.Stats[K("D")].Assists);
+    }
+
+    // --- forced repel ---
+
+    [Fact]
+    public void Repel_attributes_forced_repel_damage_to_attackers_and_does_not_clear_recovery()
+    {
+        var r = Make4Player();
+        r.OnDamage(K("C"), K("A"), 300, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnItemUsed(K("C"), ItemKind.Repel, atTick: 100);
+
+        Assert.Equal(300.0, r.Stats[K("A")].ForcedRepelDamage, precision: 6);
+        Assert.Equal(1.0, r.Stats[K("A")].ForcedRepelCredit, precision: 6);
+        Assert.Equal(1, r.Stats[K("C")].ItemUses[ItemKind.Repel]);
+        Assert.Equal(1, r.Stats[K("C")].Recovery.Count);
+    }
+
+    [Fact]
+    public void Repel_credit_splits_one_unit_across_contributors_by_share()
+    {
+        // Two attackers contribute equally to the recovery state at repel time --
+        // each receives 0.5 FR credit (total 1.0 for the event). Damage credit is full per share.
+        var r = Make4Player();
+        r.OnDamage(K("C"), K("A"), 200, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnDamage(K("C"), K("B"), 200, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnItemUsed(K("C"), ItemKind.Repel, atTick: 100);
+
+        Assert.Equal(0.5, r.Stats[K("A")].ForcedRepelCredit, precision: 6);
+        Assert.Equal(0.5, r.Stats[K("B")].ForcedRepelCredit, precision: 6);
+        Assert.Equal(200.0, r.Stats[K("A")].ForcedRepelDamage, precision: 6);
+        Assert.Equal(200.0, r.Stats[K("B")].ForcedRepelDamage, precision: 6);
+    }
+
+    [Fact]
+    public void Repel_damage_is_raw_credit_is_decay_weighted()
+    {
+        // A hit much earlier than B; at repel time A's contribution decays toward 0 weight,
+        // but ForcedRepelDamage is the RAW (non-weighted) recovery-adjusted amount, so A still
+        // gets the full 200. ForcedRepelCredit normalizes the decay-weighted shares to 1.0.
+        var r = Make4Player();
+        r.OnDamage(K("C"), K("A"), 200, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnDamage(K("C"), K("B"), 200, WeaponKind.Bullet, 0, atTick: 110);
+        r.OnItemUsed(K("C"), ItemKind.Repel, atTick: 110);
+
+        Assert.Equal(200.0, r.Stats[K("A")].ForcedRepelDamage, precision: 6);
+        Assert.Equal(200.0, r.Stats[K("B")].ForcedRepelDamage, precision: 6);
+
+        double aWeighted = 200 * Math.Pow(0.5, 10.0 / 200);
+        double bWeighted = 200.0;
+        double total = aWeighted + bWeighted;
+        Assert.Equal(aWeighted / total, r.Stats[K("A")].ForcedRepelCredit, precision: 6);
+        Assert.Equal(bWeighted / total, r.Stats[K("B")].ForcedRepelCredit, precision: 6);
+        Assert.Equal(1.0, r.Stats[K("A")].ForcedRepelCredit + r.Stats[K("B")].ForcedRepelCredit, precision: 6);
+    }
+
+    [Fact]
+    public void Preemptive_repel_with_no_recent_damage_credits_no_one()
+    {
+        var r = Make4Player();
+        r.OnItemUsed(K("C"), ItemKind.Repel, atTick: 100);
+        Assert.Equal(0.0, r.Stats[K("A")].ForcedRepelDamage);
+        Assert.Equal(0.0, r.Stats[K("A")].ForcedRepelCredit);
+    }
+
+    [Fact]
+    public void Non_repel_item_use_only_bumps_counter()
+    {
+        var r = Make4Player();
+        r.OnDamage(K("C"), K("A"), 300, WeaponKind.Bullet, 0, atTick: 100);
+        r.OnItemUsed(K("C"), ItemKind.Burst, atTick: 100);
+        Assert.Equal(0.0, r.Stats[K("A")].ForcedRepelDamage);
+        Assert.Equal(1, r.Stats[K("C")].ItemUses[ItemKind.Burst]);
+    }
+
+    // --- ship change ---
+
+    [Fact]
+    public void Ship_change_applies_old_recharge_then_swaps_in_new()
+    {
+        var r = new StatsRecorder(new DamageDecay());
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, rechargeRate: 1.0, energy, atTick: 0);
+        r.OnDamage(K("A"), K("B"), 100, WeaponKind.Bullet, 0, atTick: 0);
+        // Won't have B... the recorder skips silently. We just want to test the recovery state.
+        // Re-do with B registered.
+
+        r = new StatsRecorder(new DamageDecay());
+        r.RegisterPlayer(K("A"), 0, 1000, 1.0, energy, 0);
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+
+        r.OnDamage(K("A"), K("B"), 100, WeaponKind.Bullet, 0, atTick: 0);
+        r.OnShipChange(K("A"), newMaxEnergy: 2000, newRechargeRate: 2.0, energy, atTick: 50);
+        // 50 ticks @ 1.0 → 50 recovered; 50 remains.
+        var snap = r.Stats[K("A")].Recovery.Snapshot(currentTick: 50);
+        Assert.Single(snap);
+        Assert.Equal(50.0, snap[0].Amount, precision: 6);
+    }
+
+    // --- match flow ---
+
+    [Fact]
+    public void Match_ended_closes_open_lives_with_match_ended_reason()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("A"), 0);
+        r.OnSpawn(K("B"), 0);
+        r.OnMatchEnded(atTick: 1000);
+        Assert.Equal(LifeEndReason.MatchEnded, r.Stats[K("A")].Lives.Single().EndReason);
+        Assert.Equal(LifeEndReason.MatchEnded, r.Stats[K("B")].Lives.Single().EndReason);
+    }
+
+    [Fact]
+    public void Leave_match_closes_current_life_with_left_match()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("A"), 0);
+        r.OnLeaveMatch(K("A"), atTick: 500);
+        var life = r.Stats[K("A")].Lives.Single();
+        Assert.Equal(LifeEndReason.LeftMatch, life.EndReason);
+        Assert.Null(life.KnockoutBy);
+    }
+
+    [Fact]
+    public void Events_for_unregistered_players_are_silently_ignored()
+    {
+        var r = Make4Player();
+        r.OnDamage(K("ZZZ"), K("A"), 100, WeaponKind.Bullet, 0, 100);
+        r.OnKill(K("ZZZ"), K("A"), 100);
+        r.OnSpawn(K("ZZZ"), 100);
+        r.OnLeaveMatch(K("ZZZ"), 100);
+        // Just ensure no exceptions and registered players unaffected.
+        Assert.Equal(0, r.Stats[K("A")].Kills);
+    }
+
+    [Fact]
+    public void OnDistanceSample_appends_in_order_and_clamps_negative_to_zero()
+    {
+        var r = Make4Player();
+        r.OnDistanceSample(K("A"), 100, 256.5f);
+        r.OnDistanceSample(K("A"), 120, 17.0f);
+        r.OnDistanceSample(K("A"), 140, -3.0f);   // clamps to 0
+        r.OnDistanceSample(K("ZZZ"), 100, 50.0f); // unregistered: silently ignored
+
+        var samples = r.Stats[K("A")].DistanceSamples;
+        Assert.Equal(3, samples.Count);
+        Assert.Equal(100u, samples[0].Tick);
+        Assert.Equal(256.5f, samples[0].Distance);
+        Assert.Equal(17.0f, samples[1].Distance);
+        Assert.Equal(0f, samples[2].Distance);
+    }
+
+    [Fact]
+    public void SetWastedItem_records_and_clears()
+    {
+        var r = Make4Player();
+        r.SetWastedItem(K("A"), ItemKind.Repel, 2);
+        r.SetWastedItem(K("A"), ItemKind.Burst, 1);
+        Assert.Equal(2, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
+        Assert.Equal(1, r.Stats[K("A")].WastedItems[ItemKind.Burst]);
+
+        // Setting to 0 removes the entry rather than recording a zero.
+        r.SetWastedItem(K("A"), ItemKind.Repel, 0);
+        Assert.False(r.Stats[K("A")].WastedItems.ContainsKey(ItemKind.Repel));
+        Assert.True(r.Stats[K("A")].WastedItems.ContainsKey(ItemKind.Burst));
+    }
+
+    private static IReadOnlyDictionary<ItemKind, int> Loadout(int repels, int bursts, int thors = 0) =>
+        new Dictionary<ItemKind, int>
+        {
+            [ItemKind.Repel] = repels,
+            [ItemKind.Burst] = bursts,
+            [ItemKind.Thor] = thors,
+        };
+
+    [Fact]
+    public void OnItemUsed_decrements_inventory_and_clamps_at_zero()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
+        r.OnSpawn(K("A"), 10);
+
+        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
+        r.OnItemUsed(K("A"), ItemKind.Repel, 25);
+        Assert.Equal(1, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+        Assert.Equal(2, r.Stats[K("A")].ItemUses[ItemKind.Repel]);
+
+        // Burst goes to zero -- the entry is removed, not stored as 0.
+        r.OnItemUsed(K("A"), ItemKind.Burst, 30);
+        Assert.False(r.Stats[K("A")].Inventory.ContainsKey(ItemKind.Burst));
+
+        // Using past empty doesn't go negative; ItemUses still increments (we observed a use).
+        r.OnItemUsed(K("A"), ItemKind.Burst, 35);
+        Assert.False(r.Stats[K("A")].Inventory.ContainsKey(ItemKind.Burst));
+        Assert.Equal(2, r.Stats[K("A")].ItemUses[ItemKind.Burst]);
+    }
+
+    [Fact]
+    public void OnSpawn_resets_inventory_to_initial_loadout()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 0));
+        r.OnSpawn(K("A"), 10);
+        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
+        r.OnItemUsed(K("A"), ItemKind.Repel, 25);
+        Assert.Equal(1, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+
+        // Re-spawn after a death: inventory back to 3 (fresh life).
+        r.OnSpawn(K("A"), 100);
+        Assert.Equal(3, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+    }
+
+    [Fact]
+    public void Knockout_snapshots_remaining_inventory_as_wasted()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 3, bursts: 1, thors: 1));
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.OnSpawn(K("A"), 10);
+        r.OnItemUsed(K("A"), ItemKind.Repel, 20);   // used 1 of 3
+        r.OnSpawn(K("B"), 10);
+
+        // Final death (lives==0 -> isKnockout=true).
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: true);
+
+        var wasted = r.Stats[K("A")].WastedItems;
+        Assert.Equal(2, wasted[ItemKind.Repel]);
+        Assert.Equal(1, wasted[ItemKind.Burst]);
+        Assert.Equal(1, wasted[ItemKind.Thor]);
+    }
+
+    [Fact]
+    public void Non_knockout_death_accumulates_lifes_leftover_inventory()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 3, bursts: 1));
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.OnSpawn(K("A"), 10);
+        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
+
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: false);
+
+        // A had 2 repels + 1 burst still in inventory at the (non-knockout) close.
+        var wasted = r.Stats[K("A")].WastedItems;
+        Assert.Equal(2, wasted[ItemKind.Repel]);
+        Assert.Equal(1, wasted[ItemKind.Burst]);
+    }
+
+    [Fact]
+    public void Wasted_items_accumulate_across_multiple_lives()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 3, bursts: 1));
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.OnSpawn(K("B"), 5);
+
+        // Life 1: A used 1 repel, dies non-knockout with 2 repels + 1 burst left.
+        r.OnSpawn(K("A"), 10);
+        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 30, isKnockout: false);
+
+        // Life 2: A spawns fresh (back to 3 repels + 1 burst), uses 0 repels + 1 burst, dies knockout.
+        r.OnSpawn(K("A"), 50);
+        r.OnItemUsed(K("A"), ItemKind.Burst, 60);
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 70, isKnockout: true);
+
+        // Total wasted across both lives: 2 + 3 = 5 repels, 1 + 0 = 1 burst.
+        var wasted = r.Stats[K("A")].WastedItems;
+        Assert.Equal(5, wasted[ItemKind.Repel]);
+        Assert.Equal(1, wasted[ItemKind.Burst]);
+    }
+
+    [Fact]
+    public void OnMatchEnded_snapshots_survivors_final_life_without_double_counting_prior_lives()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 3, bursts: 0));
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0, Loadout(repels: 2, bursts: 1));
+        r.OnSpawn(K("A"), 10);
+        r.OnSpawn(K("B"), 10);
+
+        // A is knocked out with 3 repels still held -- already accumulated into wasted.
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 30, isKnockout: true);
+        Assert.Equal(3, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
+
+        // B uses 2 repels and survives; match ends with B holding 1 burst.
+        r.OnItemUsed(K("B"), ItemKind.Repel, 50);
+        r.OnItemUsed(K("B"), ItemKind.Repel, 60);
+        r.OnMatchEnded(atTick: 100);
+
+        // B's surviving inventory accumulated at match-end: 0 repels, 1 burst.
+        Assert.False(r.Stats[K("B")].WastedItems.ContainsKey(ItemKind.Repel));
+        Assert.Equal(1, r.Stats[K("B")].WastedItems[ItemKind.Burst]);
+
+        // A's tally is unchanged at match-end -- their inventory was cleared by the knockout
+        // snapshot, so the match-end pass adds nothing.
+        Assert.Equal(3, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
+    }
+
+    [Fact]
+    public void Green_pickups_increase_wasted_when_unused_at_life_close()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 1, bursts: 0));
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.OnSpawn(K("A"), 10);
+        r.OnSpawn(K("B"), 10);
+
+        // A picks up two repels and a burst mid-life, never uses any.
+        r.OnPrizePickup(K("A"), ItemKind.Repel);
+        r.OnPrizePickup(K("A"), ItemKind.Repel);
+        r.OnPrizePickup(K("A"), ItemKind.Burst);
+
+        // Knockout: 1 (initial) + 2 (greens) = 3 repels + 1 burst go to wasted.
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: true);
+        var wasted = r.Stats[K("A")].WastedItems;
+        Assert.Equal(3, wasted[ItemKind.Repel]);
+        Assert.Equal(1, wasted[ItemKind.Burst]);
+    }
+
+    // --- active ticks via position packets ---
+
+    [Fact]
+    public void OnPositionPacket_first_packet_seeds_anchor_without_crediting()
+    {
+        var r = Make4Player();
+        r.OnPositionPacket(K("A"), atTick: 100);
+        Assert.Equal(0u, r.Stats[K("A")].ActiveTicks);
+    }
+
+    [Fact]
+    public void OnPositionPacket_credits_inter_packet_delta()
+    {
+        var r = Make4Player();
+        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnPositionPacket(K("A"), atTick: 110);
+        r.OnPositionPacket(K("A"), atTick: 130);
+        Assert.Equal(30u, r.Stats[K("A")].ActiveTicks);
+    }
+
+    [Fact]
+    public void OnPositionPacket_caps_oversized_gap_at_max_active_delta()
+    {
+        var r = Make4Player();
+        r.OnPositionPacket(K("A"), atTick: 100);
+        // Gap of 1000 ticks (10 s) should cap at MaxActiveDeltaTicks (300 ticks / 3 s).
+        r.OnPositionPacket(K("A"), atTick: 1100);
+        Assert.Equal(StatsRecorder.MaxActiveDeltaTicks, r.Stats[K("A")].ActiveTicks);
+    }
+
+    [Fact]
+    public void OnPositionPacket_resets_anchor_on_spawn()
+    {
+        var r = Make4Player();
+        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnSpawn(K("A"), atTick: 105);
+        // The post-spawn packet should seed a new anchor, not credit the 105->110 since-spawn gap
+        // through the pre-spawn anchor.
+        r.OnPositionPacket(K("A"), atTick: 110);
+        r.OnPositionPacket(K("A"), atTick: 120);
+        Assert.Equal(10u, r.Stats[K("A")].ActiveTicks);
+    }
+
+    [Fact]
+    public void OnPositionPacket_resets_anchor_on_leave_match()
+    {
+        var r = Make4Player();
+        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnLeaveMatch(K("A"), atTick: 200);
+        // Re-registration would normally happen for a sub; for this test we just verify the
+        // anchor was cleared so a stale delta isn't credited if a packet somehow arrives.
+        r.OnPositionPacket(K("A"), atTick: 5000);
+        Assert.Equal(0u, r.Stats[K("A")].ActiveTicks);
+    }
+}

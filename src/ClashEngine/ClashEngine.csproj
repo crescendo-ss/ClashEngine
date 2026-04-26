@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>ClashEngine</AssemblyName>
+    <RootNamespace>ClashEngine</RootNamespace>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <OutDir>$(SubspaceServerRoot)SubspaceServer\Zone\bin\modules\ClashEngine\</OutDir>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClashEngine.Core\ClashEngine.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(SubspaceServerRoot)Core\Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="$(SubspaceServerRoot)Utilities\Utilities.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="$(SubspaceServerRoot)Packets\Packets.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="$(SubspaceServerRoot)Replay\Replay.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="$(SubspaceServerRoot)Matchmaking\Matchmaking.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="$(SubspaceServerRoot)SourceGeneration\SourceGeneration.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

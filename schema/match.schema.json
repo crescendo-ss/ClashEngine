@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clashengine.dev/schema/match.schema.json",
+  "title": "Match",
+  "description": "End-of-match envelope produced by ClashEngine. One file per finalized match. Combines metadata, ranked outcome, every participant's full stats, and an optional pointer to the replay recording.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "matchId",
+    "gameType",
+    "endedAt",
+    "finalState",
+    "teams",
+    "participants",
+    "abandonedBy"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 2,
+      "description": "Wire format version. Increment on any breaking change."
+    },
+    "matchId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique match identifier (lowercase, hyphenated UUID)."
+    },
+    "queueName": {
+      "type": ["string", "null"],
+      "description": "Matchmaking queue the match was drawn from (e.g. \"4v4_competitive\")."
+    },
+    "gameType": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Game-type identifier from the queue definition."
+    },
+    "arena": {
+      "type": ["string", "null"],
+      "description": "SubspaceServer arena the match was played in."
+    },
+    "startedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when the match transitioned from forming to live. Null if the match never went live (cancelled before start)."
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when the match was finalized."
+    },
+    "finalState": {
+      "type": "string",
+      "enum": ["Completed", "Abandoned", "Cancelled"],
+      "description": "How the match ended."
+    },
+    "teams": {
+      "type": "array",
+      "description": "Teams ranked by outcome (rank 1 first). For Cancelled matches this may be empty.",
+      "items": { "$ref": "#/$defs/rankedTeam" }
+    },
+    "participants": {
+      "type": "array",
+      "description": "Every player who was registered for this match's stats accounting, including subs.",
+      "items": { "$ref": "#/$defs/participant" }
+    },
+    "abandonedBy": {
+      "type": "array",
+      "description": "Names of players who caused the match to be flagged for abandonment (mid-match leavers, no-shows, or otherwise tracked for queue-timeout penalties). Multiple players from either team can appear in the same match; the list is a flat, unordered set rather than partitioned by team. Empty for non-abandoned matches.",
+      "items": { "type": "string" }
+    },
+    "recordingPath": {
+      "type": ["string", "null"],
+      "description": "Optional pointer to the SubspaceServer replay file for this match. Relative path; the binary itself is uploaded out-of-band."
+    }
+  },
+
+  "$defs": {
+    "rankedTeam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rank", "score", "players"],
+      "properties": {
+        "rank": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1 = winner. Ties resolve by team-index ascending."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Team kill count or other end-policy metric (KOTH defenses, etc.)."
+        },
+        "players": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Player names on this team. Order matches the queue's slot order."
+        }
+      }
+    },
+
+    "rating": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mu", "sigma", "gamesPlayed"],
+      "properties": {
+        "mu": {
+          "type": "number",
+          "description": "OpenSkill mean estimate."
+        },
+        "sigma": {
+          "type": "number",
+          "minimum": 0,
+          "description": "OpenSkill standard deviation."
+        },
+        "gamesPlayed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of games played in this game type prior to this match."
+        }
+      }
+    },
+
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "teamIndex",
+        "kills",
+        "deaths",
+        "knockouts",
+        "assists",
+        "teamkills",
+        "damageDealt",
+        "damageTaken",
+        "selfDamage",
+        "teamDamageDealt",
+        "teamDamageTaken",
+        "killDamage",
+        "killCredit",
+        "forcedRepelDamage",
+        "forcedRepelCredit",
+        "activeTicks",
+        "perWeapon",
+        "itemUses",
+        "wastedItems",
+        "distanceSamples",
+        "lives"
+      ],
+      "properties": {
+        "name": { "type": "string", "description": "Stable player name (case-insensitive identity)." },
+        "teamIndex": {
+          "type": "integer",
+          "description": "Team this player started on (0-based). -1 if registered after match start without a team assignment."
+        },
+        "ratingAtStart": {
+          "anyOf": [{ "$ref": "#/$defs/rating" }, { "type": "null" }],
+          "description": "Player's rating at the moment the match started, frozen here so the upload reflects pre-match skill (the live store updates on outcome)."
+        },
+        "ratingChange": {
+          "type": ["number", "null"],
+          "description": "Change in rating produced by this match, expressed in displayed-ordinal units (same scale as μ−3σ ×10). Positive = gained ranking points. Null when either pre-match or post-match rating is unavailable (e.g. cancelled match, unranked participant, or a participant the engine never tracked)."
+        },
+        "kills": { "type": "integer", "minimum": 0 },
+        "deaths": { "type": "integer", "minimum": 0 },
+        "knockouts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Final deaths: deaths that exhausted the player's last life. Bounded by the queue's lives-per-player."
+        },
+        "assists": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Kills credited via decay-weighted damage share ≥ 25% of victim max energy. Killer never receives an assist."
+        },
+        "teamkills": { "type": "integer", "minimum": 0 },
+
+        "damageDealt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Raw damage to enemies, summed face-value (no decay)."
+        },
+        "damageTaken": { "type": "integer", "minimum": 0 },
+        "selfDamage": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Damage you inflicted on yourself (e.g. own bomb splash). Not added to recovery state."
+        },
+        "teamDamageDealt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Friendly fire — raw damage to teammates. Splash and Thor only in practice."
+        },
+        "teamDamageTaken": { "type": "integer", "minimum": 0 },
+
+        "killDamage": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Raw (non-decay-weighted) damage this player accumulated to trigger victim deaths: sum of recovery-adjusted damage shares contributed across every kill the player was involved in. Includes friendly-fire contributions per the agreed denominator rule."
+        },
+        "killCredit": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Kill participation: each death distributes 1.0 credit across contributing attackers in proportion to their decay-weighted damage share. Sum across all attackers for one kill = 1.0; this is one player's tally. Decay weighting (exp(-(dt/halfLife) * ln 2)) is applied to determine each attacker's share before normalization."
+        },
+        "forcedRepelDamage": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Raw (non-decay-weighted) damage this player accumulated to trigger enemy repels: sum of recovery-adjusted damage shares contributed across every repel event."
+        },
+        "forcedRepelCredit": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Forced-repel participation: each repel event distributes 1.0 credit across contributing attackers in proportion to their decay-weighted damage share. Sum across all attackers for one repel = 1.0; this is one player's tally. Analogous to killCredit but triggered by repels rather than deaths."
+        },
+
+        "activeTicks": { "type": "integer", "minimum": 0 },
+
+        "perWeapon": {
+          "type": "object",
+          "description": "Per-weapon shot accounting. Keys are weapon kinds; missing keys mean zero activity. Splash weapons can produce multiple hits per shot, so hit-rate may exceed 100%.",
+          "additionalProperties": { "$ref": "#/$defs/weaponStats" },
+          "propertyNames": {
+            "enum": ["Bullet", "Bomb", "Mine", "Thor"]
+          }
+        },
+        "itemUses": {
+          "type": "object",
+          "description": "Item-use counters keyed by item kind.",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "propertyNames": {
+            "enum": ["Repel", "Burst", "Decoy", "Thor", "Brick", "Portal", "Rocket"]
+          }
+        },
+        "wastedItems": {
+          "type": "object",
+          "description": "Items the player gained but never used over the entire match. Each closed life contributes its leftover inventory (initial loadout + green pickups − uses) at close-time; over a multi-life match the totals accumulate. Same key set as itemUses.",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "propertyNames": {
+            "enum": ["Repel", "Burst", "Decoy", "Thor", "Brick", "Portal", "Rocket"]
+          }
+        },
+        "distanceSamples": {
+          "type": "array",
+          "description": "Distance-to-nearest-enemy samples taken at regular intervals while the player is in-arena. Distance is in pixels (SubspaceServer's native position unit; 16 px = 1 tile). Cadence is server-configured via [ClashEngine] DistanceSampleHz (default 5 Hz).",
+          "items": { "$ref": "#/$defs/distanceSample" }
+        },
+        "lives": {
+          "type": "array",
+          "description": "Per-life subrecord. A life starts at spawn and ends only via these reasons; ship and freq changes are not life transitions.",
+          "items": { "$ref": "#/$defs/life" }
+        }
+      }
+    },
+
+    "weaponStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fireCount", "hitCount", "energySpent"],
+      "properties": {
+        "fireCount": { "type": "integer", "minimum": 0 },
+        "hitCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "One increment per opponent damage event. For splash weapons, a single shot that damages N enemies counts N hits."
+        },
+        "energySpent": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sum of base + (level-1)*upgrade + multifire surcharge across all fired shots."
+        }
+      }
+    },
+
+    "distanceSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tick", "distance"],
+      "properties": {
+        "tick": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Server tick (10 ms granularity) at which the sample was taken."
+        },
+        "distance": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Distance in pixels to the nearest live enemy at sample time."
+        }
+      }
+    },
+
+    "life": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startTick", "kills", "damageDealt", "damageTaken"],
+      "properties": {
+        "startTick": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Server tick (10 ms granularity) when the life began."
+        },
+        "endTick": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Server tick when the life ended. Null if the life was still open at upload time (shouldn't happen for completed matches)."
+        },
+        "endReason": {
+          "type": ["string", "null"],
+          "enum": ["KilledByEnemy", "KilledByTeammate", "LeftMatch", "MatchEnded", null]
+        },
+        "knockoutBy": {
+          "type": ["string", "null"],
+          "description": "Player who closed this life (the killer). Null when not applicable."
+        },
+        "kills": { "type": "integer", "minimum": 0 },
+        "damageDealt": { "type": "integer", "minimum": 0 },
+        "damageTaken": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

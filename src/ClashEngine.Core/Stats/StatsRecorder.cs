@@ -1,0 +1,402 @@
+using System;
+using System.Collections.Generic;
+using ClashEngine.Core.Identity;
+
+namespace ClashEngine.Core.Stats;
+
+/// <summary>
+/// Orchestrates per-match stat accounting. Receives event-level inputs from the adapter
+/// (damage, kill, weapon-fire, item-use, spawn, ship-change, leave) and dispatches them to
+/// the right <see cref="PlayerStats"/>, including the cross-player attribution work on kill
+/// and forced-repel.
+/// </summary>
+/// <remarks>
+/// Single-threaded. One <see cref="StatsRecorder"/> per match. The adapter is expected to
+/// register every participant (including subs) via <see cref="RegisterPlayer"/> before
+/// dispatching their events.
+/// </remarks>
+public sealed class StatsRecorder
+{
+    private readonly Dictionary<PlayerKey, PlayerStats> _stats = new();
+    private readonly Dictionary<PlayerKey, PlayerProfile> _profiles = new();
+    private readonly Dictionary<PlayerKey, uint> _lastPositionTick = new();
+    private readonly DamageDecay _decay;
+    private readonly double _assistThresholdFraction;
+
+    public const double DefaultAssistThresholdFraction = 0.25;
+
+    /// <summary>
+    /// Cap on the inter-packet delta credited to <see cref="PlayerStats.ActiveTicks"/>. Position
+    /// packets normally arrive every 10-20 ticks (100-200 ms); a large gap usually indicates a
+    /// stutter, spec window, or arena hop and should not roll up into a player's "playing time".
+    /// 300 ticks = 3 seconds.
+    /// </summary>
+    public const uint MaxActiveDeltaTicks = 300;
+
+    public StatsRecorder(DamageDecay decay, double assistThresholdFraction = DefaultAssistThresholdFraction)
+    {
+        ArgumentNullException.ThrowIfNull(decay);
+        if (assistThresholdFraction < 0 || assistThresholdFraction > 1)
+            throw new ArgumentOutOfRangeException(nameof(assistThresholdFraction), "Must be in [0, 1].");
+        _decay = decay;
+        _assistThresholdFraction = assistThresholdFraction;
+    }
+
+    public IReadOnlyDictionary<PlayerKey, PlayerStats> Stats => _stats;
+    public DamageDecay Decay => _decay;
+    public double AssistThresholdFraction => _assistThresholdFraction;
+
+    /// <summary>
+    /// Add a participant to the match. Must be called before any event for that player.
+    /// </summary>
+    public void RegisterPlayer(
+        PlayerKey player,
+        int teamIndex,
+        int maxEnergy,
+        double rechargeRate,
+        WeaponEnergyConfig energyConfig,
+        uint atTick,
+        IReadOnlyDictionary<ItemKind, int>? initialInventory = null)
+    {
+        ArgumentNullException.ThrowIfNull(energyConfig);
+        if (player.IsDefault) throw new ArgumentException("Player key must be non-default.", nameof(player));
+        if (_stats.ContainsKey(player)) throw new InvalidOperationException($"Player {player} already registered.");
+        if (maxEnergy <= 0) throw new ArgumentOutOfRangeException(nameof(maxEnergy), "Must be positive.");
+
+        var stats = new PlayerStats(player, new DamageRecoveryState(rechargeRate, initialTick: atTick));
+        // Pre-load inventory so a slot read between RegisterPlayer and the first OnSpawn doesn't
+        // see a zeroed loadout (e.g. MatchLvz refreshing on match start before any spawn).
+        stats.ResetInventory(initialInventory);
+        // Open the first life anchored to the match-start tick so we have a life to attribute
+        // damage / deaths to even if the host never emits an initial SpawnCallback (or if the
+        // player is killed before the first spawn callback fires). OpenLife is idempotent, so
+        // a real OnSpawn arriving later is a no-op against this initial life.
+        stats.OpenLife(atTick);
+        _stats[player] = stats;
+        _profiles[player] = new PlayerProfile(teamIndex, maxEnergy, energyConfig, initialInventory);
+    }
+
+    /// <summary>
+    /// Update a player's ship-derived parameters (recharge rate, max energy, weapon energy
+    /// config). Recharge accumulated up to <paramref name="atTick"/> is applied at the old
+    /// rate before the new one takes effect.
+    /// </summary>
+    public void OnShipChange(
+        PlayerKey player,
+        int newMaxEnergy,
+        double newRechargeRate,
+        WeaponEnergyConfig newEnergyConfig,
+        uint atTick,
+        IReadOnlyDictionary<ItemKind, int>? newInitialInventory = null)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        if (newMaxEnergy <= 0) throw new ArgumentOutOfRangeException(nameof(newMaxEnergy), "Must be positive.");
+        ArgumentNullException.ThrowIfNull(newEnergyConfig);
+
+        stats.Recovery.SetRechargeRate(newRechargeRate, atTick);
+        var profile = _profiles[player];
+        _profiles[player] = profile with
+        {
+            MaxEnergy = newMaxEnergy,
+            EnergyConfig = newEnergyConfig,
+            InitialInventory = newInitialInventory ?? profile.InitialInventory,
+        };
+    }
+
+    /// <summary>Player has spawned. Opens a new life and refreshes the held-item inventory to
+    /// the ship's initial loadout (since each spawn comes with fresh items in Continuum).
+    /// Idempotent if a life is already open.</summary>
+    public void OnSpawn(PlayerKey player, uint atTick)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        stats.OpenLife(atTick);
+        if (_profiles.TryGetValue(player, out var profile))
+            stats.ResetInventory(profile.InitialInventory);
+        // Reset the position-tick anchor so the gap across the death-respawn cycle isn't
+        // credited as active time on the next packet.
+        _lastPositionTick.Remove(player);
+    }
+
+    /// <summary>
+    /// Called once per inbound position packet. Credits the elapsed-since-previous interval to
+    /// <see cref="PlayerStats.ActiveTicks"/>, capped at <see cref="MaxActiveDeltaTicks"/> so a
+    /// stutter or spec/arena hop doesn't inflate playing time. The first packet after spawn or
+    /// match start seeds the anchor without crediting any time.
+    /// </summary>
+    public void OnPositionPacket(PlayerKey player, uint atTick)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        if (_lastPositionTick.TryGetValue(player, out var prev) && atTick > prev)
+        {
+            uint delta = atTick - prev;
+            if (delta > MaxActiveDeltaTicks) delta = MaxActiveDeltaTicks;
+            stats.AddActiveTicks(delta);
+        }
+        _lastPositionTick[player] = atTick;
+    }
+
+    /// <summary>Append a distance-to-nearest-enemy sample. No-op if the player isn't registered.</summary>
+    public void OnDistanceSample(PlayerKey player, uint atTick, float distancePixels)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        stats.AppendDistanceSample(atTick, distancePixels);
+    }
+
+    /// <summary>Set a wasted-items count for the player. Pass 0 to clear.</summary>
+    public void SetWastedItem(PlayerKey player, ItemKind item, int count)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        stats.SetWastedItem(item, count);
+    }
+
+    /// <summary>
+    /// A stockpilable item was picked up via green-prize. Increments the player's tracked
+    /// inventory so a subsequent <see cref="OnItemUsed"/> doesn't undercount, and so the
+    /// end-of-life <see cref="PlayerStats.SnapshotInventoryAsWasted"/> reflects acquired items
+    /// the player never deployed.
+    /// </summary>
+    public void OnPrizePickup(PlayerKey player, ItemKind item)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        stats.IncrementInventory(item);
+    }
+
+    /// <summary>
+    /// A damage packet from <paramref name="victim"/>'s client crediting damage to
+    /// <paramref name="attacker"/>. Self-damage (<paramref name="attacker"/> == <paramref name="victim"/>)
+    /// is recorded as <see cref="PlayerStats.SelfDamage"/> only -- it does not go on the recovery state.
+    /// </summary>
+    public void OnDamage(
+        PlayerKey victim,
+        PlayerKey attacker,
+        short amount,
+        WeaponKind weapon,
+        uint empDurationTicks,
+        uint atTick)
+    {
+        if (amount <= 0) return;
+        if (!_stats.TryGetValue(victim, out var victimStats)) return;
+
+        if (attacker == victim)
+        {
+            victimStats.AddSelfDamage(amount);
+            return;
+        }
+
+        if (!_stats.TryGetValue(attacker, out var attackerStats)) return;
+
+        bool sameTeam = SameTeam(attacker, victim);
+
+        if (sameTeam)
+        {
+            attackerStats.AddTeamDamageDealt(amount);
+            victimStats.AddTeamDamageTaken(amount);
+        }
+        else
+        {
+            attackerStats.AddDamageDealt(amount);
+            victimStats.AddDamageTaken(amount);
+        }
+
+        // Record on the victim's recovery state regardless of team -- friendly fire still
+        // contributes to kill credit (per the agreed denominator), and an enemy repel triggered
+        // off teammate-inflicted pressure is still attributable to that teammate.
+        victimStats.Recovery.OnDamage(new DamageEntry(atTick, amount, weapon, empDurationTicks, attacker));
+
+        if (weapon.IsTrackedForAccuracy())
+            attackerStats.GetOrCreateWeapon(weapon).RecordHit();
+    }
+
+    /// <summary>
+    /// A weapon-fire event derived from <paramref name="player"/>'s position packet. Computes
+    /// the energy cost from the player's <see cref="WeaponEnergyConfig"/> and bumps the
+    /// per-weapon shot/energy counters. Untracked kinds (shrapnel, burst pellets) are ignored.
+    /// </summary>
+    public void OnWeaponFired(
+        PlayerKey player,
+        WeaponKind weapon,
+        int level,
+        bool multifire,
+        uint atTick)
+    {
+        if (!weapon.IsTrackedForAccuracy()) return;
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        if (!_profiles.TryGetValue(player, out var profile)) return;
+
+        int energy = profile.EnergyConfig.EnergyForShot(weapon, level, multifire);
+        stats.GetOrCreateWeapon(weapon).RecordShot(energy);
+    }
+
+    /// <summary>
+    /// Player <paramref name="victim"/> was killed by <paramref name="killer"/>. Snapshots the
+    /// victim's recovery state, decay-weights, and partitions the result among all attackers
+    /// (including teammates of the victim -- the "friendly fire still counts toward kill credit"
+    /// rule). Assists go to non-killer attackers on the opposite team whose decay-weighted
+    /// share met the assist threshold.
+    /// </summary>
+    public void OnKill(PlayerKey victim, PlayerKey killer, uint atTick, bool isKnockout = false)
+    {
+        if (!_stats.TryGetValue(victim, out var victimStats)) return;
+        if (!_profiles.TryGetValue(victim, out var victimProfile)) return;
+
+        victimStats.RecordDeath();
+        if (isKnockout) victimStats.RecordKnockout();
+
+        // Every life-close accumulates leftover inventory into the wasted bucket. On a
+        // non-knockout death the next OnSpawn refills inventory to the ship's initial loadout
+        // before the new life starts, so each life's wastage is tallied independently. On the
+        // final knockout there is no next spawn and the snapshot is the player's last contribution.
+        victimStats.SnapshotInventoryAsWasted();
+
+        // Self-kill (own splash, etc.): no kill credit, no attribution. Close life with
+        // KilledByEnemy and no knockoutBy -- the game's kill packet says it but the credit's
+        // empty.
+        if (killer == victim)
+        {
+            victimStats.CloseLife(atTick, LifeEndReason.KilledByEnemy, knockoutBy: null);
+            victimStats.Recovery.Clear();
+            return;
+        }
+
+        bool sameTeam = SameTeam(killer, victim);
+        if (_stats.TryGetValue(killer, out var killerStats))
+        {
+            if (sameTeam) killerStats.RecordTeamkill();
+            else killerStats.RecordKill();
+        }
+
+        // Single pass producing per-attacker (raw, weighted) pairs. KillDamage takes the raw
+        // recovery-adjusted amount; KillCredit takes the decay-weighted share normalized so the
+        // event distributes a total of 1.0 credit across contributors. Assist eligibility uses
+        // the decay-weighted share so it correctly devalues old hits.
+        var (attribution, totalWeighted) = AttributeWithNormalization(victimStats, atTick);
+        double assistThreshold = victimProfile.MaxEnergy * _assistThresholdFraction;
+
+        foreach (var (attacker, share) in attribution)
+        {
+            if (!_stats.TryGetValue(attacker, out var attackerStats)) continue;
+            attackerStats.AddKillDamage(share.Raw);
+            if (totalWeighted > 0) attackerStats.AddKillCredit(share.Weighted / totalWeighted);
+
+            if (attacker == killer) continue;             // killer gets the kill, not an assist
+            if (SameTeam(attacker, victim)) continue;     // teammate of victim cannot "assist" the kill
+            if (share.Weighted >= assistThreshold)
+                attackerStats.RecordAssist();
+        }
+
+        victimStats.CloseLife(
+            atTick,
+            sameTeam ? LifeEndReason.KilledByTeammate : LifeEndReason.KilledByEnemy,
+            knockoutBy: killer);
+        victimStats.Recovery.Clear();
+    }
+
+    /// <summary>
+    /// Player used an item. Bumps the per-item counter; for <see cref="ItemKind.Repel"/>,
+    /// additionally snapshots the user's recovery state and credits each recent attacker with
+    /// decay-weighted forced-repel damage. The recovery state is <em>not</em> cleared by a
+    /// repel -- the underlying damage is still unrecovered.
+    /// </summary>
+    public void OnItemUsed(PlayerKey player, ItemKind item, uint atTick)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        stats.RecordItemUse(item);
+        stats.DecrementInventory(item);
+
+        if (item != ItemKind.Repel) return;
+
+        // Same shape as the kill path. ForcedRepelDamage takes the raw recovery-adjusted
+        // amount; ForcedRepelCredit takes the decay-weighted share normalized so one repel
+        // distributes 1.0 across contributors.
+        var (attribution, totalWeighted) = AttributeWithNormalization(stats, atTick);
+
+        foreach (var (attacker, share) in attribution)
+        {
+            if (!_stats.TryGetValue(attacker, out var attackerStats)) continue;
+            attackerStats.AddForcedRepelDamage(share.Raw);
+            if (totalWeighted > 0) attackerStats.AddForcedRepelCredit(share.Weighted / totalWeighted);
+        }
+    }
+
+    /// <summary>
+    /// One pass over <paramref name="victimStats"/>'s recent (unrecovered) damage that returns
+    /// per-attacker (raw, weighted) pairs alongside the sum of weighted contributions -- the
+    /// denominator the kill / forced-repel paths use to normalize each attacker's share into a
+    /// fractional credit (0..1).
+    /// </summary>
+    private (Dictionary<PlayerKey, AttributedDamage> Attribution, double TotalWeighted)
+        AttributeWithNormalization(PlayerStats victimStats, uint atTick)
+    {
+        var attribution = DamageAttribution.AttributeRawAndWeighted(
+            victimStats.Recovery.Snapshot(atTick), atTick, _decay);
+        double totalWeighted = 0;
+        foreach (var (_, share) in attribution) totalWeighted += share.Weighted;
+        return (attribution, totalWeighted);
+    }
+
+    /// <summary>Player left the match (disconnected, switched to spec, etc.).</summary>
+    public void OnLeaveMatch(PlayerKey player, uint atTick)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        stats.SnapshotInventoryAsWasted();
+        stats.CloseLife(atTick, LifeEndReason.LeftMatch, knockoutBy: null);
+        _lastPositionTick.Remove(player);
+    }
+
+    /// <summary>Match ended. Closes any open life on every registered player and rolls each
+    /// player's remaining inventory into their wasted-items tally. Players who were knocked out
+    /// or already departed have empty inventory at this point, so the snapshot is a no-op for
+    /// them; only survivors contribute their final-life leftover.</summary>
+    public void OnMatchEnded(uint atTick)
+    {
+        foreach (var stats in _stats.Values)
+        {
+            stats.SnapshotInventoryAsWasted();
+            stats.CloseLife(atTick, LifeEndReason.MatchEnded, knockoutBy: null);
+        }
+    }
+
+    /// <summary>
+    /// Snapshot of the victim's outstanding (unrecovered) damage at <paramref name="atTick"/>,
+    /// partitioned by attacker, for use by an in-arena kill-feed line. Returns the killer's raw
+    /// damage to the victim plus any opposite-team attackers as assisters (descending damage).
+    /// Teammates of the victim and self-damage are filtered out. Caller must invoke this before
+    /// <see cref="OnKill"/> for the same kill, since OnKill clears the recovery state.
+    /// </summary>
+    public KillFeedSnapshot? BuildKillFeed(PlayerKey victim, PlayerKey killer, uint atTick)
+    {
+        if (!_stats.TryGetValue(victim, out var victimStats)) return null;
+        var attribution = DamageAttribution.AttributeRawAndWeighted(
+            victimStats.Recovery.Snapshot(atTick), atTick, _decay);
+
+        int killerDamage = 0;
+        if (attribution.TryGetValue(killer, out var k))
+            killerDamage = (int)Math.Round(k.Raw);
+
+        var assisters = new List<KillFeedAssister>();
+        foreach (var (atk, share) in attribution)
+        {
+            if (atk.Equals(killer)) continue;       // killer line, not an assist
+            if (atk.Equals(victim)) continue;       // self-damage isn't an assist
+            if (SameTeam(atk, victim)) continue;    // victim's teammates aren't assisters
+            int dmg = (int)Math.Round(share.Raw);
+            if (dmg <= 0) continue;
+            assisters.Add(new KillFeedAssister(atk, dmg));
+        }
+        assisters.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+        return new KillFeedSnapshot(killerDamage, assisters);
+    }
+
+    private bool SameTeam(PlayerKey a, PlayerKey b)
+    {
+        if (!_profiles.TryGetValue(a, out var pa)) return false;
+        if (!_profiles.TryGetValue(b, out var pb)) return false;
+        return pa.TeamIndex == pb.TeamIndex;
+    }
+
+    private readonly record struct PlayerProfile(
+        int TeamIndex,
+        int MaxEnergy,
+        WeaponEnergyConfig EnergyConfig,
+        IReadOnlyDictionary<ItemKind, int>? InitialInventory);
+}

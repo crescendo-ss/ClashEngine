@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>ClashEngine.Core</AssemblyName>
+    <RootNamespace>ClashEngine.Core</RootNamespace>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+
+  <!--
+    ExcludeAssets=runtime keeps the compile-time reference but stops MSBuild from copying
+    OpenSkillSharp.dll into the ClashEngine plug-in's deploy folder. At runtime, ClashModule
+    installs an AssemblyLoadContext.Resolving hook on its own ALC that redirects
+    OpenSkillSharp lookups to the copy already loaded by SS.Matchmaking's plug-in ALC. That
+    way ClashEngine and SS.Matchmaking share a single OpenSkillSharp.IOpenSkillModel Type
+    identity and the IMatchConfiguration vtable slots bind without "method does not have an
+    implementation" errors at type load.
+
+    Tests run in a single AppDomain with no ALC isolation and no SS.Matchmaking present, so
+    they need the actual runtime DLL. The test csproj re-adds the runtime asset.
+    -->
+  <ItemGroup>
+    <PackageReference Include="OpenSkillSharp" Version="1.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ClashEngine.Core.Tests" />
+  </ItemGroup>
+
+</Project>

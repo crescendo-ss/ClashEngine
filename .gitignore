@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+out/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# Test artifacts
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Local config
+*.local.json
+.env

@@ -1,0 +1,64 @@
+using System;
+using ClashEngine.Core.Matches;
+using ClashEngine.Core.Queue;
+using OpenSkillSharp;
+using SS.Matchmaking.OpenSkill;
+using SS.Matchmaking.TeamVersus;
+
+namespace ClashEngine.Lvz;
+
+/// <summary>
+/// Minimal <see cref="IMatchConfiguration"/> stub for ClashEngine matches. MatchLvz reads
+/// <see cref="NumTeams"/>, <see cref="PlayersPerTeam"/>, <see cref="LivesPerPlayer"/>,
+/// <see cref="TimeLimit"/>, and <see cref="OverTimeLimit"/> -- all live-derived from the
+/// underlying <see cref="ActiveMatch"/> + <see cref="QueueDefinition"/>.
+/// </summary>
+/// <remarks>
+/// <para>OpenSkill-related properties throw <see cref="NotSupportedException"/> on access.
+/// MatchLvz and MatchFocus do not read them; if any other consumer of the IMatchData
+/// interface graph is loaded (e.g. league rating math), it will surface a clear "ClashEngine
+/// doesn't expose ranking math through this adapter" error rather than silently misbehaving.
+/// ClashEngine ranking lives in its own <c>IRatingStore</c> path, separate from this adapter.</para>
+///
+/// <para><see cref="TimeLimit"/> is null because ClashEngine matches are kill-count or lives-
+/// limited, not wall-clock-limited. MatchLvz's scoreboard timer simply won't render in that
+/// case (<c>RefreshScoreboardTimer</c> short-circuits on null TimeLimit).</para>
+/// </remarks>
+internal sealed class ClashMatchConfiguration : IMatchConfiguration
+{
+    private readonly ActiveMatch _match;
+    private readonly QueueDefinition _queue;
+    private readonly IMatchBoxConfiguration[] _boxes;
+
+    public ClashMatchConfiguration(ActiveMatch match, QueueDefinition queue)
+    {
+        _match = match ?? throw new ArgumentNullException(nameof(match));
+        _queue = queue ?? throw new ArgumentNullException(nameof(queue));
+        _boxes = new IMatchBoxConfiguration[] { new ClashMatchBoxConfiguration() };
+    }
+
+    public long? GameTypeId => _match.GameType.Value;
+    public int NumTeams => _queue.Shape.TeamCount;
+    public int PlayersPerTeam => _queue.Shape.PlayersPerTeam;
+    public int LivesPerPlayer => _match.LivesPerPlayer ?? 0;
+    public TimeSpan? TimeLimit => null;
+    public TimeSpan? OverTimeLimit => null;
+    public ReadOnlySpan<IMatchBoxConfiguration> Boxes => _boxes.AsSpan();
+
+    // OpenSkill-related members are explicit interface implementations rather than public
+    // properties. ClashEngine ranking lives in its own IRatingStore path -- nothing in the
+    // MatchLvz / MatchFocus consumption graph reads these. Implementing them via EIM binds
+    // each method slot directly to the IMatchConfiguration interface declaration, which is
+    // robust against the kind of binary skew between a deployed SS.Matchmaking.dll and our
+    // compiled-against copy that surfaces as "method does not have an implementation" when
+    // ClashEngine and SS.Matchmaking land in different assembly load contexts at runtime.
+    IOpenSkillModel IMatchConfiguration.OpenSkillModel => null!;
+    double IMatchConfiguration.OpenSkillSigmaDecayPerDay => 0;
+    bool IMatchConfiguration.OpenSkillUseScoresWhenPossible => false;
+    OrdinalArgs IMatchConfiguration.OpenSkillDisplayOrdinal => default;
+
+    private sealed class ClashMatchBoxConfiguration : IMatchBoxConfiguration
+    {
+        public string? PlayAreaMapRegion => null;   // ClashEngine doesn't use play-area mechanics
+    }
+}

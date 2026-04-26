@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/ClashEngine.Core/ClashEngine.Core.csproj" />
+  <Project Path="src/ClashEngine/ClashEngine.csproj" />
+  <Project Path="tests/ClashEngine.Core.Tests/ClashEngine.Core.Tests.csproj" />
+</Solution>
