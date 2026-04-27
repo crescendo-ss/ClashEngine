@@ -330,4 +330,20 @@ public class GroupRegistryTests
         r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
         Assert.Equal(InviteResult.InviteeBusy, r.Invite(K("C"), K("A"), T0.AddSeconds(2)));
     }
+
+    [Fact]
+    public void Accept_while_already_in_a_group_returns_AlreadyInGroup()
+    {
+        // Single-party invariant: a player can never be in two groups. Even if a stale or
+        // cross-arena invitation sneaks through, the second Accept is rejected.
+        var r = Reg();
+        r.Invite(K("A"), K("B"), T0);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var firstGroup);
+
+        // C tries to invite B into a different group. Invite alone is rejected as InviteeBusy
+        // (B is in firstGroup); even if it landed somehow, Accept would still refuse.
+        Assert.Equal(InviteResult.InviteeBusy, r.Invite(K("C"), K("B"), T0.AddSeconds(2)));
+        Assert.Equal(AcceptResult.AlreadyInGroup, r.Accept(K("B"), K("C"), T0.AddSeconds(3), out _));
+        Assert.Equal(firstGroup, r.GroupOf(K("B")));
+    }
 }
