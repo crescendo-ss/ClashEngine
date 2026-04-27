@@ -545,7 +545,7 @@ public sealed class ActiveMatch
         State = MatchState.Completed;
         EndedAt = at;
         CloseAllOpenParticipations(at);
-        Outcome = outcome with { FinalState = MatchState.Completed, EndedAt = at };
+        Outcome = Enrich(outcome with { FinalState = MatchState.Completed, EndedAt = at }, at);
     }
 
     private void FinalizeCancellation(DateTimeOffset at)
@@ -590,7 +590,9 @@ public sealed class ActiveMatch
         State = MatchState.Completed;
         EndedAt = at;
         CloseAllOpenParticipations(at);
-        Outcome = new MatchOutcome(MatchId, GameType, ranked, CollectAbandoners(), MatchState.Completed, at);
+        Outcome = Enrich(
+            new MatchOutcome(MatchId, GameType, ranked, CollectAbandoners(), MatchState.Completed, at),
+            at);
     }
 
     private List<PlayerKey> CollectAbandoners()
@@ -634,6 +636,34 @@ public sealed class ActiveMatch
         State = MatchState.Abandoned;
         EndedAt = at;
         CloseAllOpenParticipations(at);
-        Outcome = new MatchOutcome(MatchId, GameType, rankedTeams, CollectAbandoners(), MatchState.Abandoned, at);
+        Outcome = Enrich(
+            new MatchOutcome(MatchId, GameType, rankedTeams, CollectAbandoners(), MatchState.Abandoned, at),
+            at);
+    }
+
+    /// <summary>
+    /// Attach per-player kill / time-alive data so the rating updater can apply margin-of-victory
+    /// scaling and per-player OpenSkill weights. No-op enrichment when the match never went live
+    /// (no <see cref="StartedAt"/>) or when lives aren't configured -- in either case there's no
+    /// meaningful "time alive" to weight against.
+    /// </summary>
+    private MatchOutcome Enrich(MatchOutcome basic, DateTimeOffset endedAt)
+    {
+        if (StartedAt is null) return basic;
+
+        var stats = new Dictionary<PlayerKey, PlayerOutcomeStats>(_teamOf.Count);
+        foreach (var (player, _) in _teamOf)
+        {
+            int kills = _killsByPlayer.TryGetValue(player, out var k) ? k : 0;
+            var alive = GetParticipationTime(player, endedAt) ?? TimeSpan.Zero;
+            stats[player] = new PlayerOutcomeStats(kills, alive);
+        }
+        var duration = endedAt - StartedAt.Value;
+        return basic with
+        {
+            PlayerStats = stats,
+            LivesPerPlayer = LivesPerPlayer,
+            Duration = duration < TimeSpan.Zero ? TimeSpan.Zero : duration,
+        };
     }
 }
