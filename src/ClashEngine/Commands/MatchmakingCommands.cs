@@ -261,7 +261,7 @@ public sealed class MatchmakingCommands
             any = true;
             _chat.SendMessage(player,
                 $"GameType {entry.GameType}: mu={entry.Value.Mu:F2} sigma={entry.Value.Sigma:F2} " +
-                $"(ord={entry.Value.Ordinal:F2}, {entry.Value.GamesPlayed} games)");
+                $"(rating={(int)Math.Round(entry.Value.Ordinal * 10.0, MidpointRounding.AwayFromZero)}, {entry.Value.GamesPlayed} games)");
         }
         if (!any) _chat.SendMessage(player, "You haven't completed any rated matches yet.");
     }
