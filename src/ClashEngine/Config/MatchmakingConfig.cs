@@ -34,8 +34,8 @@ namespace ClashEngine.Config;
 /// GameType1TimeLimit      = 0:20:00              ; TimeLimit may be set; whichever
 /// GameType1Lives          = 5                    ; fires first ends the match.
 /// GameType1WarpOnSpawn      = 1                  ; gate: 0/1; off by default
-/// GameType1Team1Spawns      = 7680,4096; 7680,4112 ; semicolon-separated x,y in pixels
-/// GameType1Team2Spawns      = 8704,4096; 8704,4112
+/// GameType1Team1Spawns      = 7680,4096;7680,4112  ; semicolon-separated x,y in pixels
+/// GameType1Team2Spawns      = 8704,4096;8704,4112  ; no spaces between semi-colons
 /// GameType1Team1Ships       = warbird,javelin,spider ; per-slot ship; names or 0..7
 /// GameType1Team2Ships       = warbird,javelin,spider
 /// GameType1MaxSpawnDrift    = 8                  ; tiles (16 px); pre-GO drift warp-back

@@ -239,7 +239,9 @@ GameType1CountdownDuration = 3             ; seconds (default 3)
 QueueCount = 2
 
 ; Ranked competitive: small look-ahead, hold-window for late better arrivals.
-Queue1Name           = 1v1
+; Names follow the {type}_{tier} convention so ?play comp 1v1 -> 1v1_competitive
+; and ?play casual 1v1 -> 1v1_casual via the resolver's tier-suffix lookup.
+Queue1Name           = 1v1_competitive
 Queue1GameType       = elimination_1v1
 Queue1Matchmaking    = competitive
 Queue1MatchArena     = 1v1comp
@@ -249,7 +251,7 @@ Queue1HoldWindow     = 0:00:10
 Queue1QualityCeiling = 0.90
 
 ; Casual: same arena & rules; pops fast, half rating weight.
-Queue2Name           = 1v1casual
+Queue2Name           = 1v1_casual
 Queue2GameType       = elimination_1v1
 Queue2Matchmaking    = casual
 Queue2MatchArena     = 1v1comp
@@ -261,7 +263,7 @@ Queue2QualityCeiling = 0.70
 
 This shows off:
 
-- **Multiple queues sharing a game type.** Both `1v1` and `1v1casual` run under `elimination_1v1`, so they share the same rules (and rating bucket via `Id = 1`). They differ only in matchmaking strictness.
+- **Multiple queues sharing a game type.** Both `1v1_competitive` and `1v1_casual` run under `elimination_1v1`, so they share the same rules (and rating bucket via `Id = 1`). They differ only in matchmaking strictness. The `_{tier}` suffix lets `?play comp 1v1` and `?play casual 1v1` resolve to the right queue automatically.
 - **Per-team spawn pools.** Three candidate spawn points per team — the orchestrator picks one at random for each match, so consecutive games don't always start in identical positions.
 - **Drift enforcement.** `MaxSpawnDrift = 6` warps anyone who wanders more than 6 tiles from the chosen spawn back during Staging and Countdown.
 - **Explicit matchmaker tuning.** `LookAhead`, `RelaxTime`, `HoldWindow`, and `QualityCeiling` are spelled out for both queues — competitive holds out for balance, casual takes whatever it can get fast.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ClashEngine.Adapter;
 using ClashEngine.Config;
 using ClashEngine.Core;
@@ -8,6 +9,7 @@ using ClashEngine.Core.Eligibility;
 using ClashEngine.Core.Groups;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Penalties;
+using ClashEngine.Core.Queue;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
 
@@ -62,7 +64,8 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("play", Next, helpText:
             "?play [comp|casual] <queue> -- Queue for the next ClashEngine match. \"comp\" is the default tier.");
         _commands.AddCommand("queue", Queue, helpText:
-            "?queue <queue> -- Inspect the players in a queue and how long they've been waiting.");
+            "?queue [name] -- List all queues, or inspect a single queue's waiting players. " +
+            "If <name> has no exact match, both <name>_competitive and <name>_casual are tried.");
         _commands.AddCommand("rating", Rating, helpText:
             "?rating -- Show your skill rating per game type.");
         _commands.AddCommand("cancel", Cancel, helpText:
@@ -162,7 +165,7 @@ public sealed class MatchmakingCommands
                 : null;
             if (string.IsNullOrWhiteSpace(defaultQueue))
             {
-                _chat.SendMessage(player, "Usage: ?play [comp|casual] <queue type>");
+                _chat.SendMessage(player, "Usage: ?play [comp|casual] <queue type>. Type ?queue to see available queues.");
                 return;
             }
             queueType = defaultQueue.Trim();
@@ -175,7 +178,7 @@ public sealed class MatchmakingCommands
                           : null;
         if (resolvedName is null)
         {
-            _chat.SendMessage(player, $"Queue '{queueType}' not found.");
+            _chat.SendMessage(player, $"Queue '{queueType}' not found. Type ?queue to see available queues.");
             return;
         }
 
@@ -214,7 +217,7 @@ public sealed class MatchmakingCommands
         if (msg is not null) _chat.SendMessage(player, msg);
     }
 
-    // ---- ?queue <queue_type>
+    // ---- ?queue [name]
 
     private void Queue(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
     {
@@ -222,29 +225,110 @@ public sealed class MatchmakingCommands
         var queueName = parameters.Trim().ToString();
         if (queueName.Length == 0)
         {
-            _chat.SendMessage(player, "Usage: ?queue <queue type>");
-            return;
-        }
-        if (!_engine.Queues.TryGet(queueName, out var def))
-        {
-            _chat.SendMessage(player, $"Queue '{queueName}' not found.");
+            ListAllQueues(player);
             return;
         }
 
+        // Resolution mirrors ?play: try the literal name first; if that misses, try the
+        // tier-suffixed pair so `?queue 1v1` finds 1v1_competitive + 1v1_casual.
+        var matches = new List<QueueDefinition>();
+        if (_engine.Queues.TryGet(queueName, out var literal))
+        {
+            matches.Add(literal);
+        }
+        else
+        {
+            if (_engine.Queues.TryGet($"{queueName}_competitive", out var comp)) matches.Add(comp);
+            if (_engine.Queues.TryGet($"{queueName}_casual", out var cas)) matches.Add(cas);
+        }
+
+        if (matches.Count == 0)
+        {
+            _chat.SendMessage(player, $"Queue '{queueName}' not found. Type ?queue to see available queues.");
+            return;
+        }
+
+        var now = _clock.UtcNow;
+        for (int i = 0; i < matches.Count; i++) ShowQueueDetail(player, matches[i], now);
+    }
+
+    private void ListAllQueues(Player player)
+    {
+        var defs = _engine.Queues.Definitions
+            .OrderBy(d => SplitTierSuffix(d.Name).Base, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (defs.Count == 0)
+        {
+            _chat.SendMessage(player, "No queues are configured.");
+            return;
+        }
+
+        // Group by base name (with tier suffix stripped) so paired queues render as one row.
+        var grouped = new Dictionary<string, List<QueueDefinition>>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<string>();
+        foreach (var d in defs)
+        {
+            var (baseName, _) = SplitTierSuffix(d.Name);
+            if (!grouped.TryGetValue(baseName, out var bucket))
+            {
+                bucket = new List<QueueDefinition>();
+                grouped[baseName] = bucket;
+                order.Add(baseName);
+            }
+            bucket.Add(d);
+        }
+
+        _chat.SendMessage(player, $"Queues ({defs.Count}):");
+        foreach (var baseName in order)
+        {
+            var bucket = grouped[baseName];
+            var shape = bucket[0].Shape;
+            var shapeTag = $"{shape.TeamCount}v{shape.PlayersPerTeam}";
+
+            // Shows each tier (or "no tier") with its current waiting count.
+            var parts = new List<string>(bucket.Count);
+            foreach (var d in bucket)
+            {
+                var (_, suffix) = SplitTierSuffix(d.Name);
+                var tierLabel = suffix ?? d.Tier.ToString().ToLowerInvariant();
+                int waiting = d.Queue.Snapshot().Count;
+                parts.Add($"{tierLabel} ({waiting} waiting)");
+            }
+            _chat.SendMessage(player, $"  {baseName} [{shapeTag}]: {string.Join(", ", parts)}");
+        }
+        _chat.SendMessage(player, "Use ?queue <name> to see who is waiting; ?play [comp|casual] <name> to join.");
+    }
+
+    private void ShowQueueDetail(Player player, QueueDefinition def, DateTimeOffset now)
+    {
         var snap = def.Queue.Snapshot();
         if (snap.Count == 0)
         {
-            _chat.SendMessage(player, $"{queueName}: empty.");
+            _chat.SendMessage(player, $"{def.Name}: empty.");
             return;
         }
-        var now = _clock.UtcNow;
-        _chat.SendMessage(player, $"{queueName}: {snap.Count} player(s) waiting.");
+        _chat.SendMessage(player, $"{def.Name}: {snap.Count} player(s) waiting.");
         for (int i = 0; i < snap.Count; i++)
         {
             var entry = snap[i];
             var wait = now - entry.EnqueuedAt;
             _chat.SendMessage(player, $"  {entry.Player.Name} ({Format(wait)})");
         }
+    }
+
+    /// <summary>Splits a registered queue name into its base type and matchmaking tier suffix.
+    /// Returns <c>(name, null)</c> when neither <c>_competitive</c> nor <c>_casual</c> is present.
+    /// Used by the listing/lookup paths so paired queues render as one row keyed on the base.</summary>
+    private static (string Base, string? Suffix) SplitTierSuffix(string name)
+    {
+        const string comp = "_competitive";
+        const string casual = "_casual";
+        if (name.EndsWith(comp, StringComparison.OrdinalIgnoreCase))
+            return (name[..^comp.Length], "competitive");
+        if (name.EndsWith(casual, StringComparison.OrdinalIgnoreCase))
+            return (name[..^casual.Length], "casual");
+        return (name, null);
     }
 
     // ---- ?rating
@@ -575,7 +659,7 @@ public sealed class MatchmakingCommands
         {
             ("?play [comp|casual] <queue>",  "Queue for the next match. \"comp\" is the default tier."),
             ("?cancel",                      "Leave every ClashEngine queue."),
-            ("?queue <queue>",               "Show who is waiting in a queue and how long they've waited."),
+            ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),
             ("?accept [inviter]",            "Accept a pending party invitation."),
