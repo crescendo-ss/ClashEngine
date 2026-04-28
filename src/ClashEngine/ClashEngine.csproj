@@ -5,7 +5,7 @@
     <RootNamespace>ClashEngine</RootNamespace>
     <VersionPrefix>0.1.0</VersionPrefix>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <OutDir>$(SubspaceServerRoot)SubspaceServer\Zone\bin\modules\ClashEngine\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)..\..\SubspaceServer\Zone\bin\modules\ClashEngine\</OutDir>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
@@ -37,5 +37,18 @@
     <ProjectReference Include="$(SubspaceServerRoot)SourceGeneration\SourceGeneration.csproj"
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="DeployToSubspaceServer" AfterTargets="Build" Condition="'$(SubspaceServerRoot)' != ''">
+    <PropertyGroup>
+      <SubspaceServerDeployDir>$(SubspaceServerRoot)SubspaceServer\Zone\bin\modules\ClashEngine\</SubspaceServerDeployDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_ClashEngineDeployFiles Include="$(OutDir)*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ClashEngineDeployFiles)"
+          DestinationFolder="$(SubspaceServerDeployDir)"
+          SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="ClashEngine -> $(SubspaceServerDeployDir)" />
+  </Target>
 
 </Project>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Queue;
+using SS.Matchmaking.League;
 using SS.Matchmaking.TeamVersus;
 
 namespace ClashEngine.Lvz;
@@ -34,6 +35,7 @@ internal sealed class ClashTeam : ITeam
     public IMatchData MatchData => _matchData;
     public int TeamIdx { get; }
     public short Freq { get; }
+    public LeagueTeamInfo? LeagueTeam => null;
     public ReadOnlyCollection<IPlayerSlot> Slots => _slotsRO;
 
     /// <summary>Live-read of team kills. Capped to short (MatchLvz expects short and team kills

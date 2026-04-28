@@ -33,7 +33,7 @@ dotnet build
 dotnet test tests/ClashEngine.Core.Tests/ClashEngine.Core.Tests.csproj
 ```
 
-The plug-in's post-build step copies `ClashEngine.dll` (and `ClashEngine.Core.dll`) into `SubspaceServer/Zone/bin/modules/ClashEngine/`.
+Build output lands in `SubspaceServer/Zone/bin/modules/ClashEngine/` inside this repo (`ClashEngine.dll` and `ClashEngine.Core.dll`). When `$(SubspaceServerRoot)` is set (the default points at `../SubspaceServer/src/`), a post-build step also copies the staged files to `$(SubspaceServerRoot)SubspaceServer/Zone/bin/modules/ClashEngine/` for direct deployment.
 
 ---
 
