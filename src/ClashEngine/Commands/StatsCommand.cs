@@ -4,6 +4,7 @@ using ClashEngine.Adapter;
 using ClashEngine.Core;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
+using ClashEngine.Core.Ratings;
 using ClashEngine.Core.Stats;
 using ClashEngine.Lvz;
 using SS.Core;
@@ -82,6 +83,9 @@ public sealed class StatsCommand
             return;
         }
 
+        // Snapshot every participant's rating, defaulting new players to Rating.Default so the
+        // scoreboard's Δ column has a pre value for every row (otherwise only veterans would
+        // show a delta and unrated players would show "—", which reads as a bug).
         var ratingsAtStart = new Dictionary<PlayerKey, RatingPayload>();
         var liveOrdinalByName = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         for (int t = 0; t < match.Teams.Count; t++)
@@ -89,11 +93,11 @@ public sealed class StatsCommand
             for (int j = 0; j < match.Teams[t].Count; j++)
             {
                 var key = match.Teams[t][j];
-                if (_engine.Ratings.TryGet(key, match.GameType, out var r))
-                {
-                    ratingsAtStart[key] = new RatingPayload(r.Mu, r.Sigma, r.GamesPlayed);
-                    liveOrdinalByName[key.Name] = r.Ordinal;
-                }
+                var r = _engine.Ratings.TryGet(key, match.GameType, out var existing)
+                    ? existing
+                    : Rating.Default;
+                ratingsAtStart[key] = new RatingPayload(r.Mu, r.Sigma, r.GamesPlayed);
+                liveOrdinalByName[key.Name] = r.Ordinal;
             }
         }
 

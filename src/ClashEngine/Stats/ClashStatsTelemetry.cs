@@ -129,15 +129,19 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
 
         // Snapshot per-player ratings at match start so the upload reflects pre-match skill
         // (the engine applies outcome to the store after the match -- by upload time the live
-        // store has already moved on).
+        // store has already moved on). Players with no prior rated match get Rating.Default
+        // (GamesPlayed=0 flags them as new for downstream consumers) so the scoreboard's Δ
+        // column has a pre value for every row instead of showing "—" only for new players.
         var ratingsAtStart = new Dictionary<PlayerKey, RatingPayload>();
         for (int t = 0; t < match.Teams.Count; t++)
         {
             for (int j = 0; j < match.Teams[t].Count; j++)
             {
                 var key = match.Teams[t][j];
-                if (_engine.Ratings.TryGet(key, match.GameType, out var r))
-                    ratingsAtStart[key] = new RatingPayload(r.Mu, r.Sigma, r.GamesPlayed);
+                var r = _engine.Ratings.TryGet(key, match.GameType, out var existing)
+                    ? existing
+                    : Rating.Default;
+                ratingsAtStart[key] = new RatingPayload(r.Mu, r.Sigma, r.GamesPlayed);
             }
         }
 
