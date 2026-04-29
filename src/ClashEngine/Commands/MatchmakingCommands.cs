@@ -379,7 +379,42 @@ public sealed class MatchmakingCommands
     {
         LogCommand("cancel", player, parameters);
         if (_resolver.KeyOf(player) is not PlayerKey k) return;
-        var removed = _engine.DequeueEverywhere(k, _clock.UtcNow);
+
+        var now = _clock.UtcNow;
+
+        // Mirror ?play's group-vs-solo dispatch: ?play routes a grouped caller through
+        // TryEnqueueGroup (atomic), so ?cancel must dequeue every party member to keep the
+        // queue entry consistent. The matcher tracks per-player entries and won't cascade.
+        if (_engine.Groups.GroupOf(k) is GroupId g)
+        {
+            var members = new List<PlayerKey>(_engine.Groups.MembersOf(g));
+            int totalRemoved = 0;
+            foreach (var m in members)
+            {
+                var removedFor = _engine.DequeueEverywhere(m, now);
+                totalRemoved += removedFor.Count;
+                if (_log.IsDebug)
+                    _log.Debug(LogCategory, $"?cancel(party) {m.Name} removed from {removedFor.Count} queue(s): [{string.Join(",", removedFor)}]");
+            }
+
+            if (totalRemoved == 0)
+            {
+                _chat.SendMessage(player, "Your party isn't in any queue.");
+                return;
+            }
+
+            // Notify the rest of the party. Caller stays silent on success, matching the
+            // solo path's existing convention.
+            foreach (var m in members)
+            {
+                if (m.Equals(k)) continue;
+                if (_resolver.Resolve(m) is { } pp)
+                    _chat.SendMessage(pp, $"{k.Name} cancelled the party's queue.");
+            }
+            return;
+        }
+
+        var removed = _engine.DequeueEverywhere(k, now);
         if (_log.IsDebug)
             _log.Debug(LogCategory, $"?cancel {k.Name} removed from {removed.Count} queue(s): [{string.Join(",", removed)}]");
         if (removed.Count == 0) _chat.SendMessage(player, "You weren't in any queue.");
