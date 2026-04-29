@@ -205,14 +205,18 @@ public class ActiveMatchTests
     [Fact]
     public void Reaching_zero_lives_records_exit_time()
     {
-        // Lives=3 -> initial respawns=2 -> two cross-team kills brings the victim to 0.
+        // Lives=3 -> initial respawns=2. The first two deaths consume both respawns; the third
+        // death lands with no respawn left and is the eliminating one that sets ExitedAt.
         var m = JoinAll(BuildMatch(livesPerPlayer: 3, endPolicy: new KillCountEndPolicy(100)));
 
         m.OnKill(K("A"), K("C"), T0.AddSeconds(10));
         m.OnKill(K("A"), K("C"), T0.AddSeconds(20));
-
         Assert.Equal(0, m.LivesRemaining[K("C")]);
-        Assert.Equal(T0.AddSeconds(20), m.ExitedAt[K("C")]);
+        Assert.False(m.ExitedAt.ContainsKey(K("C")));
+
+        m.OnKill(K("A"), K("C"), T0.AddSeconds(30));
+        Assert.Equal(0, m.LivesRemaining[K("C")]);
+        Assert.Equal(T0.AddSeconds(30), m.ExitedAt[K("C")]);
     }
 
     [Fact]

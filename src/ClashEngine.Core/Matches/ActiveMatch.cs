@@ -383,15 +383,16 @@ public sealed class ActiveMatch
         Increment(_killsByPlayer, killer);
         _killsByTeam[killerTeam]++;
 
-        // Decrement victim's lives (if lives are configured) and record exit time on zero.
-        // The counter is remaining respawns, so it can already be 0 here when LivesPerPlayer = 1
-        // (no respawns ever) -- the first death is still the eliminating one and needs ExitedAt.
+        // The counter is remaining respawns: a death with respawns left consumes one and the
+        // player lives on; a death with none left is the eliminating one. LivesPerPlayer = 1
+        // seeds 0 respawns so the first death qualifies; LivesPerPlayer = 2 seeds 1 respawn so
+        // the player gets one revival before elimination.
         if (LivesPerPlayer.HasValue
             && _livesRemaining.TryGetValue(victim, out var lives))
         {
-            int newLives = lives > 0 ? lives - 1 : 0;
-            _livesRemaining[victim] = newLives;
-            if (newLives == 0 && !_exitedAt.ContainsKey(victim))
+            if (lives > 0)
+                _livesRemaining[victim] = lives - 1;
+            else if (!_exitedAt.ContainsKey(victim))
                 _exitedAt[victim] = at;
         }
 

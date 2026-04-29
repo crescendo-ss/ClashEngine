@@ -187,9 +187,9 @@ public sealed class StatsListener
 
     /// <summary>
     /// Predicts whether the in-flight kill will be the eliminating one. Runs pre-engine, so
-    /// <c>LivesRemaining</c> still holds the count <em>before</em> this death is applied --
-    /// a value of 0 (LivesPerPlayer == 1, no respawns) or 1 means the engine is about to
-    /// decrement to 0 and set <c>ExitedAt</c>. Returns <c>false</c> for unlimited-lives matches.
+    /// <c>LivesRemaining</c> still holds the count of respawns the player had <em>before</em>
+    /// this death -- 0 means there's no respawn left to consume and the engine will set
+    /// <c>ExitedAt</c>. Returns <c>false</c> for unlimited-lives matches.
     /// </summary>
     private bool IsKnockout(PlayerKey victim)
     {
@@ -199,7 +199,7 @@ public sealed class StatsListener
         if (match.LivesPerPlayer is null) return false;
         if (match.ExitedAt.ContainsKey(victim)) return true;
         if (!match.LivesRemaining.TryGetValue(victim, out var lives)) return false;
-        return lives <= 1;
+        return lives == 0;
     }
 
     /// <summary>
