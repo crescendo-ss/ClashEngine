@@ -601,7 +601,7 @@ public class StatsRecorderTests
     public void OnPositionPacket_first_packet_seeds_anchor_without_crediting()
     {
         var r = Make4Player();
-        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnPositionPacket(K("A"), atTick: 100, energy: 0);
         Assert.Equal(0u, r.Stats[K("A")].ActiveTicks);
     }
 
@@ -609,9 +609,9 @@ public class StatsRecorderTests
     public void OnPositionPacket_credits_inter_packet_delta()
     {
         var r = Make4Player();
-        r.OnPositionPacket(K("A"), atTick: 100);
-        r.OnPositionPacket(K("A"), atTick: 110);
-        r.OnPositionPacket(K("A"), atTick: 130);
+        r.OnPositionPacket(K("A"), atTick: 100, energy: 0);
+        r.OnPositionPacket(K("A"), atTick: 110, energy: 0);
+        r.OnPositionPacket(K("A"), atTick: 130, energy: 0);
         Assert.Equal(30u, r.Stats[K("A")].ActiveTicks);
     }
 
@@ -619,9 +619,9 @@ public class StatsRecorderTests
     public void OnPositionPacket_caps_oversized_gap_at_max_active_delta()
     {
         var r = Make4Player();
-        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnPositionPacket(K("A"), atTick: 100, energy: 0);
         // Gap of 1000 ticks (10 s) should cap at MaxActiveDeltaTicks (300 ticks / 3 s).
-        r.OnPositionPacket(K("A"), atTick: 1100);
+        r.OnPositionPacket(K("A"), atTick: 1100, energy: 0);
         Assert.Equal(StatsRecorder.MaxActiveDeltaTicks, r.Stats[K("A")].ActiveTicks);
     }
 
@@ -629,12 +629,12 @@ public class StatsRecorderTests
     public void OnPositionPacket_resets_anchor_on_spawn()
     {
         var r = Make4Player();
-        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnPositionPacket(K("A"), atTick: 100, energy: 0);
         r.OnSpawn(K("A"), atTick: 105);
         // The post-spawn packet should seed a new anchor, not credit the 105->110 since-spawn gap
         // through the pre-spawn anchor.
-        r.OnPositionPacket(K("A"), atTick: 110);
-        r.OnPositionPacket(K("A"), atTick: 120);
+        r.OnPositionPacket(K("A"), atTick: 110, energy: 0);
+        r.OnPositionPacket(K("A"), atTick: 120, energy: 0);
         Assert.Equal(10u, r.Stats[K("A")].ActiveTicks);
     }
 
@@ -642,11 +642,73 @@ public class StatsRecorderTests
     public void OnPositionPacket_resets_anchor_on_leave_match()
     {
         var r = Make4Player();
-        r.OnPositionPacket(K("A"), atTick: 100);
+        r.OnPositionPacket(K("A"), atTick: 100, energy: 0);
         r.OnLeaveMatch(K("A"), atTick: 200);
         // Re-registration would normally happen for a sub; for this test we just verify the
         // anchor was cleared so a stale delta isn't credited if a packet somehow arrives.
-        r.OnPositionPacket(K("A"), atTick: 5000);
+        r.OnPositionPacket(K("A"), atTick: 5000, energy: 0);
         Assert.Equal(0u, r.Stats[K("A")].ActiveTicks);
+    }
+
+    // --- duplicate-death suppression ---
+
+    [Fact]
+    public void OnKill_duplicate_without_intervening_alive_packet_is_dropped()
+    {
+        var r = Make4Player();
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 100);
+        // The buggy client sends a second death packet a few ticks later.
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 103);
+        Assert.Equal(1, r.Stats[K("A")].Deaths);
+        Assert.Equal(1, r.Stats[K("C")].Kills);
+    }
+
+    [Fact]
+    public void OnKill_after_full_energy_position_packet_counts()
+    {
+        var r = Make4Player();
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 100);
+        // Without an intervening OnSpawn, only the >75%-energy position packet can clear
+        // the gate. Energy 800 / max 1000 = 80% qualifies.
+        r.OnPositionPacket(K("A"), atTick: 200, energy: 800);
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 300);
+        Assert.Equal(2, r.Stats[K("A")].Deaths);
+        Assert.Equal(2, r.Stats[K("C")].Kills);
+    }
+
+    [Fact]
+    public void OnKill_after_spawn_counts_even_without_position_packet()
+    {
+        var r = Make4Player();
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 100);
+        r.OnSpawn(K("A"), atTick: 200);
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 300);
+        Assert.Equal(2, r.Stats[K("A")].Deaths);
+    }
+
+    [Fact]
+    public void OnKill_low_energy_position_packet_does_not_clear_gate()
+    {
+        var r = Make4Player();
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 100);
+        // 75% of 1000 max is 750; energy at exactly 75% is not strictly above the threshold.
+        r.OnPositionPacket(K("A"), atTick: 150, energy: 750);
+        // Even a respawn packet doesn't help if it's still at 50%.
+        r.OnPositionPacket(K("A"), atTick: 160, energy: 500);
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 170);
+        Assert.Equal(1, r.Stats[K("A")].Deaths);
+    }
+
+    [Fact]
+    public void OnKill_position_packet_predating_death_tick_does_not_clear_gate()
+    {
+        var r = Make4Player();
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 100);
+        // Out-of-order arrival: the packet is processed after the death but its client tick
+        // is older than the death's tick. It must not retroactively prove the player came
+        // back alive.
+        r.OnPositionPacket(K("A"), atTick: 90, energy: 1000);
+        r.OnKill(victim: K("A"), killer: K("C"), atTick: 105);
+        Assert.Equal(1, r.Stats[K("A")].Deaths);
     }
 }

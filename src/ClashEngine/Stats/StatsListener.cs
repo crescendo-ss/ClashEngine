@@ -128,7 +128,7 @@ public sealed class StatsListener
 
         // Drive the active-tick accountant from every packet, even ones with no weapon event.
         uint tick = (uint)packet.Time;
-        recorder.OnPositionPacket(pkey, tick);
+        recorder.OnPositionPacket(pkey, tick, packet.Energy);
 
         if (packet.Weapon.Type == WeaponCodes.Null) return;
 

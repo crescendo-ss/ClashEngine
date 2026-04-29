@@ -20,6 +20,7 @@ public sealed class StatsRecorder
     private readonly Dictionary<PlayerKey, PlayerStats> _stats = new();
     private readonly Dictionary<PlayerKey, PlayerProfile> _profiles = new();
     private readonly Dictionary<PlayerKey, uint> _lastPositionTick = new();
+    private readonly Dictionary<PlayerKey, uint> _pendingDeathTick = new();
     private readonly DamageDecay _decay;
     private readonly double _assistThresholdFraction;
 
@@ -32,6 +33,15 @@ public sealed class StatsRecorder
     /// 300 ticks = 3 seconds.
     /// </summary>
     public const uint MaxActiveDeltaTicks = 300;
+
+    /// <summary>
+    /// Energy threshold (as a fraction of the player's max) that a post-death position packet
+    /// must exceed for us to consider the player "back alive" -- i.e. for the next death packet
+    /// to count. The Continuum client occasionally double-sends a death packet, and this gate
+    /// suppresses the second one. 75% is well above any realistic damaged-but-alive snapshot
+    /// since fresh spawns come in at full energy.
+    /// </summary>
+    public const double AliveEnergyThresholdFraction = 0.75;
 
     public StatsRecorder(DamageDecay decay, double assistThresholdFraction = DefaultAssistThresholdFraction)
     {
@@ -115,15 +125,23 @@ public sealed class StatsRecorder
         // Reset the position-tick anchor so the gap across the death-respawn cycle isn't
         // credited as active time on the next packet.
         _lastPositionTick.Remove(player);
+        // The spawn event is server-authoritative proof the player is back alive, so
+        // it also clears the duplicate-death gate. The position-packet branch in
+        // OnPositionPacket is the wire-side fallback for cases where SpawnCallback
+        // hasn't fired yet.
+        _pendingDeathTick.Remove(player);
     }
 
     /// <summary>
     /// Called once per inbound position packet. Credits the elapsed-since-previous interval to
     /// <see cref="PlayerStats.ActiveTicks"/>, capped at <see cref="MaxActiveDeltaTicks"/> so a
     /// stutter or spec/arena hop doesn't inflate playing time. The first packet after spawn or
-    /// match start seeds the anchor without crediting any time.
+    /// match start seeds the anchor without crediting any time. A packet at <paramref name="atTick"/>
+    /// later than the player's last recorded death tick and carrying energy above
+    /// <see cref="AliveEnergyThresholdFraction"/> of the player's max also clears the
+    /// duplicate-death gate set by <see cref="OnKill"/>.
     /// </summary>
-    public void OnPositionPacket(PlayerKey player, uint atTick)
+    public void OnPositionPacket(PlayerKey player, uint atTick, int energy)
     {
         if (!_stats.TryGetValue(player, out var stats)) return;
         if (_lastPositionTick.TryGetValue(player, out var prev) && atTick > prev)
@@ -133,6 +151,14 @@ public sealed class StatsRecorder
             stats.AddActiveTicks(delta);
         }
         _lastPositionTick[player] = atTick;
+
+        if (_pendingDeathTick.TryGetValue(player, out var deathTick)
+            && atTick > deathTick
+            && _profiles.TryGetValue(player, out var profile)
+            && energy > profile.MaxEnergy * AliveEnergyThresholdFraction)
+        {
+            _pendingDeathTick.Remove(player);
+        }
     }
 
     /// <summary>Append a distance-to-nearest-enemy sample. No-op if the player isn't registered.</summary>
@@ -239,6 +265,13 @@ public sealed class StatsRecorder
         if (!_stats.TryGetValue(victim, out var victimStats)) return;
         if (!_profiles.TryGetValue(victim, out var victimProfile)) return;
 
+        // Drop duplicate death packets from the buggy client. The gate is cleared by a
+        // post-death position packet showing the player back at >75% energy
+        // (see OnPositionPacket); until that arrives, treat any further death as the
+        // duplicate of the one we already recorded.
+        if (_pendingDeathTick.ContainsKey(victim)) return;
+        _pendingDeathTick[victim] = atTick;
+
         victimStats.RecordDeath();
         if (isKnockout) victimStats.RecordKnockout();
 
@@ -341,6 +374,7 @@ public sealed class StatsRecorder
         stats.SnapshotInventoryAsWasted();
         stats.CloseLife(atTick, LifeEndReason.LeftMatch, knockoutBy: null);
         _lastPositionTick.Remove(player);
+        _pendingDeathTick.Remove(player);
     }
 
     /// <summary>Match ended. Closes any open life on every registered player and rolls each
