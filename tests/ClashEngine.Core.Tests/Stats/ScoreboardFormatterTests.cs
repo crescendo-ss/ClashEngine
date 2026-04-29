@@ -84,7 +84,7 @@ public class ScoreboardFormatterTests
         Assert.DoesNotContain("Player", lines[1]);
         Assert.Contains("Ki/De", lines[1]);
         Assert.Contains("AcB", lines[1]);
-        Assert.Contains("Δ", lines[1]);
+        Assert.Contains("+/-", lines[1]);
 
         // Player rows render names and KO/Death counts.
         Assert.Contains("Beacon", lines[3]);
@@ -176,14 +176,16 @@ public class ScoreboardFormatterTests
     public void Format_renders_dash_for_missing_rating_and_zero_division_cells()
     {
         var payload = SamplePayload();
-        // No post-match ordinals provided -> Δ and Rat should be dashes.
+        // No post-match ordinals provided -> +/- and Rat should be dashes.
         var lines = ScoreboardFormatter.Format(payload);
 
         // Jolt row has no bullets fired, so AcB should be dashed; with no postOrdinal,
-        // Δ and Rat are also dashed. Jolt is the second player row (index 4 in the new layout).
+        // +/- and Rat are also dashed. Jolt is the second player row (index 4 in the new layout).
         string joltRow = lines[4];
         Assert.Contains("Jolt", joltRow);
-        Assert.Contains("—", joltRow);
+        // " - " (space-hyphen-space) only appears inside dash-placeholder cells -- divider
+        // rows look like "+---...---+" with no surrounding spaces around the hyphens.
+        Assert.Contains(" - ", joltRow);
     }
 
     [Fact]

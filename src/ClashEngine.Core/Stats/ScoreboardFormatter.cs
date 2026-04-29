@@ -13,13 +13,17 @@ namespace ClashEngine.Core.Stats;
 /// <remarks>
 /// Server ticks are 10 ms (100 ticks/second). Distance samples are in raw subspace pixels;
 /// <c>dE</c> is reported in 16-pixel tiles. Rating columns require <c>postOrdinalByPlayer</c>;
-/// players missing from that map render as <c>"—"</c> for both Δ and Rat.
+/// players missing from that map render as <c>"-"</c> for both +/- and Rat.
+///
+/// Output is plain ASCII -- the SubSpace chat font's printable set doesn't include em-dash
+/// or Greek delta, so previously-used <c>'—'</c> (em-dash) and <c>'Δ'</c> (delta)
+/// rendered as substitute glyphs and broke column alignment.
 /// </remarks>
 public static class ScoreboardFormatter
 {
     private const int TicksPerSecond = 100;
     private const int PixelsPerTile = 16;
-    private const string Dash = "—";
+    private const string Dash = "-";
 
     private static readonly Column[] LeftCols =
     {
@@ -32,7 +36,7 @@ public static class ScoreboardFormatter
         new("DDealt", 6), new("DTaken", 6), new("DmgE", 4), new("KiDmg", 5), new("FRDmg", 5), new("TmDmg", 4),
     };
     private static readonly Column[] AccuracyCols = { new("AcB", 3), new("AcG", 3) };
-    private static readonly Column[] RatingCols = { new("Δ", 4), new("Rat", 4) };
+    private static readonly Column[] RatingCols = { new("+/-", 4), new("Rat", 4) };
 
     private readonly record struct Column(string Header, int Width, bool LeftAlign = false);
 
@@ -43,8 +47,8 @@ public static class ScoreboardFormatter
     /// </summary>
     /// <param name="payload">Finalized match envelope.</param>
     /// <param name="postOrdinalByPlayer">
-    /// Map of player name (case-insensitive) to post-match ordinal (μ−3σ). When provided, Δ
-    /// shows (post−pre)×10 rounded and Rat shows post×10 rounded.
+    /// Map of player name (case-insensitive) to post-match ordinal (mu - 3*sigma). When
+    /// provided, the +/- column shows (post-pre)*10 rounded and Rat shows post*10 rounded.
     /// </param>
     public static IReadOnlyList<string> Format(
         MatchPayload payload,
