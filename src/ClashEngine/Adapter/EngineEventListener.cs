@@ -78,6 +78,32 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
                 $"{inviter.Name} invited you to a party. Use ?accept {inviter.Name} within {Format(ttl)} or ?decline.");
     }
 
+    public void OnInviteAccepted(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"InviteAccepted: {invitee.Name} -> {inviter.Name}");
+        // The invitee's own ?accept handler messages them ("You joined the group..."); just notify
+        // the inviter so they know their invitation got picked up.
+        if (_resolver.Resolve(inviter) is { } p)
+            _chat.SendMessage(p, $"{invitee.Name} accepted your party invitation.");
+    }
+
+    public void OnInviteDeclined(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"InviteDeclined: {invitee.Name} -> {inviter.Name}");
+        if (_resolver.Resolve(inviter) is { } p)
+            _chat.SendMessage(p, $"{invitee.Name} declined your party invitation.");
+    }
+
+    public void OnInviteExpired(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"InviteExpired: {inviter.Name} -> {invitee.Name}");
+        if (_resolver.Resolve(inviter) is { } p)
+            _chat.SendMessage(p, $"Your party invitation to {invitee.Name} expired with no response.");
+    }
+
     public void OnMatchProposed(MatchProposal proposal)
     {
         // The actionable "Match found! Move or fire within Xs" message is sent by

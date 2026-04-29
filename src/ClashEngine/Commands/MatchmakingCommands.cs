@@ -385,17 +385,27 @@ public sealed class MatchmakingCommands
         var now = _clock.UtcNow;
         foreach (var raw in arg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var inviteeKey = new PlayerKey(raw);
+            // Resolve before inviting so a typo or offline name produces explicit feedback
+            // instead of a ghost ledger entry. Use the canonical-cased name from the resolved
+            // player for all replies.
+            var resolved = _resolver.Resolve(new PlayerKey(raw));
+            if (resolved is null || _resolver.KeyOf(resolved) is not PlayerKey inviteeKey)
+            {
+                _chat.SendMessage(player, $"No player named '{raw}' is online.");
+                continue;
+            }
+            var displayName = inviteeKey.Name;
+
             var result = _engine.InviteToGroup(k, inviteeKey, now);
             if (_log.IsDebug)
-                _log.Debug(LogCategory, $"?party {k.Name} -> {raw} result={result}");
+                _log.Debug(LogCategory, $"?party {k.Name} -> {displayName} result={result}");
             var msg = result switch
             {
-                InviteResult.Sent => $"Invitation sent to {raw}.",
+                InviteResult.Sent => $"Invitation sent to {displayName}.",
                 InviteResult.SelfInvite => "You can't invite yourself.",
-                InviteResult.AlreadyInGroup => $"{raw} is already in your group.",
-                InviteResult.InviteeBusy => $"{raw} is already in another group.",
-                InviteResult.AlreadyInvited => $"{raw} already has a pending invitation from you.",
+                InviteResult.AlreadyInGroup => $"{displayName} is already in your group.",
+                InviteResult.InviteeBusy => $"{displayName} is already in another group.",
+                InviteResult.AlreadyInvited => $"{displayName} already has a pending invitation from you.",
                 InviteResult.NotLeader => "Only the party leader can invite (party is closed).",
                 _ => null,
             };

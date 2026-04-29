@@ -22,6 +22,18 @@ public interface IMatchmakingTelemetry
     /// successful (<see cref="Groups.InviteResult.Sent"/>) path; the adapter typically translates
     /// this into a DM to <paramref name="invitee"/> so they know to <c>?accept</c>.</summary>
     void OnInviteSent(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at, TimeSpan ttl) { }
+
+    /// <summary>The invitee accepted a pending invitation. The adapter typically DMs the inviter
+    /// so they know the recipient joined.</summary>
+    void OnInviteAccepted(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at) { }
+
+    /// <summary>The invitee explicitly declined a pending invitation. The adapter typically DMs
+    /// the inviter so they know the recipient said no.</summary>
+    void OnInviteDeclined(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at) { }
+
+    /// <summary>A previously-sent invitation reached its TTL with no accept/decline. The adapter
+    /// typically DMs the inviter so they know it lapsed unanswered.</summary>
+    void OnInviteExpired(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at) { }
     void OnMatchProposed(MatchProposal proposal) { }
     void OnMatchStarted(ActiveMatch match) { }
     void OnMatchEnded(MatchOutcome outcome) { }

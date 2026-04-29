@@ -85,9 +85,10 @@ public sealed class GroupRegistry
         return _ledger.Add(inviter, invitee, at) ? InviteResult.Sent : InviteResult.AlreadyInvited;
     }
 
-    public AcceptResult Accept(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at, out GroupId groupId)
+    public AcceptResult Accept(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at, out GroupId groupId, out PlayerKey resolvedInviter)
     {
         groupId = default;
+        resolvedInviter = default;
         if (invitee.IsDefault) throw new ArgumentException("Player must not be default.", nameof(invitee));
 
         if (GroupOf(invitee) is not null) return AcceptResult.AlreadyInGroup;
@@ -110,6 +111,7 @@ public sealed class GroupRegistry
             if (pending.Count > 1) return AcceptResult.AmbiguousMustSpecify;
             invite = pending[0];
         }
+        resolvedInviter = invite.Inviter;
 
         // Add invitee to inviter's group, creating one if the inviter is solo.
         var inviterCurrent = GroupOf(invite.Inviter);
@@ -138,18 +140,24 @@ public sealed class GroupRegistry
         return AcceptResult.Joined;
     }
 
-    public DeclineResult Decline(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at)
+    public DeclineResult Decline(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at, out PlayerKey resolvedInviter)
     {
+        resolvedInviter = default;
         if (invitee.IsDefault) throw new ArgumentException("Player must not be default.", nameof(invitee));
 
         if (inviter is PlayerKey i)
-            return _ledger.Remove(invitee, i) ? DeclineResult.Declined : DeclineResult.NoSuchInvite;
+        {
+            if (!_ledger.Remove(invitee, i)) return DeclineResult.NoSuchInvite;
+            resolvedInviter = i;
+            return DeclineResult.Declined;
+        }
 
         var pending = _ledger.Pending(invitee, at);
         if (pending.Count == 0) return DeclineResult.NoPendingInvite;
         if (pending.Count > 1) return DeclineResult.AmbiguousMustSpecify;
 
-        _ledger.Remove(invitee, pending[0].Inviter);
+        resolvedInviter = pending[0].Inviter;
+        _ledger.Remove(invitee, resolvedInviter);
         return DeclineResult.Declined;
     }
 
@@ -237,6 +245,15 @@ public sealed class GroupRegistry
 
     /// <summary>Removes all expired invitations. Returns the number pruned.</summary>
     public int PruneExpiredInvitations(DateTimeOffset at) => _ledger.PruneExpired(at);
+
+    /// <summary>Removes all expired invitations and returns them so the caller can fire
+    /// per-invitation telemetry.</summary>
+    public IReadOnlyList<GroupInvitation> PruneExpiredInvitationsAndReport(DateTimeOffset at) =>
+        _ledger.PruneExpiredAndReport(at);
+
+    /// <summary>Drops every invitation where <paramref name="player"/> is the inviter or the
+    /// invitee. Returns the number removed.</summary>
+    public int RemoveInvitationsInvolving(PlayerKey player) => _ledger.RemoveAllInvolving(player);
 
     public int PendingInvitationCount => _ledger.Count;
 

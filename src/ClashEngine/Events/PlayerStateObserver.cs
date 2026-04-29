@@ -77,10 +77,14 @@ public sealed class PlayerStateObserver
                     // A disconnect (or zone exit) is a hard departure from the party. Spec'ing
                     // is handled separately in OnShipFreqChange and deliberately does NOT drop.
                     _engine.LeaveGroup(k2, _clock.UtcNow);
+                    // Drop pending invitations on either side so they don't outlive the session.
+                    // Deliberately not done on LeaveArena -- arena hops are transient and the
+                    // invitation should still be there when the player returns.
+                    var pruned = _engine.Groups.RemoveInvitationsInvolving(k2);
                     if (_log.IsDebug)
                     {
                         var elig = _engine.CheckEligibility(k2).Status;
-                        _log.Debug(LogCategory, $"Disconnected: {k2.Name} (eligibility now {elig})");
+                        _log.Debug(LogCategory, $"Disconnected: {k2.Name} (eligibility now {elig}, pruned {pruned} invitation(s))");
                     }
                 }
                 _resolver.OnDisconnect(player);

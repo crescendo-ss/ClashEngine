@@ -78,5 +78,35 @@ public sealed class InvitationLedger
         return toRemove.Count;
     }
 
+    /// <summary>Variant of <see cref="PruneExpired"/> that returns the pruned invitations so the
+    /// caller can fire per-invitation telemetry. Returns an empty list if nothing expired.</summary>
+    public IReadOnlyList<GroupInvitation> PruneExpiredAndReport(DateTimeOffset at)
+    {
+        List<GroupInvitation>? expired = null;
+        List<(PlayerKey, PlayerKey)>? keys = null;
+        foreach (var kvp in _byKey)
+        {
+            if (kvp.Value.ExpiresAt <= at)
+            {
+                (expired ??= new List<GroupInvitation>()).Add(kvp.Value);
+                (keys ??= new List<(PlayerKey, PlayerKey)>()).Add(kvp.Key);
+            }
+        }
+        if (keys is not null) foreach (var k in keys) _byKey.Remove(k);
+        return expired ?? (IReadOnlyList<GroupInvitation>)Array.Empty<GroupInvitation>();
+    }
+
+    /// <summary>Removes every invitation involving <paramref name="player"/> on either side
+    /// (inviter or invitee). Used when a player disconnects so stale invites don't outlive the
+    /// session.</summary>
+    public int RemoveAllInvolving(PlayerKey player)
+    {
+        var toRemove = new List<(PlayerKey, PlayerKey)>();
+        foreach (var key in _byKey.Keys)
+            if (key.Invitee == player || key.Inviter == player) toRemove.Add(key);
+        foreach (var k in toRemove) _byKey.Remove(k);
+        return toRemove.Count;
+    }
+
     public int Count => _byKey.Count;
 }

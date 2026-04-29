@@ -232,15 +232,23 @@ public sealed class MatchmakingEngine
     /// </summary>
     public AcceptResult AcceptInvite(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at, out GroupId groupId)
     {
-        var result = _groups.Accept(invitee, inviter, at, out groupId);
+        var result = _groups.Accept(invitee, inviter, at, out groupId, out var resolvedInviter);
         if (result == AcceptResult.Joined)
+        {
             DequeueAllMembers(_groups.MembersOf(groupId), at);
+            _telemetry.OnInviteAccepted(resolvedInviter, invitee, at);
+        }
         return result;
     }
 
     /// <summary>Declines a pending invitation. <paramref name="inviter"/> may be null when there's only one pending.</summary>
-    public DeclineResult DeclineInvite(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at) =>
-        _groups.Decline(invitee, inviter, at);
+    public DeclineResult DeclineInvite(PlayerKey invitee, PlayerKey? inviter, DateTimeOffset at)
+    {
+        var result = _groups.Decline(invitee, inviter, at, out var resolvedInviter);
+        if (result == DeclineResult.Declined)
+            _telemetry.OnInviteDeclined(resolvedInviter, invitee, at);
+        return result;
+    }
 
     /// <summary>
     /// Toggles the calling player's group between Open (any member can invite) and Closed
@@ -422,7 +430,12 @@ public sealed class MatchmakingEngine
             foreach (var m in toFinalize) FinalizeMatch(m, at);
 
         ExpireVetoWindows(at);
-        _groups.PruneExpiredInvitations(at);
+        var expiredInvites = _groups.PruneExpiredInvitationsAndReport(at);
+        for (int i = 0; i < expiredInvites.Count; i++)
+        {
+            var invite = expiredInvites[i];
+            _telemetry.OnInviteExpired(invite.Inviter, invite.Invitee, at);
+        }
 
         while (true)
         {

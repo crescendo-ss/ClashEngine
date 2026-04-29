@@ -72,4 +72,20 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnGroupDisbanded(notify, trigger, reason);
     }
+    public void OnInviteSent(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at, TimeSpan ttl)
+    {
+        foreach (var l in _listeners) l.OnInviteSent(inviter, invitee, at, ttl);
+    }
+    public void OnInviteAccepted(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnInviteAccepted(inviter, invitee, at);
+    }
+    public void OnInviteDeclined(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnInviteDeclined(inviter, invitee, at);
+    }
+    public void OnInviteExpired(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnInviteExpired(inviter, invitee, at);
+    }
 }

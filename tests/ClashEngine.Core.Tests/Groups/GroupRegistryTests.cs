@@ -27,7 +27,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
         // B is now in a group with A.
 
         Assert.Equal(InviteResult.InviteeBusy, r.Invite(K("C"), K("B"), T0.AddSeconds(2)));
@@ -47,7 +47,7 @@ public class GroupRegistryTests
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
 
-        var status = r.Accept(K("B"), K("A"), T0.AddSeconds(2), out var groupId);
+        var status = r.Accept(K("B"), K("A"), T0.AddSeconds(2), out var groupId, out _);
 
         Assert.Equal(AcceptResult.Joined, status);
         Assert.False(groupId.IsDefault);
@@ -61,11 +61,11 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId, out _);
         // {A, B} group exists.
 
         r.Invite(K("A"), K("C"), T0.AddSeconds(2));
-        var status = r.Accept(K("C"), K("A"), T0.AddSeconds(3), out var sameGroupId);
+        var status = r.Accept(K("C"), K("A"), T0.AddSeconds(3), out var sameGroupId, out _);
 
         Assert.Equal(AcceptResult.Joined, status);
         Assert.Equal(groupId, sameGroupId);
@@ -77,7 +77,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        Assert.Equal(AcceptResult.Joined, r.Accept(K("B"), null, T0.AddSeconds(1), out _));
+        Assert.Equal(AcceptResult.Joined, r.Accept(K("B"), null, T0.AddSeconds(1), out _, out _));
     }
 
     [Fact]
@@ -87,13 +87,13 @@ public class GroupRegistryTests
         r.Invite(K("A"), K("X"), T0);
         r.Invite(K("B"), K("X"), T0);
 
-        Assert.Equal(AcceptResult.AmbiguousMustSpecify, r.Accept(K("X"), null, T0.AddSeconds(1), out _));
+        Assert.Equal(AcceptResult.AmbiguousMustSpecify, r.Accept(K("X"), null, T0.AddSeconds(1), out _, out _));
     }
 
     [Fact]
     public void Accept_no_pending_returns_NoPendingInvite()
     {
-        Assert.Equal(AcceptResult.NoPendingInvite, Reg().Accept(K("A"), null, T0, out _));
+        Assert.Equal(AcceptResult.NoPendingInvite, Reg().Accept(K("A"), null, T0, out _, out _));
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        Assert.Equal(AcceptResult.NoSuchInvite, r.Accept(K("B"), K("A"), T0.AddSeconds(20), out _));
+        Assert.Equal(AcceptResult.NoSuchInvite, r.Accept(K("B"), K("A"), T0.AddSeconds(20), out _, out _));
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class GroupRegistryTests
         r.Invite(K("A"), K("X"), T0);
         r.Invite(K("B"), K("X"), T0);
 
-        r.Accept(K("X"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("X"), K("A"), T0.AddSeconds(1), out _, out _);
 
         Assert.Empty(r.PendingFor(K("X"), T0.AddSeconds(2)));
     }
@@ -123,7 +123,7 @@ public class GroupRegistryTests
         r.Invite(K("A"), K("X"), T0);
         r.Invite(K("B"), K("X"), T0);
 
-        Assert.Equal(DeclineResult.Declined, r.Decline(K("X"), K("A"), T0.AddSeconds(1)));
+        Assert.Equal(DeclineResult.Declined, r.Decline(K("X"), K("A"), T0.AddSeconds(1), out _));
         Assert.Single(r.PendingFor(K("X"), T0.AddSeconds(2)));
     }
 
@@ -132,7 +132,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("X"), T0);
-        Assert.Equal(DeclineResult.Declined, r.Decline(K("X"), null, T0.AddSeconds(1)));
+        Assert.Equal(DeclineResult.Declined, r.Decline(K("X"), null, T0.AddSeconds(1), out _));
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class GroupRegistryTests
         var r = Reg();
         r.Invite(K("A"), K("X"), T0);
         r.Invite(K("B"), K("X"), T0);
-        Assert.Equal(DeclineResult.AmbiguousMustSpecify, r.Decline(K("X"), null, T0.AddSeconds(1)));
+        Assert.Equal(DeclineResult.AmbiguousMustSpecify, r.Decline(K("X"), null, T0.AddSeconds(1), out _));
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId, out _);
 
         Assert.True(r.Leave(K("A"), out var outcome));
 
@@ -166,9 +166,9 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
         r.Invite(K("A"), K("C"), T0.AddSeconds(2));
-        r.Accept(K("C"), K("A"), T0.AddSeconds(3), out var groupId);
+        r.Accept(K("C"), K("A"), T0.AddSeconds(3), out var groupId, out _);
 
         Assert.True(r.Leave(K("C"), out var outcome));
 
@@ -194,7 +194,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId, out _);
 
         Assert.Equal(GroupMode.Open, r.ModeOf(groupId));
         Assert.Equal(K("A"), r.LeaderOf(groupId));   // leader field tracked for promotion-on-close
@@ -205,7 +205,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
 
         // B (non-leader) can invite C while the party is Open.
         Assert.Equal(InviteResult.Sent, r.Invite(K("B"), K("C"), T0.AddSeconds(2)));
@@ -216,7 +216,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId, out _);
 
         Assert.Equal(SetModeResult.Changed, r.SetMode(K("B"), GroupMode.Closed));
         Assert.Equal(GroupMode.Closed, r.ModeOf(groupId));
@@ -228,7 +228,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
 
         Assert.Equal(SetModeResult.Unchanged, r.SetMode(K("A"), GroupMode.Open));
     }
@@ -238,7 +238,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
         r.SetMode(K("A"), GroupMode.Closed);   // A becomes leader
 
         Assert.Equal(SetModeResult.NotLeader, r.SetMode(K("B"), GroupMode.Open));
@@ -256,7 +256,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
         r.SetMode(K("A"), GroupMode.Closed);   // A is leader
 
         Assert.Equal(InviteResult.NotLeader, r.Invite(K("B"), K("C"), T0.AddSeconds(2)));
@@ -268,9 +268,9 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId, out _);
         r.Invite(K("A"), K("C"), T0.AddSeconds(2));
-        r.Accept(K("C"), K("A"), T0.AddSeconds(3), out _);
+        r.Accept(K("C"), K("A"), T0.AddSeconds(3), out _, out _);
         r.SetMode(K("A"), GroupMode.Closed);
 
         Assert.True(r.Leave(K("A"), out var outcome));
@@ -290,9 +290,9 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var groupId, out _);
         r.Invite(K("A"), K("C"), T0.AddSeconds(2));
-        r.Accept(K("C"), K("A"), T0.AddSeconds(3), out _);
+        r.Accept(K("C"), K("A"), T0.AddSeconds(3), out _, out _);
         r.SetMode(K("A"), GroupMode.Closed);
 
         Assert.True(r.Leave(K("C"), out var outcome));
@@ -327,7 +327,7 @@ public class GroupRegistryTests
     {
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out _, out _);
         Assert.Equal(InviteResult.InviteeBusy, r.Invite(K("C"), K("A"), T0.AddSeconds(2)));
     }
 
@@ -338,12 +338,12 @@ public class GroupRegistryTests
         // cross-arena invitation sneaks through, the second Accept is rejected.
         var r = Reg();
         r.Invite(K("A"), K("B"), T0);
-        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var firstGroup);
+        r.Accept(K("B"), K("A"), T0.AddSeconds(1), out var firstGroup, out _);
 
         // C tries to invite B into a different group. Invite alone is rejected as InviteeBusy
         // (B is in firstGroup); even if it landed somehow, Accept would still refuse.
         Assert.Equal(InviteResult.InviteeBusy, r.Invite(K("C"), K("B"), T0.AddSeconds(2)));
-        Assert.Equal(AcceptResult.AlreadyInGroup, r.Accept(K("B"), K("C"), T0.AddSeconds(3), out _));
+        Assert.Equal(AcceptResult.AlreadyInGroup, r.Accept(K("B"), K("C"), T0.AddSeconds(3), out _, out _));
         Assert.Equal(firstGroup, r.GroupOf(K("B")));
     }
 }
