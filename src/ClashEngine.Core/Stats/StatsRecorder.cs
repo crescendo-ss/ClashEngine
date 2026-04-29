@@ -393,17 +393,15 @@ public sealed class StatsRecorder
         _pendingDeathTick.Remove(player);
     }
 
-    /// <summary>Match ended. Closes any open life on every registered player and rolls each
-    /// player's remaining inventory into their wasted-items tally. Players who were knocked out
-    /// or already departed have empty inventory at this point, so the snapshot is a no-op for
-    /// them; only survivors contribute their final-life leftover.</summary>
+    /// <summary>Match ended. Closes any open life on every registered player. Wasted-items are
+    /// only tallied at death/elimination -- survivors hanging onto items at the buzzer don't
+    /// have those items folded into their wasted-items count, since "wasted" is meant to
+    /// quantify items the player took to the grave on a prior life, not the final-life
+    /// leftover from a match they actually survived.</summary>
     public void OnMatchEnded(uint atTick)
     {
         foreach (var stats in _stats.Values)
-        {
-            stats.SnapshotInventoryAsWasted();
             stats.CloseLife(atTick, LifeEndReason.MatchEnded, knockoutBy: null);
-        }
     }
 
     /// <summary>

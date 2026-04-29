@@ -48,6 +48,7 @@ public sealed class MatchKillRouter
     private readonly IClock _clock;
     private readonly ILogManager _log;
     private readonly ClashLog _verbose;
+    private readonly List<(string Name, ReaderDelegate Handler)> _preEngineReaders = new();
     private readonly List<(string Name, ReaderDelegate Handler)> _readers = new();
     private bool _registered;
 
@@ -74,6 +75,20 @@ public sealed class MatchKillRouter
         ArgumentException.ThrowIfNullOrEmpty(readerName);
         ArgumentNullException.ThrowIfNull(handler);
         _readers.Add((readerName, handler));
+    }
+
+    /// <summary>
+    /// Add a pre-state-update kill reader -- runs <em>before</em> <c>engine.OnKill</c>. Use this
+    /// for consumers (notably stats recording) that must observe the kill even when it's the
+    /// match-ending one: <c>engine.OnKill</c> can synchronously trigger <c>FinalizeMatch</c>,
+    /// which fires <c>OnMatchEnded</c> and tears down per-match state. A post-engine reader
+    /// would see that teardown and silently drop the final kill.
+    /// </summary>
+    public void AddPreEngineReader(string readerName, ReaderDelegate handler)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(readerName);
+        ArgumentNullException.ThrowIfNull(handler);
+        _preEngineReaders.Add((readerName, handler));
     }
 
     public void Register()
@@ -110,6 +125,19 @@ public sealed class MatchKillRouter
 
         if (_verbose.IsTrace)
             _verbose.Trace(LogCategory, $"Kill {killerKey.Name} -> {killedKey.Name} (bounty={bounty}, flags={flagCount}, points={points})");
+
+        // Phase 0: pre-engine readers. Stats recording lives here so the final kill of a match
+        // is captured before engine.OnKill synchronously tears the match down via FinalizeMatch.
+        for (int i = 0; i < _preEngineReaders.Count; i++)
+        {
+            var (name, handler) = _preEngineReaders[i];
+            try { handler(arena, killer, killed, bounty, flagCount, points, green); }
+            catch (Exception ex)
+            {
+                _log.LogM(LogLevel.Error, LogCategory,
+                    $"Pre-engine kill reader '{name}' threw for {killerKey.Name} -> {killedKey.Name}: {ex}");
+            }
+        }
 
         try
         {

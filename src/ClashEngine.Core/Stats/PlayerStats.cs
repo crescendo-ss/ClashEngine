@@ -88,11 +88,13 @@ public sealed class PlayerStats
     public IReadOnlyDictionary<ItemKind, int> ItemUses => _itemUses;
 
     /// <summary>
-    /// Items the player gained but never used over the entire match. Each closed life contributes
-    /// its leftover inventory (initial loadout + green pickups − uses) at close-time; over a
-    /// multi-life match the totals accumulate. Populated automatically by the recorder via
-    /// <see cref="SnapshotInventoryAsWasted"/>; may also be set externally via
-    /// <see cref="SetWastedItem"/>.
+    /// Items the player took to the grave on closed-out lives -- initial loadout + green pickups
+    /// − uses, snapshotted at each death (or other elimination event). Survivors who reach
+    /// match-end with items still in hand do not have those items folded in here, since the
+    /// "wasted" measure is meant to quantify items that were spent without being used in the
+    /// course of dying, not leftover stockpile from a life the player kept. Populated
+    /// automatically by the recorder via <see cref="SnapshotInventoryAsWasted"/>; may also be
+    /// set externally via <see cref="SetWastedItem"/>.
     /// </summary>
     public IReadOnlyDictionary<ItemKind, int> WastedItems => _wastedItems;
 
@@ -203,9 +205,10 @@ public sealed class PlayerStats
     }
 
     /// <summary>Accumulate the current life's leftover inventory into <see cref="WastedItems"/>
-    /// and clear the live inventory. Called at every life-close (any death, leave, match end)
-    /// so multi-life matches sum unused items across all lives. Calling twice in a row with no
-    /// pickups in between is a no-op since the second call sees an empty inventory.</summary>
+    /// and clear the live inventory. Called at death/leave -- not at match-end -- since the
+    /// "wasted" tally counts items the player carried into a death, not the surviving-final-life
+    /// stockpile. Multi-life matches sum the leftover from each closed life. Calling twice in a
+    /// row with no pickups in between is a no-op since the second call sees an empty inventory.</summary>
     internal void SnapshotInventoryAsWasted()
     {
         if (_inventory.Count == 0) return;

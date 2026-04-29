@@ -345,8 +345,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // structural rather than positional. Recorder uses its own KillCallback subscription
         // because replay encoding is independent of engine state.
         _killRouter = new MatchKillRouter(broker, _engine, _resolver, _clock, _log, _clashLog);
+        // StatsListener is a pre-engine reader: the final kill of a match must be recorded
+        // before engine.OnKill triggers OnMatchEnded, which tears down the recorder before
+        // post-engine readers run.
+        _killRouter.AddPreEngineReader(nameof(StatsListener), _statsListener.OnKill);
         _killRouter.AddReader(nameof(MatchOrchestratorRegistry), _orchestrators.OnKill);
-        _killRouter.AddReader(nameof(StatsListener), _statsListener.OnKill);
         _killRouter.AddReader(nameof(MatchLvzAdapter), _lvzAdapter.OnKill);
         _killRouter.AddReader(nameof(MatchFreqAdvisor), _freqAdvisor.OnKill);
         _killRouter.Register();

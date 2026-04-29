@@ -146,8 +146,10 @@ public static class ScoreboardFormatter
 
         long dealt = ps.DamageDealt, taken = ps.DamageTaken;
         string dmgE = FormatPercent(dealt + taken == 0 ? -1 : (double)dealt / (dealt + taken));
-        string acb = FormatPercent(bul.Fire == 0 ? -1 : (double)bul.Hit / bul.Fire);
-        string acg = FormatPercent(bom.Fire == 0 ? -1 : (double)bom.Hit / bom.Fire);
+        // AcB = bomb accuracy, AcG = gun (bullet) accuracy. Keep these mapped to the
+        // corresponding weapon's fire/hit counters or the column header lies.
+        string acb = FormatPercent(bom.Fire == 0 ? -1 : (double)bom.Hit / bom.Fire);
+        string acg = FormatPercent(bul.Fire == 0 ? -1 : (double)bul.Hit / bul.Fire);
         (string delta, string rat) = FormatRatingCells(ps, postOrdinal);
 
         var leftValues = new[]
@@ -181,8 +183,8 @@ public static class ScoreboardFormatter
     {
         string kide = $"{t.Kills,2}/{t.Deaths,2}";
         string dmgE = FormatPercent(t.Dealt + t.Taken == 0 ? -1 : (double)t.Dealt / (t.Dealt + t.Taken));
-        string acb = FormatPercent(t.BulFire == 0 ? -1 : (double)t.BulHit / t.BulFire);
-        string acg = FormatPercent(t.BomFire == 0 ? -1 : (double)t.BomHit / t.BomFire);
+        string acb = FormatPercent(t.BomFire == 0 ? -1 : (double)t.BomHit / t.BomFire);
+        string acg = FormatPercent(t.BulFire == 0 ? -1 : (double)t.BulHit / t.BulFire);
         int activeSeconds = (int)(t.ActiveTicks / TicksPerSecond);
         int weps = activeSeconds <= 0 ? 0 : RoundToInt((double)t.Energy / activeSeconds);
         string de = t.DistanceSampleCount == 0 ? Dash
@@ -227,13 +229,15 @@ public static class ScoreboardFormatter
         chars[0] = '+';
         chars[width - 1] = '+';
 
-        // Section break corners line up with " | " separators between sections.
+        // Section break corners line up with the '|' separator between sections. A closed
+        // section opens with " |", so the '|' itself sits one position past the previous
+        // section's end -- hence the +1 to land the '+' on the bar instead of the leading space.
         int afterLeft = SectionEndIndex(LeftCols, openSection: true);
         int afterDmg = afterLeft + SectionEndIndex(DamageCols, openSection: false);
         int afterAcc = afterDmg + SectionEndIndex(AccuracyCols, openSection: false);
-        if (afterLeft < width) chars[afterLeft] = '+';
-        if (afterDmg < width) chars[afterDmg] = '+';
-        if (afterAcc < width) chars[afterAcc] = '+';
+        if (afterLeft + 1 < width) chars[afterLeft + 1] = '+';
+        if (afterDmg + 1 < width) chars[afterDmg + 1] = '+';
+        if (afterAcc + 1 < width) chars[afterAcc + 1] = '+';
         return new string(chars);
     }
 

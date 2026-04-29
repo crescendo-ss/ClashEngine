@@ -153,8 +153,13 @@ public sealed class StatsListener
         recorder.OnSpawn(pkey, (uint)ServerTick.Now);
     }
 
-    /// <summary>Called by <see cref="ClashEngine.Events.MatchKillRouter"/> after the engine has
-    /// updated <c>LivesRemaining</c>; we can read knockout state directly off the match.</summary>
+    /// <summary>Called by <see cref="ClashEngine.Events.MatchKillRouter"/> as a pre-engine
+    /// reader -- runs <em>before</em> <c>engine.OnKill</c>. This ordering is required because
+    /// <c>engine.OnKill</c> can synchronously finalize the match (firing <c>OnMatchEnded</c>,
+    /// which tears down the recorder); recording the kill afterward would silently drop the
+    /// match-ending death. As a consequence, <c>LivesRemaining</c>/<c>ExitedAt</c> still hold
+    /// the pre-kill state when we read them, so knockout detection has to predict from
+    /// remaining lives.</summary>
     public void OnKill(Arena arena, Player killer, Player killed, short bounty, short flagCount, short points, Prize green)
     {
         if (_resolver.KeyOf(killer) is not PlayerKey kkey) return;
@@ -180,13 +185,21 @@ public sealed class StatsListener
         }
     }
 
+    /// <summary>
+    /// Predicts whether the in-flight kill will be the eliminating one. Runs pre-engine, so
+    /// <c>LivesRemaining</c> still holds the count <em>before</em> this death is applied --
+    /// a value of 0 (LivesPerPlayer == 1, no respawns) or 1 means the engine is about to
+    /// decrement to 0 and set <c>ExitedAt</c>. Returns <c>false</c> for unlimited-lives matches.
+    /// </summary>
     private bool IsKnockout(PlayerKey victim)
     {
         var matchId = _registry.MatchIdOf(victim);
         if (matchId is null) return false;
         if (!_engine.ActiveMatches.TryGetValue(matchId.Value, out var match)) return false;
         if (match.LivesPerPlayer is null) return false;
-        return match.ExitedAt.ContainsKey(victim);
+        if (match.ExitedAt.ContainsKey(victim)) return true;
+        if (!match.LivesRemaining.TryGetValue(victim, out var lives)) return false;
+        return lives <= 1;
     }
 
     /// <summary>

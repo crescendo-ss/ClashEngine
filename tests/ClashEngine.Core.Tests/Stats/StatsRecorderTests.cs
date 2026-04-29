@@ -546,7 +546,7 @@ public class StatsRecorderTests
     }
 
     [Fact]
-    public void OnMatchEnded_snapshots_survivors_final_life_without_double_counting_prior_lives()
+    public void OnMatchEnded_does_not_snapshot_survivors_final_life_inventory()
     {
         var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
         var energy = SimpleEnergy();
@@ -555,21 +555,22 @@ public class StatsRecorderTests
         r.OnSpawn(K("A"), 10);
         r.OnSpawn(K("B"), 10);
 
-        // A is knocked out with 3 repels still held -- already accumulated into wasted.
+        // A is knocked out with 3 repels still held -- accumulated into wasted at the elimination.
         r.OnKill(victim: K("A"), killer: K("B"), atTick: 30, isKnockout: true);
         Assert.Equal(3, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
 
-        // B uses 2 repels and survives; match ends with B holding 1 burst.
+        // B uses 2 repels and survives the match holding 1 burst.
         r.OnItemUsed(K("B"), ItemKind.Repel, 50);
         r.OnItemUsed(K("B"), ItemKind.Repel, 60);
         r.OnMatchEnded(atTick: 100);
 
-        // B's surviving inventory accumulated at match-end: 0 repels, 1 burst.
+        // Wasted-items count only the items unused at time of death/elimination -- a player who
+        // survives to the buzzer takes their leftover inventory home and does not accrue wasted
+        // counts for it.
         Assert.False(r.Stats[K("B")].WastedItems.ContainsKey(ItemKind.Repel));
-        Assert.Equal(1, r.Stats[K("B")].WastedItems[ItemKind.Burst]);
+        Assert.False(r.Stats[K("B")].WastedItems.ContainsKey(ItemKind.Burst));
 
-        // A's tally is unchanged at match-end -- their inventory was cleared by the knockout
-        // snapshot, so the match-end pass adds nothing.
+        // A's tally is unchanged at match-end.
         Assert.Equal(3, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
     }
 
