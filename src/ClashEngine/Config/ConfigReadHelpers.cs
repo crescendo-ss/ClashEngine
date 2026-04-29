@@ -36,9 +36,12 @@ internal static class ConfigReadHelpers
     {
         var s = config.GetStr(config.Global, ConfigConstants.Section, key);
         if (string.IsNullOrWhiteSpace(s)) return null;
-        if (TimeSpan.TryParse(s, CultureInfo.InvariantCulture, out var ts)) return ts;
+        // A bare integer means seconds (per the documented config format). Check this before
+        // TimeSpan.TryParse, which would otherwise interpret "15" as 15 *days* (its colon-less
+        // shorthand for d.HH:MM:SS).
         if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds))
             return TimeSpan.FromSeconds(seconds);
+        if (TimeSpan.TryParse(s, CultureInfo.InvariantCulture, out var ts)) return ts;
         log?.Warn(ConfigConstants.LogCategory,
             $"{contextPrefix}: could not parse '{s}' for {key} as HH:MM:SS or seconds; using default.");
         return null;
