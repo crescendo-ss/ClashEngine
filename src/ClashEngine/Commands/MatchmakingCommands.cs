@@ -302,13 +302,18 @@ public sealed class MatchmakingCommands
 
     private void ShowQueueDetail(Player player, QueueDefinition def, DateTimeOffset now)
     {
+        // Render the suffixed name as "<base> (<tier>)" -- e.g. "4v4_competitive" -> "4v4 (competitive)" --
+        // so a ?queue 4v4 lookup that resolves to two rows reads as the same base with parenthesized tiers.
+        var (baseName, suffix) = SplitTierSuffix(def.Name);
+        string display = suffix is null ? def.Name : $"{baseName} ({suffix})";
+
         var snap = def.Queue.Snapshot();
         if (snap.Count == 0)
         {
-            _chat.SendMessage(player, $"{def.Name}: empty.");
+            _chat.SendMessage(player, $"{display}: empty.");
             return;
         }
-        _chat.SendMessage(player, $"{def.Name}: {snap.Count} player(s) waiting.");
+        _chat.SendMessage(player, $"{display}: {snap.Count} player(s) waiting.");
         for (int i = 0; i < snap.Count; i++)
         {
             var entry = snap[i];
