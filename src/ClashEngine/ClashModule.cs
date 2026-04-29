@@ -215,8 +215,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
 
         _persistPenalties = new PersistPenaltyStore(_engine.Penalties);
 
+        // Recipient-resolution helper that adds spectators-in-focus to participant broadcasts so
+        // staging / countdown / cleanup / collapse messages reach watchers as well.
+        var matchAudience = new MatchAudience(broker, _playerData, _arenaManager, _chat);
+
         _orchestrators = new MatchOrchestratorRegistry(
-            broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog);
+            broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
+            matchAudience);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 

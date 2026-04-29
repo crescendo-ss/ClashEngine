@@ -36,6 +36,7 @@ public sealed class MatchOrchestrator
     private readonly ILogManager _log;
     private readonly PlayerKeyResolver _resolver;
     private readonly ClashLog _verbose;
+    private readonly MatchAudience? _audience;
 
     /// <summary>Staging-phase idle detection (per-player).</summary>
     private readonly IdleStateTracker _idleTracker = new();
@@ -72,6 +73,7 @@ public sealed class MatchOrchestrator
         ILogManager log,
         PlayerKeyResolver resolver,
         ClashLog verbose,
+        MatchAudience? audience = null,
         IRandomSource? rng = null)
     {
         _matchId = matchId;
@@ -86,6 +88,7 @@ public sealed class MatchOrchestrator
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _verbose = verbose ?? throw new ArgumentNullException(nameof(verbose));
+        _audience = audience;
         _rng = rng ?? DefaultRandomSource.Instance;
         _drift = new SpawnDriftEnforcer(_queue, _proposal);
 
@@ -168,11 +171,8 @@ public sealed class MatchOrchestrator
         // One-shot timer: SS mainloop rejects interval=0 (must be > 0 or Timeout.Infinite).
         _timer.SetTimer(OnStagingEnd, (int)_queue.StagingDuration.TotalMilliseconds, Timeout.Infinite, this);
 
-        for (int t = 0; t < _proposal.Teams.Count; t++)
-            for (int j = 0; j < _proposal.Teams[t].Count; j++)
-                if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
-                    _chat.SendMessage(p,
-                        $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. Spec to abandon.");
+        BroadcastToAll(
+            $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. Spec to abandon.");
     }
 
     /// <summary>
@@ -273,17 +273,27 @@ public sealed class MatchOrchestrator
             if (afk.Count > 0)
             {
                 string afkNames = string.Join(", ", afk.Select(k => k.Name));
+                // The AFK-specific line is a personal "you were flagged" notice, so we send it
+                // directly to the affected participants only -- spectators don't need it.
                 for (int i = 0; i < afk.Count; i++)
                     if (_resolver.Resolve(afk[i]) is { } p)
                         _chat.SendMessage(p, "You were flagged as AFK and the match was cancelled.");
+
+                // Match-cancellation announcement for everyone else (participants and watching
+                // spectators), excluding the AFK players who already got their own version.
+                var notAfkParticipants = new List<Player>();
                 for (int t = 0; t < _proposal.Teams.Count; t++)
                     for (int j = 0; j < _proposal.Teams[t].Count; j++)
                     {
                         var k = _proposal.Teams[t][j];
                         if (afk.Contains(k)) continue;
-                        if (_resolver.Resolve(k) is { } p)
-                            _chat.SendMessage(p, $"Match cancelled. {afkNames} did not ready.");
+                        if (_resolver.Resolve(k) is { } p) notAfkParticipants.Add(p);
                     }
+                string cancelMessage = $"Match cancelled. {afkNames} did not ready.";
+                if (_audience is not null)
+                    _audience.Broadcast(_matchId, _queue.MatchArenaName, notAfkParticipants, cancelMessage);
+                else
+                    foreach (var p in notAfkParticipants) _chat.SendMessage(p, cancelMessage);
 
                 _engine.CancelMatchAsAfk(_matchId, afk, _clock.UtcNow);
                 // Cleanup is invoked by the registry's OnMatchEnded handler.
@@ -320,13 +330,16 @@ public sealed class MatchOrchestrator
         _timer.ClearTimer<PlayerKey>(OnDeferredKnockoutSpec, this);
         _pendingKnockoutSpec.Clear();
 
+        // Broadcast the summary to everyone (participants + focused spectators) before
+        // returning the participants to spec so watchers learn the outcome too.
+        BroadcastToAll(summary);
+
         for (int t = 0; t < _proposal.Teams.Count; t++)
         {
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
                 if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
                 {
-                    _chat.SendMessage(p, summary);
                     _game.Unlock(p, notify: false);
                     _game.SetShip(p, ShipType.Spec);
                 }
@@ -433,12 +446,11 @@ public sealed class MatchOrchestrator
                 for (int j = 0; j < _proposal.Teams[t].Count; j++)
                 {
                     if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
-                    {
                         _game.Unlock(p, notify: false);
-                        _chat.SendMessage(p, "GO!");
-                    }
                 }
             }
+            // The "GO!" announcement reaches participants and focused spectators alike.
+            BroadcastToAll("GO!");
         }
         catch (Exception ex)
         {
@@ -448,13 +460,27 @@ public sealed class MatchOrchestrator
         return false;
     }
 
-    /// <summary>Sends <paramref name="message"/> to every resolvable participant.</summary>
+    /// <summary>Sends <paramref name="message"/> to every resolvable participant and to any
+    /// spectator currently focused on this match (per <c>IMatchFocus</c>).</summary>
     private void BroadcastToAll(string message)
     {
+        var participants = ResolveParticipants();
+        if (_audience is null)
+        {
+            foreach (var p in participants) _chat.SendMessage(p, message);
+            return;
+        }
+        _audience.Broadcast(_matchId, _queue.MatchArenaName, participants, message);
+    }
+
+    private List<Player> ResolveParticipants()
+    {
+        var list = new List<Player>(_proposal.Teams.Count * 2);
         for (int t = 0; t < _proposal.Teams.Count; t++)
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
                 if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
-                    _chat.SendMessage(p, message);
+                    list.Add(p);
+        return list;
     }
 
     /// <summary>

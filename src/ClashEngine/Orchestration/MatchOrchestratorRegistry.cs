@@ -33,6 +33,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     private readonly ILogManager _log;
     private readonly PlayerKeyResolver _resolver;
     private readonly ClashLog _verbose;
+    private readonly MatchAudience? _audience;
     private bool _registeredCallback;
 
     public MatchOrchestratorRegistry(
@@ -45,7 +46,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         IClock clock,
         ILogManager log,
         PlayerKeyResolver resolver,
-        ClashLog verbose)
+        ClashLog verbose,
+        MatchAudience? audience = null)
     {
         _broker = broker;
         _engine = engine;
@@ -57,6 +59,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         _log = log;
         _resolver = resolver;
         _verbose = verbose ?? throw new ArgumentNullException(nameof(verbose));
+        _audience = audience;
     }
 
     public void Register()
@@ -83,7 +86,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         if (matchId == Guid.Empty) return;
 
         var orchestrator = new MatchOrchestrator(
-            matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log, _resolver, _verbose);
+            matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log,
+            _resolver, _verbose, _audience);
         _orchestrators[matchId] = orchestrator;
 
         // Track players for position-packet routing during staging.
