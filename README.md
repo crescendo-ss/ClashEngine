@@ -141,7 +141,7 @@ cmd_helpclash
 | `GameType<i>PlayersPerTeam` | int ≥ 1 | 4 | Players per team. |
 | `GameType<i>KillTarget` | int ≥ 0 | 30 (when nothing else set) | Per-team kills required to win. `0` = unset (use `TimeLimit` instead). |
 | `GameType<i>TimeLimit` | `HH:MM:SS` | (unset) | Leader at this elapsed time wins. A tie at the limit triggers unlimited sudden-death overtime — next kill that breaks the tie wins. |
-| `GameType<i>Lives` | int ≥ 0 | 0 = unlimited | Elimination matches: each player has this many lives; a player at 0 lives is eliminated and released from the match-roster (cooldown applies). |
+| `GameType<i>Lives` | int ≥ 0 | 0 = unlimited | Elimination matches: each player gets this many lives total, counting the initial spawn (so `Lives - 1` respawns). A player whose last life ends is eliminated and released from the match-roster (cooldown applies). |
 | `GameType<i>TeamCollapseGrace` | seconds or `HH:MM:SS` | `10` | How long an entire team can be without any Active or Pending players before forfeiting. Distinct from per-player grace; a team-wide simultaneous drop gets this window to recover before the surviving teams take a forfeit win. |
 | `GameType<i>ShipChangeGracePeriod` | seconds or `HH:MM:SS` | `10` | After a non-fatal death, the player has this long to change ships before being re-locked to whatever ship they're currently in for the rest of the life. Mid-life ship changes are otherwise forbidden because each ship transition refreshes Continuum item counts. Freq (team) changes are blocked outright for match participants regardless of this value. Set to `0` to forbid every in-match ship change. Knockouts (last life) don't open this window — the orchestrator's `KnockoutSpecDelay` handles that path. |
 

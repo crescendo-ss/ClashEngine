@@ -351,7 +351,7 @@ public sealed class MatchOrchestrator
         if (Phase is MatchPhase.Cleanup) return;
         if (!_engine.ActiveMatches.TryGetValue(_matchId, out var match)) return;
         if (!match.LivesPerPlayer.HasValue) return;
-        if (!match.LivesRemaining.TryGetValue(victim, out var lives) || lives != 0) return;
+        if (!match.ExitedAt.ContainsKey(victim)) return;
 
         // KillCallback fires once per kill, but defensively guard against repeats (e.g. the kill
         // packet replayed by some other path). Already-pending spec? leave the timer alone.

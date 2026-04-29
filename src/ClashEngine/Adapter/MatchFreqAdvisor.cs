@@ -263,8 +263,8 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         foreach (var (_, match) in _engine.ActiveMatches)
         {
             if (match.LivesPerPlayer is null) continue;
-            if (match.LivesRemaining.TryGetValue(victim, out var lives))
-                return lives == 0;
+            if (match.LivesRemaining.ContainsKey(victim))
+                return match.ExitedAt.ContainsKey(victim);
         }
         return false;
     }

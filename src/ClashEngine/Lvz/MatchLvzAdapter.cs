@@ -293,8 +293,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
             if (ssArena is null) return;
 
             bool isKnockout = matchData.Match.LivesPerPlayer.HasValue
-                && matchData.Match.LivesRemaining.TryGetValue(killedKey, out var lives)
-                && lives == 0;
+                && matchData.Match.ExitedAt.ContainsKey(killedKey);
 
             TeamVersusMatchPlayerKilledCallback.Fire(ssArena, killedSlot, killerSlot, isKnockout);
             // Stats are read live off the slots themselves (ClashPlayerSlot implements

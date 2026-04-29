@@ -75,7 +75,10 @@ public sealed class ActiveMatch
                     throw new ArgumentException($"Player {p} appears in multiple teams.", nameof(teams));
                 _teamOf[p] = t;
                 _status[p] = PlayerStatus.Pending;
-                if (livesPerPlayer.HasValue) _livesRemaining[p] = livesPerPlayer.Value;
+                // "Lives = N" means N spawns total (the initial spawn + N-1 respawns), so the
+                // counter tracks remaining respawns -- it starts at N-1 and a death decrements it,
+                // hitting 0 on the death that closes the player's last life.
+                if (livesPerPlayer.HasValue) _livesRemaining[p] = livesPerPlayer.Value - 1;
             }
         }
     }
@@ -98,7 +101,9 @@ public sealed class ActiveMatch
     public TimeSpan TeamCollapseGrace { get; }
 
     /// <summary>
-    /// Lives each player starts with. <see langword="null"/> = unlimited (no exit-time tracking).
+    /// Lives each player gets in the match: the initial spawn plus this-many-minus-one respawns,
+    /// so a player at <see cref="LivesRemaining"/> 0 just used their last life.
+    /// <see langword="null"/> = unlimited (no exit-time tracking).
     /// </summary>
     public int? LivesPerPlayer { get; }
 
@@ -277,9 +282,9 @@ public sealed class ActiveMatch
     /// </summary>
     private bool IsAbandonmentCandidateAt(PlayerKey player)
     {
-        if (LivesPerPlayer.HasValue
-            && _livesRemaining.TryGetValue(player, out var myLives)
-            && myLives == 0)
+        // A player on their last life still has 0 remaining respawns -- "exhausted" is the
+        // ExitedAt marker, set the moment the eliminating death lands.
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player))
             return false;
 
         if (!_teamOf.TryGetValue(player, out var teamIdx)) return false;
@@ -298,9 +303,7 @@ public sealed class ActiveMatch
     {
         if (!_status.TryGetValue(player, out var s)) return false;
         if (s == PlayerStatus.Abandoned) return false;
-        if (LivesPerPlayer.HasValue
-            && _livesRemaining.TryGetValue(player, out var lives)
-            && lives == 0)
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player))
             return false;
         return true;
     }
@@ -369,11 +372,12 @@ public sealed class ActiveMatch
         _killsByTeam[killerTeam]++;
 
         // Decrement victim's lives (if lives are configured) and record exit time on zero.
+        // The counter is remaining respawns, so it can already be 0 here when LivesPerPlayer = 1
+        // (no respawns ever) -- the first death is still the eliminating one and needs ExitedAt.
         if (LivesPerPlayer.HasValue
-            && _livesRemaining.TryGetValue(victim, out var lives)
-            && lives > 0)
+            && _livesRemaining.TryGetValue(victim, out var lives))
         {
-            int newLives = lives - 1;
+            int newLives = lives > 0 ? lives - 1 : 0;
             _livesRemaining[victim] = newLives;
             if (newLives == 0 && !_exitedAt.ContainsKey(victim))
                 _exitedAt[victim] = at;
@@ -465,10 +469,7 @@ public sealed class ActiveMatch
             var p = team[j];
             var s = _status[p];
             if (s != PlayerStatus.Active && s != PlayerStatus.Pending) continue;
-            if (LivesPerPlayer.HasValue
-                && _livesRemaining.TryGetValue(p, out var lives)
-                && lives == 0)
-                continue;
+            if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(p)) continue;
             return true;
         }
         return false;
@@ -498,10 +499,7 @@ public sealed class ActiveMatch
         {
             var p = team[j];
             if (_status[p] != PlayerStatus.InGrace) continue;
-            if (LivesPerPlayer.HasValue
-                && _livesRemaining.TryGetValue(p, out var lives)
-                && lives == 0)
-                continue;
+            if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(p)) continue;
             return true;
         }
         return false;

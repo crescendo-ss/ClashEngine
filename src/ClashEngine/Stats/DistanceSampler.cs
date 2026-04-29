@@ -160,9 +160,7 @@ public sealed class DistanceSampler
         if (player.Status != PlayerState.Playing) return false;
         if (!match.Statuses.TryGetValue(key, out var status)) return false;
         if (status != PlayerStatus.Active) return false;
-        if (match.LivesPerPlayer.HasValue
-            && match.LivesRemaining.TryGetValue(key, out var lives)
-            && lives == 0)
+        if (match.LivesPerPlayer.HasValue && match.ExitedAt.ContainsKey(key))
             return false;
         return true;
     }

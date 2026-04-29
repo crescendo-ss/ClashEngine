@@ -168,12 +168,11 @@ public sealed class MatchmakingEngine
         m.OnKill(killer, victim, at);
         DiffCollapsedAndEmit(m, prevCollapsed);
 
-        // If the kill just eliminated the victim (lives = 0), release them from the match-roster
-        // so they can queue elsewhere after a brief cooldown. They stay rostered in the
-        // ActiveMatch for end-of-match rating purposes.
+        // If the kill just eliminated the victim (ExitedAt set), release them from the
+        // match-roster so they can queue elsewhere after a brief cooldown. They stay rostered
+        // in the ActiveMatch for end-of-match rating purposes.
         if (m.LivesPerPlayer.HasValue
-            && m.LivesRemaining.TryGetValue(victim, out var lives)
-            && lives == 0
+            && m.ExitedAt.ContainsKey(victim)
             && _matchOf.TryGetValue(victim, out var stillMappedMatch)
             && stillMappedMatch == killerMatch)
         {

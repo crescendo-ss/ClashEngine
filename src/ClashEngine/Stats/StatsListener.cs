@@ -186,7 +186,7 @@ public sealed class StatsListener
         if (matchId is null) return false;
         if (!_engine.ActiveMatches.TryGetValue(matchId.Value, out var match)) return false;
         if (match.LivesPerPlayer is null) return false;
-        return match.LivesRemaining.TryGetValue(victim, out var lives) && lives == 0;
+        return match.ExitedAt.ContainsKey(victim);
     }
 
     /// <summary>

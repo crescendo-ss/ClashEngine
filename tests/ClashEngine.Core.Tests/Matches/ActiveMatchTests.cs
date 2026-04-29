@@ -175,10 +175,12 @@ public class ActiveMatchTests
     [Fact]
     public void Lives_initialize_at_configured_value_for_every_player()
     {
+        // LivesRemaining counts respawns left, so a Lives=3 player has 2 remaining respawns
+        // beyond the initial spawn.
         var m = BuildMatch(livesPerPlayer: 3);
         foreach (var team in m.Teams)
             foreach (var p in team)
-                Assert.Equal(3, m.LivesRemaining[p]);
+                Assert.Equal(2, m.LivesRemaining[p]);
     }
 
     [Fact]
@@ -187,8 +189,8 @@ public class ActiveMatchTests
         var m = JoinAll(BuildMatch(livesPerPlayer: 3, endPolicy: new KillCountEndPolicy(100)));
         m.OnKill(K("A"), K("C"), T0.AddSeconds(10));
 
-        Assert.Equal(3, m.LivesRemaining[K("A")]);
-        Assert.Equal(2, m.LivesRemaining[K("C")]);
+        Assert.Equal(2, m.LivesRemaining[K("A")]);
+        Assert.Equal(1, m.LivesRemaining[K("C")]);
     }
 
     [Fact]
@@ -197,13 +199,14 @@ public class ActiveMatchTests
         var m = JoinAll(BuildMatch(livesPerPlayer: 3));
         m.OnKill(K("A"), K("B"), T0.AddSeconds(10));
 
-        Assert.Equal(3, m.LivesRemaining[K("B")]);
+        Assert.Equal(2, m.LivesRemaining[K("B")]);
     }
 
     [Fact]
     public void Reaching_zero_lives_records_exit_time()
     {
-        var m = JoinAll(BuildMatch(livesPerPlayer: 2, endPolicy: new KillCountEndPolicy(100)));
+        // Lives=3 -> initial respawns=2 -> two cross-team kills brings the victim to 0.
+        var m = JoinAll(BuildMatch(livesPerPlayer: 3, endPolicy: new KillCountEndPolicy(100)));
 
         m.OnKill(K("A"), K("C"), T0.AddSeconds(10));
         m.OnKill(K("A"), K("C"), T0.AddSeconds(20));
@@ -375,7 +378,7 @@ public class ActiveMatchTests
     {
         // Player A burns through all their lives normally. They didn't "leave" — they died.
         // Should NOT be flagged as an abandoner.
-        var m = JoinAll(BuildMatch(livesPerPlayer: 2, endPolicy: new KillCountEndPolicy(1000)));
+        var m = JoinAll(BuildMatch(livesPerPlayer: 3, endPolicy: new KillCountEndPolicy(1000)));
 
         m.OnKill(K("C"), K("A"), T0.AddSeconds(10));
         m.OnKill(K("C"), K("A"), T0.AddSeconds(20));
