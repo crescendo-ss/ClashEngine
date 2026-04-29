@@ -132,7 +132,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             $"Abandonment: {player.Name} offense#{offenseCount} timeoutUntil={timeoutUntil:HH:mm:ss} (~{Format(remaining)})");
         if (p is null) return;
         _chat.SendMessage(p,
-            $"You abandoned a match (offense #{offenseCount}). Queue-locked for {Format(remaining)}.");
+            $"You abandoned a match (offense #{offenseCount}). Queue-locked for {HumanDuration.Humanize(remaining)}.");
     }
 
     public void OnTeamCollapsing(ActiveMatch match, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)

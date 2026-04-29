@@ -199,10 +199,10 @@ public sealed class MatchmakingCommands
         if (_log.IsDebug)
             _log.Debug(LogCategory, $"?play {k.Name} -> queue '{resolvedName}' result={result}" +
                 (groupId is GroupId gg ? $" (group {gg})" : ""));
-        ReplyForEnqueue(player, resolvedName, result);
+        ReplyForEnqueue(player, k, resolvedName, result);
     }
 
-    private void ReplyForEnqueue(Player player, string queueName, EnqueueResult result)
+    private void ReplyForEnqueue(Player player, PlayerKey key, string queueName, EnqueueResult result)
     {
         var msg = result switch
         {
@@ -210,12 +210,29 @@ public sealed class MatchmakingCommands
             EnqueueResult.UnknownQueue => $"Queue '{queueName}' not found.",
             EnqueueResult.NotConnected => "You aren't connected.",
             EnqueueResult.InMatch => "You're already in a match.",
-            EnqueueResult.InTimeout => "You're serving a queue-timeout penalty.",
+            EnqueueResult.InTimeout => RenderInTimeoutMessage(key),
             EnqueueResult.AlreadyQueued => $"You're already in '{queueName}'.",
             EnqueueResult.GroupTooLarge => $"Your group is too large for '{queueName}'.",
             _ => null,
         };
         if (msg is not null) _chat.SendMessage(player, msg);
+    }
+
+    /// <summary>
+    /// Builds the in-timeout reply with a human-readable remaining duration when the caller
+    /// themselves is in timeout. In the group-enqueue path the caller may not be the offender,
+    /// so falls back to a generic phrase if their own eligibility says they're available.
+    /// </summary>
+    private string RenderInTimeoutMessage(PlayerKey key)
+    {
+        var elig = _engine.CheckEligibility(key);
+        if (elig.Status == Core.Eligibility.EligibilityStatus.InTimeout && elig.TimeoutUntil is { } until)
+        {
+            var remaining = until - _clock.UtcNow;
+            if (remaining > TimeSpan.Zero)
+                return $"You're serving a queue-timeout penalty -- {HumanDuration.Humanize(remaining)} remaining.";
+        }
+        return "You're serving a queue-timeout penalty.";
     }
 
     // ---- ?queue [name]
