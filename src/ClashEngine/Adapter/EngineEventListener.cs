@@ -192,10 +192,17 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             _chat.SendMessage(t, "Your griefing penalty was vetoed by your peers.");
     }
 
-    public void OnGriefingConfirmed(PendingGriefingPenalty pending)
+    public void OnGriefingConfirmed(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil)
     {
         _log.LogM(LogLevel.Info, LogCategory,
             $"Griefing penalty for {pending.Target.Name} confirmed (no veto: {pending.VotesReceived.Count}/{pending.VetoesRequired}).");
+        if (_resolver.Resolve(pending.Target) is { } t)
+        {
+            var remaining = timeoutUntil - DateTimeOffset.UtcNow;
+            if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
+            _chat.SendMessage(t,
+                $"You were penalized for griefing: {pending.Reason}. Queue-locked for {HumanDuration.Humanize(remaining)}.");
+        }
     }
 
     public void OnGroupDisbanded(IReadOnlyCollection<PlayerKey> notify, PlayerKey trigger, DisbandReason reason)

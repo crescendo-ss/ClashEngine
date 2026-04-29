@@ -62,8 +62,11 @@ public interface IMatchmakingTelemetry
     /// <summary>Enough match participants vetoed: the griefing penalty has been rescinded.</summary>
     void OnGriefingVetoed(PendingGriefingPenalty pending) { }
 
-    /// <summary>The veto window expired without enough vetoes; the penalty is now confirmed.</summary>
-    void OnGriefingConfirmed(PendingGriefingPenalty pending) { }
+    /// <summary>The griefing penalty is now final -- either the veto window expired without
+    /// enough vetoes, or the penalty was applied without ever opening a veto window because the
+    /// match had too few eligible voters. <paramref name="timeoutUntil"/> is when the player's
+    /// queue-lock currently ends (already includes any in-effect Abandonment timeout).</summary>
+    void OnGriefingConfirmed(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil) { }
 
     /// <summary>
     /// A group was just dissolved. <paramref name="notify"/> is the set of remaining members the

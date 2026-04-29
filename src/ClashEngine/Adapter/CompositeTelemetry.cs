@@ -64,9 +64,9 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnGriefingVetoed(pending);
     }
-    public void OnGriefingConfirmed(PendingGriefingPenalty pending)
+    public void OnGriefingConfirmed(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil)
     {
-        foreach (var l in _listeners) l.OnGriefingConfirmed(pending);
+        foreach (var l in _listeners) l.OnGriefingConfirmed(pending, timeoutUntil);
     }
     public void OnGroupDisbanded(IReadOnlyCollection<PlayerKey> notify, PlayerKey trigger, DisbandReason reason)
     {

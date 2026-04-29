@@ -441,7 +441,7 @@ public sealed class MatchmakingEngine
         {
             var pending = _pendingGriefs[key];
             _pendingGriefs.Remove(key);
-            _telemetry.OnGriefingConfirmed(pending);
+            _telemetry.OnGriefingConfirmed(pending, _penalties.TimeoutUntil(pending.Target) ?? at);
         }
     }
 
@@ -459,7 +459,7 @@ public sealed class MatchmakingEngine
         if (pending.VetoWindowEndsAt <= at)
         {
             _pendingGriefs.Remove(key);
-            _telemetry.OnGriefingConfirmed(pending);
+            _telemetry.OnGriefingConfirmed(pending, _penalties.TimeoutUntil(pending.Target) ?? at);
             return VetoResult.WindowExpired;
         }
 
@@ -639,9 +639,24 @@ public sealed class MatchmakingEngine
             var eligibleVoters = new HashSet<PlayerKey>(allParticipants);
             eligibleVoters.Remove(flag.Player);
 
-            // Skip the veto window if there aren't enough eligible voters to ever rescind.
+            // Skip the veto window if there aren't enough eligible voters to ever rescind. The
+            // penalty is final immediately -- fire OnGriefingConfirmed so the adapter can DM the
+            // target. (We don't fire OnGriefingFlagged here, since there's no veto period to
+            // tell teammates about.)
             if (eligibleVoters.Count < def.VetoesRequired)
+            {
+                var confirmed = new PendingGriefingPenalty(
+                    MatchId: m.MatchId,
+                    Target: flag.Player,
+                    Reason: flag.Reason,
+                    PenaltyAppliedAt: at,
+                    VetoWindowEndsAt: at,                    // already-closed window
+                    VetoesRequired: def.VetoesRequired,
+                    EligibleVoters: eligibleVoters,
+                    VotesReceived: new HashSet<PlayerKey>());
+                _telemetry.OnGriefingConfirmed(confirmed, _penalties.TimeoutUntil(flag.Player) ?? at);
                 continue;
+            }
 
             var pending = new PendingGriefingPenalty(
                 MatchId: m.MatchId,

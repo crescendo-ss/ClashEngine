@@ -38,5 +38,5 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public void OnVetoRecorded(PendingGriefingPenalty pending, PlayerKey voter) =>
         VetoesRecorded.Add((pending, voter));
     public void OnGriefingVetoed(PendingGriefingPenalty pending) => GriefingVetoed.Add(pending);
-    public void OnGriefingConfirmed(PendingGriefingPenalty pending) => GriefingConfirmed.Add(pending);
+    public void OnGriefingConfirmed(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil) => GriefingConfirmed.Add(pending);
 }
