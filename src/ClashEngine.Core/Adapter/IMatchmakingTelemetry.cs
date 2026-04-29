@@ -17,6 +17,11 @@ public interface IMatchmakingTelemetry
 {
     void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at) { }
     void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) { }
+
+    /// <summary>A new group invitation was just accepted by the registry. Fired only on the
+    /// successful (<see cref="Groups.InviteResult.Sent"/>) path; the adapter typically translates
+    /// this into a DM to <paramref name="invitee"/> so they know to <c>?accept</c>.</summary>
+    void OnInviteSent(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at, TimeSpan ttl) { }
     void OnMatchProposed(MatchProposal proposal) { }
     void OnMatchStarted(ActiveMatch match) { }
     void OnMatchEnded(MatchOutcome outcome) { }

@@ -69,6 +69,15 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             _chat.SendMessage(p, $"Left {queueName} queue.");
     }
 
+    public void OnInviteSent(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at, TimeSpan ttl)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"InviteSent: {inviter.Name} -> {invitee.Name} (ttl={Format(ttl)})");
+        if (_resolver.Resolve(invitee) is { } p)
+            _chat.SendMessage(p,
+                $"{inviter.Name} invited you to a party. Use ?accept {inviter.Name} within {Format(ttl)} or ?decline.");
+    }
+
     public void OnMatchProposed(MatchProposal proposal)
     {
         // The actionable "Match found! Move or fire within Xs" message is sent by

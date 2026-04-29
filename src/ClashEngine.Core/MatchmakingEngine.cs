@@ -213,10 +213,16 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
-    /// Sends a group invitation. Returns <see cref="InviteResult.Sent"/> on success.
+    /// Sends a group invitation. Returns <see cref="InviteResult.Sent"/> on success and fires
+    /// <see cref="IMatchmakingTelemetry.OnInviteSent"/> so the adapter can DM the invitee.
     /// </summary>
-    public InviteResult InviteToGroup(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at) =>
-        _groups.Invite(inviter, invitee, at);
+    public InviteResult InviteToGroup(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at)
+    {
+        var result = _groups.Invite(inviter, invitee, at);
+        if (result == InviteResult.Sent)
+            _telemetry.OnInviteSent(inviter, invitee, at, _groups.InvitationTtl);
+        return result;
+    }
 
     /// <summary>
     /// Accepts a pending invitation. If <paramref name="inviter"/> is null, the invitee must have
