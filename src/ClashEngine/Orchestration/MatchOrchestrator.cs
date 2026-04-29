@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using ClashEngine.Adapter;
 using ClashEngine.Core;
@@ -270,6 +271,7 @@ public sealed class MatchOrchestrator
 
             if (afk.Count > 0)
             {
+                string afkNames = string.Join(", ", afk.Select(k => k.Name));
                 for (int i = 0; i < afk.Count; i++)
                     if (_resolver.Resolve(afk[i]) is { } p)
                         _chat.SendMessage(p, "You were flagged as AFK and the match was cancelled.");
@@ -279,7 +281,7 @@ public sealed class MatchOrchestrator
                         var k = _proposal.Teams[t][j];
                         if (afk.Contains(k)) continue;
                         if (_resolver.Resolve(k) is { } p)
-                            _chat.SendMessage(p, "Match cancelled -- one or more players were AFK.");
+                            _chat.SendMessage(p, $"Match cancelled. {afkNames} did not ready.");
                     }
 
                 _engine.CancelMatchAsAfk(_matchId, afk, _clock.UtcNow);
