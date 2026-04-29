@@ -243,10 +243,11 @@ public sealed class MatchOrchestrator
             _game.WarpTo(drifter, spawn.X, spawn.Y);
             if (_verbose.IsDebug)
             {
-                int dx = x - spawn.X, dy = y - spawn.Y;
+                // Position packet x/y are pixels; spawn is tiles (16 px each).
+                int dxTiles = (x >> 4) - spawn.X, dyTiles = (y >> 4) - spawn.Y;
                 _verbose.Debug(LogCategory,
                     $"Match {_matchId:N}: warped {key.Name} back to spawn ({spawn.X},{spawn.Y}) -- " +
-                    $"drift {(int)Math.Sqrt((long)dx * dx + (long)dy * dy) / 16}t.");
+                    $"drift {(int)Math.Sqrt((long)dxTiles * dxTiles + (long)dyTiles * dyTiles)}t.");
             }
         }
 
