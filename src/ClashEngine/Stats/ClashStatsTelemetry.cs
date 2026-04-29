@@ -115,10 +115,14 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
                     : ShipEnergyConfigBuilder.Build(_config, ch, ship);
                 var initialInventory = ch is null
                     ? null
-                    : ShipInventoryConfigBuilder.Build(_config, ch, ship);
+                    : ShipInventoryConfigBuilder.BuildInitial(_config, ch, ship);
+                var maxInventory = ch is null
+                    ? null
+                    : ShipInventoryConfigBuilder.BuildMax(_config, ch, ship);
 
                 _registry.AddPlayer(
-                    match.MatchId, player, t, maxEnergy, recharge, energyConfig, atTick, initialInventory);
+                    match.MatchId, player, t, maxEnergy, recharge, energyConfig, atTick,
+                    initialInventory, maxInventory);
             }
         }
 

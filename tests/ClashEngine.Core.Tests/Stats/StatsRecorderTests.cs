@@ -595,6 +595,45 @@ public class StatsRecorderTests
         Assert.Equal(1, wasted[ItemKind.Burst]);
     }
 
+    [Fact]
+    public void Green_pickups_clamp_at_per_item_cap()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        var initial = Loadout(repels: 3, bursts: 0);
+        var caps = new Dictionary<ItemKind, int> { [ItemKind.Repel] = 5 };
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, initial, caps);
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.OnSpawn(K("A"), 10);
+        r.OnSpawn(K("B"), 10);
+
+        // Five greens, but cap is 5 and initial is 3 -- only the first two stick.
+        for (int i = 0; i < 5; i++) r.OnPrizePickup(K("A"), ItemKind.Repel);
+        Assert.Equal(5, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+
+        r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: true);
+        Assert.Equal(5, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
+    }
+
+    [Fact]
+    public void Green_pickups_uncapped_when_no_max_configured_for_item()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        var energy = SimpleEnergy();
+        // Cap configured for repels but not bursts: bursts grow unbounded.
+        var caps = new Dictionary<ItemKind, int> { [ItemKind.Repel] = 2 };
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 0, bursts: 0), caps);
+        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.OnSpawn(K("A"), 10);
+        r.OnSpawn(K("B"), 10);
+
+        for (int i = 0; i < 4; i++) r.OnPrizePickup(K("A"), ItemKind.Burst);
+        for (int i = 0; i < 4; i++) r.OnPrizePickup(K("A"), ItemKind.Repel);
+
+        Assert.Equal(4, r.Stats[K("A")].Inventory[ItemKind.Burst]);
+        Assert.Equal(2, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+    }
+
     // --- active ticks via position packets ---
 
     [Fact]

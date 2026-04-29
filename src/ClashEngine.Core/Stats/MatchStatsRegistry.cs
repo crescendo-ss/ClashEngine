@@ -52,14 +52,16 @@ public sealed class MatchStatsRegistry
         double rechargeRate,
         WeaponEnergyConfig energyConfig,
         uint atTick,
-        IReadOnlyDictionary<ItemKind, int>? initialInventory = null)
+        IReadOnlyDictionary<ItemKind, int>? initialInventory = null,
+        IReadOnlyDictionary<ItemKind, int>? maxInventory = null)
     {
         if (!_recorders.TryGetValue(matchId, out var recorder))
             throw new InvalidOperationException($"Match {matchId:N} has no recorder; call BeginMatch first.");
         if (_matchOf.TryGetValue(player, out var existing) && existing != matchId)
             throw new InvalidOperationException($"Player {player} is already in match {existing:N}.");
 
-        recorder.RegisterPlayer(player, teamIndex, maxEnergy, rechargeRate, energyConfig, atTick, initialInventory);
+        recorder.RegisterPlayer(
+            player, teamIndex, maxEnergy, rechargeRate, energyConfig, atTick, initialInventory, maxInventory);
         _matchOf[player] = matchId;
     }
 

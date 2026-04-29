@@ -59,6 +59,10 @@ public sealed class StatsRecorder
     /// <summary>
     /// Add a participant to the match. Must be called before any event for that player.
     /// </summary>
+    /// <param name="maxInventory">Optional per-item cap mirroring the ship's <c>BurstMax</c> /
+    /// <c>RepelMax</c> / etc. Continuum drops a green when the player is already at the cap, so
+    /// <see cref="OnPrizePickup"/> consults this to avoid inflating the wasted-items tally with
+    /// pickups the client never actually retained.</param>
     public void RegisterPlayer(
         PlayerKey player,
         int teamIndex,
@@ -66,7 +70,8 @@ public sealed class StatsRecorder
         double rechargeRate,
         WeaponEnergyConfig energyConfig,
         uint atTick,
-        IReadOnlyDictionary<ItemKind, int>? initialInventory = null)
+        IReadOnlyDictionary<ItemKind, int>? initialInventory = null,
+        IReadOnlyDictionary<ItemKind, int>? maxInventory = null)
     {
         ArgumentNullException.ThrowIfNull(energyConfig);
         if (player.IsDefault) throw new ArgumentException("Player key must be non-default.", nameof(player));
@@ -83,7 +88,7 @@ public sealed class StatsRecorder
         // a real OnSpawn arriving later is a no-op against this initial life.
         stats.OpenLife(atTick);
         _stats[player] = stats;
-        _profiles[player] = new PlayerProfile(teamIndex, maxEnergy, energyConfig, initialInventory);
+        _profiles[player] = new PlayerProfile(teamIndex, maxEnergy, energyConfig, initialInventory, maxInventory);
     }
 
     /// <summary>
@@ -97,7 +102,8 @@ public sealed class StatsRecorder
         double newRechargeRate,
         WeaponEnergyConfig newEnergyConfig,
         uint atTick,
-        IReadOnlyDictionary<ItemKind, int>? newInitialInventory = null)
+        IReadOnlyDictionary<ItemKind, int>? newInitialInventory = null,
+        IReadOnlyDictionary<ItemKind, int>? newMaxInventory = null)
     {
         if (!_stats.TryGetValue(player, out var stats)) return;
         if (newMaxEnergy <= 0) throw new ArgumentOutOfRangeException(nameof(newMaxEnergy), "Must be positive.");
@@ -110,6 +116,7 @@ public sealed class StatsRecorder
             MaxEnergy = newMaxEnergy,
             EnergyConfig = newEnergyConfig,
             InitialInventory = newInitialInventory ?? profile.InitialInventory,
+            MaxInventory = newMaxInventory ?? profile.MaxInventory,
         };
     }
 
@@ -177,13 +184,22 @@ public sealed class StatsRecorder
 
     /// <summary>
     /// A stockpilable item was picked up via green-prize. Increments the player's tracked
-    /// inventory so a subsequent <see cref="OnItemUsed"/> doesn't undercount, and so the
-    /// end-of-life <see cref="PlayerStats.SnapshotInventoryAsWasted"/> reflects acquired items
-    /// the player never deployed.
+    /// inventory (clamped at the ship's per-item cap, since Continuum silently drops greens that
+    /// would push past the cap) so a subsequent <see cref="OnItemUsed"/> doesn't undercount, and
+    /// so the end-of-life <see cref="PlayerStats.SnapshotInventoryAsWasted"/> reflects acquired
+    /// items the player never deployed without inflating wasted-item totals with pickups the
+    /// client never actually retained.
     /// </summary>
     public void OnPrizePickup(PlayerKey player, ItemKind item)
     {
         if (!_stats.TryGetValue(player, out var stats)) return;
+        if (_profiles.TryGetValue(player, out var profile)
+            && profile.MaxInventory is not null
+            && profile.MaxInventory.TryGetValue(item, out var max))
+        {
+            int current = stats.Inventory.TryGetValue(item, out var n) ? n : 0;
+            if (current >= max) return;
+        }
         stats.IncrementInventory(item);
     }
 
@@ -432,5 +448,6 @@ public sealed class StatsRecorder
         int TeamIndex,
         int MaxEnergy,
         WeaponEnergyConfig EnergyConfig,
-        IReadOnlyDictionary<ItemKind, int>? InitialInventory);
+        IReadOnlyDictionary<ItemKind, int>? InitialInventory,
+        IReadOnlyDictionary<ItemKind, int>? MaxInventory);
 }
