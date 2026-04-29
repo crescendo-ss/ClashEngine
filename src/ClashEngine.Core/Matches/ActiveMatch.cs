@@ -195,6 +195,18 @@ public sealed class ActiveMatch
     public PlayerStatus GetStatus(PlayerKey player) =>
         _status.TryGetValue(player, out var s) ? s : PlayerStatus.Pending;
 
+    /// <summary>
+    /// True when the player is no longer eligible to return: lives-mode players whose last life
+    /// has been spent (have an <see cref="ExitedAt"/> entry), or players in <see cref="PlayerStatus.Abandoned"/>.
+    /// Statbox / item-list / scoreboard surfaces share this predicate so they all draw the same
+    /// "still in" line.
+    /// </summary>
+    public bool IsKnockedOut(PlayerKey player)
+    {
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return true;
+        return GetStatus(player) == PlayerStatus.Abandoned;
+    }
+
     public int? TeamIndexOf(PlayerKey player) =>
         _teamOf.TryGetValue(player, out var t) ? t : null;
 

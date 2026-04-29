@@ -72,6 +72,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
     private ClashStatsTelemetry? _matchStatsTelemetry;
     private StatsListener? _statsListener;
     private StatsCommand? _statsCommand;
+    private ItemsCommand? _itemsCommand;
     private DistanceSampler? _distanceSampler;
     private MatchLvzAdapter? _lvzAdapter;
     private MatchFreqAdvisor? _freqAdvisor;
@@ -282,9 +283,15 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         _statsListener.Register();
         _unregisterActions.Add(_statsListener.Unregister);
 
-        _statsCommand = new StatsCommand(broker, _engine, _matchStats, _commands, _chat, _resolver);
+        var matchLookup = new ActiveMatchLookup(broker, _engine, _matchStats, _resolver);
+
+        _statsCommand = new StatsCommand(_engine, matchLookup, _commands, _chat);
         _statsCommand.Register();
         _unregisterActions.Add(_statsCommand.Unregister);
+
+        _itemsCommand = new ItemsCommand(matchLookup, _commands, _chat);
+        _itemsCommand.Register();
+        _unregisterActions.Add(_itemsCommand.Unregister);
 
         // Periodic distance-to-nearest-enemy sampling. Default 5 Hz; 0 disables.
         int distanceHz = _config.GetInt(_config.Global, "ClashEngine", "DistanceSampleHz", 5);
@@ -430,6 +437,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         _matchStatsTelemetry = null;
         _statsListener = null;
         _statsCommand = null;
+        _itemsCommand = null;
         _distanceSampler = null;
         _lvzAdapter = null;
         _matchUploader = null;

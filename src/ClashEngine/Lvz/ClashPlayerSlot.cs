@@ -45,19 +45,14 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
         {
             var match = _matchData.Match;
             if (!match.Statuses.TryGetValue(_key, out var ps)) return PlayerSlotStatus.None;
-            // Map ClashEngine PlayerStatus -> MatchLvz PlayerSlotStatus.
-            //   Pending             -> Waiting   (still expected to join)
-            //   Active              -> Playing
-            //   InGrace             -> Waiting   (left mid-match; could come back)
-            //   Eliminated by lives -> KnockedOut (engine sets ExitedAt on the eliminating death)
-            //   Abandoned           -> KnockedOut
-            if (match.LivesPerPlayer.HasValue && match.ExitedAt.ContainsKey(_key))
-                return PlayerSlotStatus.KnockedOut;
+            // Knockout (lives spent or abandoned) takes precedence over the live PlayerStatus,
+            // since the engine doesn't transition Active -> some-knockout-status on the
+            // eliminating death; ExitedAt is the marker.
+            if (match.IsKnockedOut(_key)) return PlayerSlotStatus.KnockedOut;
             return ps switch
             {
                 PlayerStatus.Active => PlayerSlotStatus.Playing,
                 PlayerStatus.Pending or PlayerStatus.InGrace => PlayerSlotStatus.Waiting,
-                PlayerStatus.Abandoned => PlayerSlotStatus.KnockedOut,
                 _ => PlayerSlotStatus.None,
             };
         }
