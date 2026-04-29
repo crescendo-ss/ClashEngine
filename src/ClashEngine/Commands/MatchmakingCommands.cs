@@ -71,6 +71,7 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("cancel", Cancel, helpText:
             "?cancel -- Leave every ClashEngine matchmaking queue.");
         _commands.AddCommand("party", Group, helpText:
+            "?party -- List the members of your current party. " +
             "?party player1[,player2,...] -- Invite one or more players to your ClashEngine group.");
         _commands.AddCommand("accept", Accept, helpText:
             "?accept [inviter] -- Accept a pending ClashEngine group invitation. Inviter is optional when only one is pending.");
@@ -377,7 +378,7 @@ public sealed class MatchmakingCommands
         var arg = parameters.Trim().ToString();
         if (arg.Length == 0)
         {
-            _chat.SendMessage(player, "Usage: ?party player1[,player2,...]");
+            ShowPartyMembers(player, k);
             return;
         }
 
@@ -399,6 +400,30 @@ public sealed class MatchmakingCommands
                 _ => null,
             };
             if (msg is not null) _chat.SendMessage(player, msg);
+        }
+    }
+
+    /// <summary>Sends the caller a snapshot of their current party: mode, member count, and the
+    /// member names. In closed parties the leader is annotated with "(leader)" so members know
+    /// who controls invites.</summary>
+    private void ShowPartyMembers(Player player, PlayerKey self)
+    {
+        if (_engine.Groups.GroupOf(self) is not GroupId group)
+        {
+            _chat.SendMessage(player, "You're not in a party. Use ?party <player> to invite someone.");
+            return;
+        }
+
+        var members = _engine.Groups.MembersOf(group);
+        var mode = _engine.Groups.ModeOf(group);
+        var leader = mode == GroupMode.Closed ? _engine.Groups.LeaderOf(group) : null;
+
+        _chat.SendMessage(player,
+            $"Party ({mode.ToString().ToLowerInvariant()}, {members.Count} member{(members.Count == 1 ? "" : "s")}):");
+        foreach (var m in members.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            string suffix = leader is { } l && l.Equals(m) ? " (leader)" : "";
+            _chat.SendMessage(player, $"  {m.Name}{suffix}");
         }
     }
 
@@ -666,6 +691,7 @@ public sealed class MatchmakingCommands
             ("?cancel",                      "Leave every ClashEngine queue."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
+            ("?party",                       "List your current party's members (leader marked if closed)."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),
             ("?accept [inviter]",            "Accept a pending party invitation."),
             ("?decline [inviter]",           "Decline a pending party invitation."),
