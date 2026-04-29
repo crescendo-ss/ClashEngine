@@ -44,15 +44,22 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
 
     /// <summary>
     /// Renders the "queued for X" reply with a (competitive) / (casual) tier prefix sourced from
-    /// the queue's registered <see cref="QueueDefinition.Tier"/>. Falls back to the bare queue
-    /// name if the queue isn't registered (a defensive case the engine shouldn't normally hit).
+    /// the queue's registered <see cref="QueueDefinition.Tier"/>. The tier suffix on the
+    /// registered queue name (<c>_competitive</c>/<c>_casual</c>) is stripped from the display
+    /// so the prefix isn't redundantly echoed (e.g. "Queued for competitive 4v4", not
+    /// "Queued for competitive 4v4_competitive"). Falls back to the bare queue name if the
+    /// queue isn't registered.
     /// </summary>
     private string FormatQueuedMessage(string queueName)
     {
         if (!_queues.TryGet(queueName, out var def))
             return $"Queued for {queueName}.";
         string tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
-        return $"Queued for {tierLabel} {queueName}.";
+        string suffix = "_" + tierLabel;
+        string display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? queueName[..^suffix.Length]
+            : queueName;
+        return $"Queued for {tierLabel} {display}.";
     }
 
     public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at)
