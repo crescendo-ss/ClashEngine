@@ -578,6 +578,27 @@ public sealed class ActiveMatch
     }
 
     /// <summary>
+    /// Cancels a Forming match because the orchestrator detected one or more idle players in
+    /// the staging window. Every player named in <paramref name="afkPlayers"/> is marked as an
+    /// abandoner regardless of their current status (Active players who got placed but didn't
+    /// ready up are just as responsible as Pending no-shows whose placement never landed).
+    /// Any remaining Pending player not in the AFK list is still marked as a no-show.
+    /// </summary>
+    public void CancelAsAfk(IEnumerable<PlayerKey> afkPlayers, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(afkPlayers);
+        if (State != MatchState.Forming) return;
+
+        foreach (var p in afkPlayers)
+        {
+            if (!_status.ContainsKey(p)) continue;   // unknown player -- skip
+            _status[p] = PlayerStatus.Abandoned;
+            _candidateAbandoners.Add(p);
+        }
+        FinalizeCancellation(at);
+    }
+
+    /// <summary>
     /// Finalize as a forfeit win: exactly one team is still alive. Survivor ranks first; other
     /// teams ranked by kill count.
     /// </summary>

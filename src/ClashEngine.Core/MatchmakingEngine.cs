@@ -356,37 +356,19 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
-    /// Cancels a Forming match because one or more players failed the idle/readiness check after
-    /// being warped to the match arena. The named players are flagged as candidate-abandoners
-    /// (with optional <paramref name="severityMultiplier"/>); the match transitions to Cancelled
-    /// and other participants are released without penalty.
+    /// Cancels a Forming match because one or more players failed the staging-phase readiness
+    /// check. Every player in <paramref name="afkPlayers"/> is marked as an abandoner regardless
+    /// of whether they reached Active -- showing up to the arena and then going idle counts the
+    /// same as never showing up. The match transitions to Cancelled and the AFK players are
+    /// assessed a <see cref="PenaltyKind.StagingAfk"/> penalty (a milder ladder than the
+    /// in-match <see cref="PenaltyKind.Abandonment"/> kind, since the match never started).
     /// </summary>
-    public bool CancelMatchAsAfk(
-        Guid matchId,
-        IReadOnlyList<PlayerKey> afkPlayers,
-        DateTimeOffset at,
-        double severityMultiplier = 2.0)
+    public bool CancelMatchAsAfk(Guid matchId, IReadOnlyList<PlayerKey> afkPlayers, DateTimeOffset at)
     {
         if (!_matches.TryGetValue(matchId, out var match)) return false;
         if (match.State != MatchState.Forming) return false;
 
-        // Drive the join-timeout path so the engine produces a Cancelled outcome with AFK
-        // players in AbandonedBy. Players still in Pending status will be flagged as no-shows.
-        match.Tick(match.ProposedAt + match.JoinTimeout + TimeSpan.FromSeconds(1));
-
-        // Apply severity boost to the AFK players' abandonment records.
-        if (severityMultiplier > 1.0 && match.Outcome is { } outcome)
-        {
-            foreach (var p in outcome.AbandonedBy)
-            {
-                if (afkPlayers.Contains(p))
-                {
-                    _penalties.RescindMostRecent(p, PenaltyKind.Abandonment);
-                    _penalties.RecordPenalty(p, PenaltyKind.Abandonment, at, severityMultiplier);
-                }
-            }
-        }
-
+        match.CancelAsAfk(afkPlayers, at);
         FinalizeMatch(match, at);
         return true;
     }
@@ -537,10 +519,17 @@ public sealed class MatchmakingEngine
         if (m.Outcome.FinalState != MatchState.Cancelled)
             _ratingUpdater.ApplyOutcome(_ratings, m.Outcome, at, weight);
 
+        // Cancelled matches use the milder StagingAfk ladder (the match never actually started,
+        // so nobody else's match was ruined). Live abandons use the standard Abandonment ladder.
+        // Falls back to Abandonment if StagingAfk wasn't registered, so test rigs that only
+        // register the legacy policies still work.
+        var abandonKind = m.Outcome.FinalState == MatchState.Cancelled && _penalties.HasPolicy(PenaltyKind.StagingAfk)
+            ? PenaltyKind.StagingAfk
+            : PenaltyKind.Abandonment;
         for (int i = 0; i < m.Outcome.AbandonedBy.Count; i++)
         {
             var p = m.Outcome.AbandonedBy[i];
-            int count = _penalties.RecordPenalty(p, PenaltyKind.Abandonment, at);
+            int count = _penalties.RecordPenalty(p, abandonKind, at);
             var until = _penalties.TimeoutUntil(p)!.Value;
             _telemetry.OnAbandonment(p, count, until);
         }

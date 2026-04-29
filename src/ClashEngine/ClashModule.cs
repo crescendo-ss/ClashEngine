@@ -209,6 +209,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
             {
                 PenaltyPolicy.DefaultAbandonment,
                 PenaltyPolicy.DefaultGriefing,
+                PenaltyPolicy.DefaultStagingAfk,
             },
             invitationTtl: TimeSpan.FromSeconds(15));
 

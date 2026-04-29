@@ -42,6 +42,15 @@ public sealed class PenaltyPolicy
     public static PenaltyPolicy DefaultEliminationCooldown { get; } =
         new(PenaltyKind.EliminationCooldown, TimeSpan.FromMinutes(1), 1.0, TimeSpan.FromMinutes(5));
 
+    /// <summary>
+    /// Default for staging-phase AFK: 1 minute first offense, doubles each repeat. Milder than
+    /// <see cref="DefaultAbandonment"/> because the match was cancelled before it ever started --
+    /// nobody else lost the match because of the AFK -- but escalates because chronic
+    /// no-readies still waste everyone else's time.
+    /// </summary>
+    public static PenaltyPolicy DefaultStagingAfk { get; } =
+        new(PenaltyKind.StagingAfk, TimeSpan.FromMinutes(1), 2.0, TimeSpan.FromHours(24));
+
     public TimeSpan TimeoutForOffense(int offenseCount)
     {
         if (offenseCount < 1) throw new ArgumentOutOfRangeException(nameof(offenseCount));
