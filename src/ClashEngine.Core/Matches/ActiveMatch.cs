@@ -579,16 +579,19 @@ public sealed class ActiveMatch
     }
 
     /// <summary>
-    /// Cancels a Forming match because the orchestrator detected one or more idle players in
+    /// Cancels a pre-GO match because the orchestrator detected one or more idle players in
     /// the staging window. Every player named in <paramref name="afkPlayers"/> is marked as an
     /// abandoner regardless of their current status (Active players who got placed but didn't
     /// ready up are just as responsible as Pending no-shows whose placement never landed).
-    /// Any remaining Pending player not in the AFK list is still marked as a no-show.
+    /// Any remaining Pending player not in the AFK list is still marked as a no-show. Accepts
+    /// Forming or Live -- by the time staging ends the engine has usually transitioned to Live
+    /// (every participant reached Active during placement) even though physically the match
+    /// hasn't started yet.
     /// </summary>
     public void CancelAsAfk(IEnumerable<PlayerKey> afkPlayers, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(afkPlayers);
-        if (State != MatchState.Forming) return;
+        if (State is not (MatchState.Forming or MatchState.Live)) return;
 
         foreach (var p in afkPlayers)
         {

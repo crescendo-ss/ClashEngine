@@ -356,17 +356,23 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
-    /// Cancels a Forming match because one or more players failed the staging-phase readiness
+    /// Cancels a pre-GO match because one or more players failed the staging-phase readiness
     /// check. Every player in <paramref name="afkPlayers"/> is marked as an abandoner regardless
     /// of whether they reached Active -- showing up to the arena and then going idle counts the
     /// same as never showing up. The match transitions to Cancelled and the AFK players are
     /// assessed a <see cref="PenaltyKind.StagingAfk"/> penalty (a milder ladder than the
     /// in-match <see cref="PenaltyKind.Abandonment"/> kind, since the match never started).
     /// </summary>
+    /// <remarks>
+    /// Accepts either Forming or Live: a match transitions to Live as soon as every participant
+    /// reaches Active (i.e. ship-joins during Setup), which happens before the staging idle
+    /// gate runs. Restricting this to Forming would silently drop AFK cancellations after the
+    /// last placement landed and leave players stranded in their ships.
+    /// </remarks>
     public bool CancelMatchAsAfk(Guid matchId, IReadOnlyList<PlayerKey> afkPlayers, DateTimeOffset at)
     {
         if (!_matches.TryGetValue(matchId, out var match)) return false;
-        if (match.State != MatchState.Forming) return false;
+        if (match.State is not (MatchState.Forming or MatchState.Live)) return false;
 
         match.CancelAsAfk(afkPlayers, at);
         FinalizeMatch(match, at);
