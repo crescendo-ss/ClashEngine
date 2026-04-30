@@ -216,7 +216,14 @@ public sealed class MatchOrchestrator
 
         _game.SetShipAndFreq(player, info.Ship, info.Freq);
         if (info.SpawnX != 0 || info.SpawnY != 0)
+        {
             _game.WarpTo(player, info.SpawnX, info.SpawnY);
+            // Anchor the idle tracker at the warp destination so stale pre-warp position
+            // packets (in-flight when WarpTo went out) don't seed the tracker at the old
+            // position and trigger a false-positive "moved" detection on the first post-warp
+            // packet. SpawnX/Y are tile coords; position packets carry pixels (16 px/tile).
+            _idleTracker.AnchorAt(key, (short)(info.SpawnX << 4), (short)(info.SpawnY << 4));
+        }
         _game.Lock(player, notify: false, spec: false, timeout: LockTimeoutSeconds);
 
         if (_verbose.IsDebug)
