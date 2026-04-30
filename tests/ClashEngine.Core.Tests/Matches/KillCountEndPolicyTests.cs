@@ -25,6 +25,7 @@ public class KillCountEndPolicyTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, T0.AddSeconds(1));
+        m.MarkLive(T0.AddSeconds(1));
         return m;
     }
 

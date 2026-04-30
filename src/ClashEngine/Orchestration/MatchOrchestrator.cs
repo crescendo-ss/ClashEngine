@@ -435,6 +435,10 @@ public sealed class MatchOrchestrator
             }
 
             SetPhase(MatchPhase.Live);
+            // Engine-side Forming -> Live happens here, not during placement: the engine treats
+            // "Live" as gameplay-live, so no Live-only state (kill processing, team-collapse, etc.)
+            // can fire pre-GO even if a ship-lock expires early.
+            _engine.MarkMatchLive(_matchId, _clock.UtcNow);
             // Final re-warp to the chosen spawn at GO. This (a) snaps any drift-clamped player
             // back to the exact spawn coord, and (b) ensures the whole team starts the match
             // co-located even if the drift check missed a sub-threshold wander.

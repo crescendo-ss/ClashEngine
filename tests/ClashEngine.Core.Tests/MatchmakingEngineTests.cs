@@ -49,6 +49,22 @@ public class MatchmakingEngineTests
 
         public void Enqueue(string name, string queue = "2v2") =>
             Engine.TryEnqueue(K(name), queue, Clock.UtcNow);
+
+        /// <summary>
+        /// Drives the engine through the same sequence the orchestrator does at end-of-Countdown:
+        /// each player gets joined-arena (Pending -> Active), then the match is marked Live. Use
+        /// when a test just needs an in-progress match without exercising the join/timeout paths.
+        /// </summary>
+        public ActiveMatch StartProposedMatch()
+        {
+            var matchId = Engine.ActiveMatches.Keys.Single();
+            var match = Engine.ActiveMatches[matchId];
+            foreach (var team in match.Teams)
+                foreach (var p in team)
+                    Engine.OnPlayerJoinedArena(p, Clock.UtcNow);
+            Engine.MarkMatchLive(matchId, Clock.UtcNow);
+            return match;
+        }
     }
 
     [Fact]
@@ -67,19 +83,52 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
-    public void All_players_joining_starts_the_match()
+    public void OnPlayerJoinedArena_does_not_flip_to_Live_without_MarkMatchLive()
     {
+        // Engine state is gameplay-live only after the orchestrator's GO! call. Up to then we
+        // stay Forming so Live-only paths (kill processing, team-collapse, distance sampling)
+        // can't fire pre-GO even if a ship-set callback already fired for every player.
         var h = new Harness();
         h.Connect("A", "B", "C", "D");
         foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
         h.Engine.Tick(T0);
 
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+
         h.Clock.Advance(TimeSpan.FromSeconds(2));
         foreach (var n in new[] { "A", "B", "C", "D" })
             h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
 
+        Assert.Empty(h.Telemetry.Started);
+        Assert.Equal(MatchState.Forming, h.Engine.ActiveMatches[matchId].State);
+
+        // Orchestrator's GO! tick.
+        h.Clock.Advance(TimeSpan.FromSeconds(13));
+        Assert.True(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
+
         Assert.Single(h.Telemetry.Started);
         Assert.Equal(MatchState.Live, h.Telemetry.Started[0].State);
+        Assert.Equal(h.Clock.UtcNow, h.Telemetry.Started[0].StartedAt);
+    }
+
+    [Fact]
+    public void MarkMatchLive_returns_false_when_a_player_never_joined()
+    {
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        // Only 3 of 4 players reached Active.
+        h.Engine.OnPlayerJoinedArena(K("A"), h.Clock.UtcNow);
+        h.Engine.OnPlayerJoinedArena(K("B"), h.Clock.UtcNow);
+        h.Engine.OnPlayerJoinedArena(K("C"), h.Clock.UtcNow);
+
+        Assert.False(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
+        Assert.Empty(h.Telemetry.Started);
+        Assert.Equal(MatchState.Forming, h.Engine.ActiveMatches[matchId].State);
     }
 
     [Fact]
@@ -91,8 +140,7 @@ public class MatchmakingEngineTests
         h.Engine.Tick(T0);
 
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        foreach (var n in new[] { "A", "B", "C", "D" })
-            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+        h.StartProposedMatch();
 
         var teams = h.Telemetry.Started[0].Teams;
         var winners = teams[0];
@@ -199,8 +247,7 @@ public class MatchmakingEngineTests
         h.Engine.Tick(T0);
 
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        foreach (var n in new[] { "A", "B", "C", "D" })
-            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+        h.StartProposedMatch();
 
         var teams = h.Telemetry.Started[0].Teams;
         var leaver = teams[0][0];
@@ -278,6 +325,36 @@ public class MatchmakingEngineTests
 
         h.Engine.Queues.TryGet("2v2", out var def);
         Assert.False(def!.Queue.Contains(K("A")));
+    }
+
+    [Fact]
+    public void CancelMatchAsAfk_succeeds_during_staging_when_all_players_have_joined()
+    {
+        // Pre-architectural-fix this scenario was broken: the engine flipped to Live as soon as
+        // every player was placed onto a ship, so the orchestrator's staging-end AFK call hit the
+        // "State != Forming" guard and silently no-oped. With the engine now staying Forming
+        // until MarkMatchLive is invoked at GO!, CancelMatchAsAfk runs cleanly.
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+        Assert.Equal(MatchState.Forming, h.Engine.ActiveMatches[matchId].State);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.True(h.Engine.CancelMatchAsAfk(matchId, new[] { K("D") }, h.Clock.UtcNow));
+
+        Assert.Single(h.Telemetry.Ended);
+        Assert.Equal(MatchState.Cancelled, h.Telemetry.Ended[0].FinalState);
+        Assert.Equal(K("D"), Assert.Single(h.Telemetry.Ended[0].AbandonedBy));
+
+        foreach (var n in new[] { "A", "B", "C" })
+            Assert.Equal(EligibilityStatus.Available, h.Engine.CheckEligibility(K(n)).Status);
+        Assert.Equal(EligibilityStatus.InTimeout, h.Engine.CheckEligibility(K("D")).Status);
     }
 
     [Fact]

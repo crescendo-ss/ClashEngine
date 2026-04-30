@@ -65,9 +65,10 @@ public class EliminationCooldownTests
             Engine.Tick(Clock.UtcNow);
             var m = Engine.ActiveMatches.First().Value;
 
-            // Players need to actually join.
+            // Players need to actually join, then the orchestrator's GO! fires MarkMatchLive.
             Clock.Advance(TimeSpan.FromSeconds(2));
             foreach (var n in names) Engine.OnPlayerJoinedArena(K(n), Clock.UtcNow);
+            Engine.MarkMatchLive(m.MatchId, Clock.UtcNow);
             return m;
         }
     }

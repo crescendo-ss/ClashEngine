@@ -218,12 +218,21 @@ public sealed class ActiveMatch
 
         _status[player] = PlayerStatus.Active;
         OpenParticipation(player, at);
+    }
 
-        if (AllActive())
-        {
-            State = MatchState.Live;
-            StartedAt = at;
-        }
+    /// <summary>
+    /// Transition Forming -> Live. The orchestrator calls this at GO! after Setup, Staging, and
+    /// Countdown have completed; before then, "all players Active" only means they were placed
+    /// onto ships, not that gameplay has started. No-op if any player isn't Active yet, if the
+    /// match isn't Forming, or if it's already Live.
+    /// </summary>
+    public bool MarkLive(DateTimeOffset at)
+    {
+        if (State != MatchState.Forming) return false;
+        if (!AllActive()) return false;
+        State = MatchState.Live;
+        StartedAt = at;
+        return true;
     }
 
     /// <summary>
@@ -278,12 +287,6 @@ public sealed class ActiveMatch
         // Clear the team-collapse timer if this player's return brings their team back to life.
         if (_teamOf.TryGetValue(player, out var teamIdx))
             _teamCollapsedSince.Remove(teamIdx);
-
-        if (State == MatchState.Forming && AllActive())
-        {
-            State = MatchState.Live;
-            StartedAt = at;
-        }
     }
 
     /// <summary>

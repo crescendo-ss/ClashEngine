@@ -43,19 +43,61 @@ public class ActiveMatchTests
     }
 
     [Fact]
-    public void Joining_last_player_transitions_to_Live()
+    public void OnPlayerJoined_marks_pending_active_but_does_not_flip_to_Live()
     {
+        // Engine state stays Forming through Setup, Staging, and Countdown -- only the
+        // orchestrator's GO! call (MarkLive) flips to Live. This prevents Live-only state
+        // (kill processing, team-collapse, etc.) from firing pre-GO.
         var m = BuildMatch();
-
         m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
-        Assert.Equal(MatchState.Forming, m.State);
-
         m.OnPlayerJoined(K("B"), T0.AddSeconds(2));
         m.OnPlayerJoined(K("C"), T0.AddSeconds(3));
         m.OnPlayerJoined(K("D"), T0.AddSeconds(4));
 
+        Assert.Equal(MatchState.Forming, m.State);
+        Assert.Null(m.StartedAt);
+        foreach (var team in m.Teams)
+            foreach (var p in team)
+                Assert.Equal(PlayerStatus.Active, m.GetStatus(p));
+    }
+
+    [Fact]
+    public void MarkLive_after_all_active_transitions_to_Live()
+    {
+        var m = BuildMatch();
+        m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
+        m.OnPlayerJoined(K("B"), T0.AddSeconds(2));
+        m.OnPlayerJoined(K("C"), T0.AddSeconds(3));
+        m.OnPlayerJoined(K("D"), T0.AddSeconds(4));
+
+        Assert.True(m.MarkLive(T0.AddSeconds(10)));
         Assert.Equal(MatchState.Live, m.State);
-        Assert.Equal(T0.AddSeconds(4), m.StartedAt);
+        Assert.Equal(T0.AddSeconds(10), m.StartedAt);
+    }
+
+    [Fact]
+    public void MarkLive_returns_false_when_some_player_is_still_pending()
+    {
+        var m = BuildMatch();
+        m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
+        m.OnPlayerJoined(K("B"), T0.AddSeconds(2));
+        m.OnPlayerJoined(K("C"), T0.AddSeconds(3));
+        // D never joined.
+
+        Assert.False(m.MarkLive(T0.AddSeconds(10)));
+        Assert.Equal(MatchState.Forming, m.State);
+        Assert.Null(m.StartedAt);
+    }
+
+    [Fact]
+    public void MarkLive_is_idempotent_and_returns_false_when_already_live()
+    {
+        var m = JoinAll(BuildMatch());
+        Assert.Equal(MatchState.Live, m.State);
+        var startedAt = m.StartedAt;
+
+        Assert.False(m.MarkLive(T0.AddMinutes(1)));
+        Assert.Equal(startedAt, m.StartedAt);
     }
 
     [Fact]
@@ -471,6 +513,7 @@ public class ActiveMatchTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, T0.AddSeconds(5));
+        m.MarkLive(T0.AddSeconds(5));
 
         // A kills B, C, D — A is the last team standing.
         m.OnKill(K("A"), K("B"), T0.AddSeconds(10));
@@ -617,6 +660,7 @@ public class ActiveMatchTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, when);
+        m.MarkLive(when);
         return m;
     }
 }

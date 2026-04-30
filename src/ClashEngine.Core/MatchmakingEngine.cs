@@ -124,11 +124,21 @@ public sealed class MatchmakingEngine
     public void OnPlayerJoinedArena(PlayerKey player, DateTimeOffset at)
     {
         if (!_matchOf.TryGetValue(player, out var matchId)) return;
-        var m = _matches[matchId];
-        var prev = m.State;
-        m.OnPlayerJoined(player, at);
-        if (prev == MatchState.Forming && m.State == MatchState.Live)
-            _telemetry.OnMatchStarted(m);
+        _matches[matchId].OnPlayerJoined(player, at);
+    }
+
+    /// <summary>
+    /// Transition the match to Live. Called by the orchestrator at GO! (after Setup, Staging,
+    /// and Countdown). Returns false if the match is unknown, no longer Forming, or some player
+    /// hasn't reached Active yet -- callers should treat false as "match isn't ready, leave it
+    /// to the engine's join-timeout to clean up." Fires <c>OnMatchStarted</c> on success.
+    /// </summary>
+    public bool MarkMatchLive(Guid matchId, DateTimeOffset at)
+    {
+        if (!_matches.TryGetValue(matchId, out var match)) return false;
+        if (!match.MarkLive(at)) return false;
+        _telemetry.OnMatchStarted(match);
+        return true;
     }
 
     /// <summary>Player has left the arena or specced.</summary>

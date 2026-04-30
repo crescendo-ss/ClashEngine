@@ -46,6 +46,18 @@ public class KothModeTests
             foreach (var n in names) Engine.OnPlayerConnected(K(n), Clock.UtcNow);
         }
 
+        /// <summary>Drives the most recently proposed match through join + GO!.</summary>
+        public ActiveMatch StartProposedMatch(MatchProposal proposal)
+        {
+            foreach (var team in proposal.Teams)
+                foreach (var p in team)
+                    Engine.OnPlayerJoinedArena(p, Clock.UtcNow);
+            var matchId = Engine.ActiveMatches
+                .First(kvp => ReferenceEquals(kvp.Value.Teams, proposal.Teams)).Key;
+            Engine.MarkMatchLive(matchId, Clock.UtcNow);
+            return Engine.ActiveMatches[matchId];
+        }
+
         public ActiveMatch RunMatchAndPickWinningTeam(string winningKiller, string victim)
         {
             Engine.Tick(Clock.UtcNow);
@@ -71,9 +83,7 @@ public class KothModeTests
 
         var proposal = h.Telemetry.Proposed[0];
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        foreach (var team in proposal.Teams)
-            foreach (var p in team)
-                h.Engine.OnPlayerJoinedArena(p, h.Clock.UtcNow);
+        h.StartProposedMatch(proposal);
         var match = h.Telemetry.Started[0];
 
         var winners = match.Teams[0];   // pick team 0 to win
@@ -106,7 +116,7 @@ public class KothModeTests
         h.Engine.Tick(T0);
         var p1 = h.Telemetry.Proposed[0];
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        foreach (var team in p1.Teams) foreach (var p in team) h.Engine.OnPlayerJoinedArena(p, h.Clock.UtcNow);
+        h.StartProposedMatch(p1);
 
         var winners1 = p1.Teams[0];
         var loser1 = p1.Teams[1][0];
@@ -121,7 +131,7 @@ public class KothModeTests
 
         var p2 = h.Telemetry.Proposed[1];
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        foreach (var team in p2.Teams) foreach (var p in team) h.Engine.OnPlayerJoinedArena(p, h.Clock.UtcNow);
+        h.StartProposedMatch(p2);
 
         // Have the same winners win again — at defense cap = 1, this is their last "defense."
         var winners2 = p2.Teams.First(t => t.Contains(winners1[0]));
@@ -159,7 +169,7 @@ public class KothModeTests
 
         var proposal = h.Telemetry.Proposed[0];
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        foreach (var team in proposal.Teams) foreach (var p in team) h.Engine.OnPlayerJoinedArena(p, h.Clock.UtcNow);
+        h.StartProposedMatch(proposal);
 
         var winners = proposal.Teams[0];
         var loser = proposal.Teams[1][0];

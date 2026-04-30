@@ -26,6 +26,7 @@ public class TeamkillThresholdHeuristicTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, T0.AddSeconds(1));
+        m.MarkLive(T0.AddSeconds(1));
 
         for (int i = 0; i < tks.Length; i++)
             m.OnKill(K(tks[i].Killer), K(tks[i].Victim), T0.AddSeconds(10 + i));

@@ -27,6 +27,7 @@ public class EarlyExitHeuristicTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, startedAt);
+        m.MarkLive(startedAt);
         return m;
     }
 
@@ -131,6 +132,7 @@ public class EarlyExitHeuristicTests
         foreach (var team in m2.Teams)
             foreach (var p in team)
                 m2.OnPlayerJoined(p, startedAt);
+        m2.MarkLive(startedAt);
 
         m2.OnKill(K("A"), K("C"), startedAt.AddSeconds(10));   // C exits at +10s
         m2.OnKill(K("A"), K("D"), startedAt.AddSeconds(100));  // D exits at +100s — match ends here

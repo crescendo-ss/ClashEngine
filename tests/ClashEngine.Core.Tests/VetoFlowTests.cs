@@ -51,6 +51,8 @@ public class VetoFlowTests
 
             Clock.Advance(TimeSpan.FromSeconds(2));
             foreach (var n in names) Engine.OnPlayerJoinedArena(K(n), Clock.UtcNow);
+            var matchId = Engine.ActiveMatches.Keys.Single();
+            Engine.MarkMatchLive(matchId, Clock.UtcNow);
 
             return Telemetry.Started[0];
         }

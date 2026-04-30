@@ -30,6 +30,7 @@ public class TeamCollapseGraceTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, T0.AddSeconds(1));
+        m.MarkLive(T0.AddSeconds(1));
         return m;
     }
 
@@ -105,6 +106,7 @@ public class TeamCollapseGraceTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, T0.AddSeconds(1));
+        m.MarkLive(T0.AddSeconds(1));
 
         m.OnPlayerLeft(K("C"), T0.AddSeconds(10));
         m.OnPlayerReturned(K("C"), T0.AddSeconds(15));   // candidate cleared on return
@@ -137,6 +139,7 @@ public class TeamCollapseGraceTests
         foreach (var team in m.Teams)
             foreach (var p in team)
                 m.OnPlayerJoined(p, T0.AddSeconds(1));
+        m.MarkLive(T0.AddSeconds(1));
 
         m.OnKill(K("A"), K("B"), T0.AddSeconds(10));
         m.OnKill(K("A"), K("C"), T0.AddSeconds(11));

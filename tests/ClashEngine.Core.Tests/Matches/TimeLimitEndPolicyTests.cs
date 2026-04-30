@@ -24,7 +24,8 @@ public class TimeLimitEndPolicyTests
 
         foreach (var team in m.Teams)
             foreach (var p in team)
-                m.OnPlayerJoined(p, T0.AddSeconds(1));   // match becomes Live at T0+1s
+                m.OnPlayerJoined(p, T0.AddSeconds(1));
+        m.MarkLive(T0.AddSeconds(1));   // match becomes Live at T0+1s
         return m;
     }
 
