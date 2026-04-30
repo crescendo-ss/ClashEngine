@@ -39,13 +39,15 @@ public sealed class MatchAudience
     /// Send <paramref name="message"/> to every participant in <paramref name="participants"/>
     /// and to every spectator in <paramref name="arenaName"/> currently focused on the match
     /// identified by <paramref name="matchId"/>. Participants are messaged exactly once even if
-    /// they show up in the focused-spectator set too.
+    /// they show up in the focused-spectator set too. Pass <paramref name="sound"/> to attach
+    /// a chat sound (e.g. <see cref="ChatSound.Ding"/> for the GO! announcement).
     /// </summary>
     public void Broadcast(
         Guid matchId,
         string? arenaName,
         IReadOnlyCollection<Player> participants,
-        string message)
+        string message,
+        ChatSound sound = ChatSound.None)
     {
         ArgumentNullException.ThrowIfNull(participants);
         ArgumentNullException.ThrowIfNull(message);
@@ -54,7 +56,7 @@ public sealed class MatchAudience
         foreach (var p in participants)
         {
             if (p is null) continue;
-            if (sent.Add(p)) _chat.SendMessage(p, message);
+            if (sent.Add(p)) Send(p, message, sound);
         }
 
         if (string.IsNullOrEmpty(arenaName)) return;
@@ -76,12 +78,18 @@ public sealed class MatchAudience
                     if (focused is ClashMatchData cmd && cmd.Match.MatchId == matchId
                         && sent.Add(p))
                     {
-                        _chat.SendMessage(p, message);
+                        Send(p, message, sound);
                     }
                 }
             }
             finally { _playerData.Unlock(); }
         }
         finally { _broker.ReleaseInterface(ref focus); }
+    }
+
+    private void Send(Player p, string message, ChatSound sound)
+    {
+        if (sound == ChatSound.None) _chat.SendMessage(p, message);
+        else _chat.SendMessage(p, sound, message);
     }
 }

@@ -470,7 +470,9 @@ public sealed class MatchOrchestrator
                 }
             }
             // The "GO!" announcement reaches participants and focused spectators alike.
-            BroadcastToAll("GO!");
+            // Mirror upstream TeamVersusMatch's start cue: the message carries a Ding so players
+            // get an audible "match has started" beat in addition to the chat line.
+            BroadcastToAll("GO!", ChatSound.Ding);
         }
         catch (Exception ex)
         {
@@ -481,16 +483,21 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>Sends <paramref name="message"/> to every resolvable participant and to any
-    /// spectator currently focused on this match (per <c>IMatchFocus</c>).</summary>
-    private void BroadcastToAll(string message)
+    /// spectator currently focused on this match (per <c>IMatchFocus</c>). Pass <paramref name="sound"/>
+    /// to attach a chat sound (e.g. <see cref="ChatSound.Ding"/> for the GO! announcement).</summary>
+    private void BroadcastToAll(string message, ChatSound sound = ChatSound.None)
     {
         var participants = ResolveParticipants();
         if (_audience is null)
         {
-            foreach (var p in participants) _chat.SendMessage(p, message);
+            foreach (var p in participants)
+            {
+                if (sound == ChatSound.None) _chat.SendMessage(p, message);
+                else _chat.SendMessage(p, sound, message);
+            }
             return;
         }
-        _audience.Broadcast(_matchId, _queue.MatchArenaName, participants, message);
+        _audience.Broadcast(_matchId, _queue.MatchArenaName, participants, message, sound);
     }
 
     private List<Player> ResolveParticipants()
