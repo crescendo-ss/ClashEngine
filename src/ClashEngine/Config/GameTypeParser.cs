@@ -162,7 +162,7 @@ internal static class GameTypeParser
             $"WarpOnSpawn={def.WarpOnSpawn}, Spawns={spawnDesc}, Ships={shipDesc}, " +
             $"MaxSpawnDrift={(def.MaxSpawnDriftTiles is { } md ? md + "t" : "(unset)")}, " +
             $"StagingDuration={(def.StagingDuration is { } sd ? sd.ToString() : "(default 10s)")}, " +
-            $"CountdownDuration={(def.CountdownDuration is { } cd ? cd.ToString() : "(default 3s)")}, " +
+            $"CountdownDuration={(def.CountdownDuration is { } cd ? cd.ToString() : "(default 5s)")}, " +
             $"KnockoutSpecDelay={(def.KnockoutSpecDelay is { } ks ? ks.ToString() : "(default 0)")}, " +
             $"TeamCollapseGrace={(def.TeamCollapseGrace is { } tg ? tg.ToString() : "(default 10s)")}, " +
             $"ShipChangeGracePeriod={(def.ShipChangeGracePeriod is { } sg ? sg.ToString() : "(default 10s)")}.");

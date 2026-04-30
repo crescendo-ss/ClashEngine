@@ -313,10 +313,16 @@ public sealed class MatchOrchestrator
                     _engine.OnPlayerJoinedArena(_proposal.Teams[t][j], _clock.UtcNow);
 
             SetPhase(MatchPhase.Countdown);
+            // CountdownDuration is validated at >= 5s in QueueDefinition, so the per-second
+            // "-3-/-2-/-1-" tick window always has room to fire.
             _countdownSecondsRemaining = (int)_queue.CountdownDuration.TotalSeconds;
             _timer.SetTimer(OnCountdownTick, 1000, 1000, this);
 
-            BroadcastToAll($"All set! Starting in {_countdownSecondsRemaining} seconds!");
+            // For long countdowns (>10s), tell players how long they're waiting; for short ones,
+            // the "-3-" tick is close enough that an explicit duration would just be noise.
+            BroadcastToAll(_countdownSecondsRemaining > 10
+                ? $"All set! Starting in {_countdownSecondsRemaining} seconds!"
+                : "All set!");
         }
         catch (Exception ex)
         {
@@ -419,7 +425,7 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// One tick per second of the pre-match countdown. Broadcasts the remaining number, then
+    /// One tick per second of the pre-match countdown. Broadcasts the final-3s ticks, then
     /// "GO!" on the final tick and transitions the match to Live.
     /// </summary>
     private bool OnCountdownTick()
@@ -430,7 +436,10 @@ public sealed class MatchOrchestrator
             _countdownSecondsRemaining--;
             if (_countdownSecondsRemaining > 0)
             {
-                BroadcastToAll($"-{_countdownSecondsRemaining}-");
+                // Only the last 3 ticks are announced -- earlier ticks would clutter chat for
+                // longer countdowns where the up-front "Starting in N seconds!" already covered it.
+                if (_countdownSecondsRemaining <= 3)
+                    BroadcastToAll($"-{_countdownSecondsRemaining}-");
                 return true;
             }
 

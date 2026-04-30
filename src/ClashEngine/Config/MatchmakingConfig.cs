@@ -40,7 +40,7 @@ namespace ClashEngine.Config;
 /// GameType1Team2Ships       = warbird,javelin,spider
 /// GameType1MaxSpawnDrift    = 8                  ; tiles (16 px); pre-GO drift warp-back
 /// GameType1StagingDuration  = 10                 ; seconds or HH:MM:SS; warmup (default 10s)
-/// GameType1CountdownDuration = 3                 ; seconds or HH:MM:SS; countdown (default 3s)
+/// GameType1CountdownDuration = 5                 ; seconds or HH:MM:SS; countdown (min/default 5s)
 /// GameType1KnockoutSpecDelay = 2                 ; seconds; grace before specing on last-life
 ///                                                ; death so residual mines/bombs can land.
 ///                                                ; Default 0 (immediate).

@@ -145,11 +145,11 @@ public class QueueDefinitionTests
     }
 
     [Fact]
-    public void StagingDuration_and_CountdownDuration_default_to_10s_and_3s()
+    public void StagingDuration_and_CountdownDuration_default_to_10s_and_5s()
     {
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
         Assert.Equal(TimeSpan.FromSeconds(10), def.StagingDuration);
-        Assert.Equal(TimeSpan.FromSeconds(3), def.CountdownDuration);
+        Assert.Equal(TimeSpan.FromSeconds(5), def.CountdownDuration);
     }
 
     [Fact]
@@ -171,10 +171,21 @@ public class QueueDefinitionTests
     }
 
     [Fact]
-    public void CountdownDuration_rejects_non_positive()
+    public void CountdownDuration_rejects_below_minimum()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new QueueDefinition("q", new MatchShape(2, 2), Policy(),
                 countdownDuration: TimeSpan.FromSeconds(-1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(),
+                countdownDuration: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(),
+                countdownDuration: TimeSpan.FromSeconds(4)));
+
+        // 5s exactly is allowed (the minimum).
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(),
+            countdownDuration: TimeSpan.FromSeconds(5));
+        Assert.Equal(TimeSpan.FromSeconds(5), def.CountdownDuration);
     }
 }

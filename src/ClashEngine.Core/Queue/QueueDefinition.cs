@@ -105,8 +105,8 @@ public sealed class QueueDefinition
 
         if (stagingDuration is { } sd && sd <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(stagingDuration), "Must be positive.");
-        if (countdownDuration is { } cd && cd <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(countdownDuration), "Must be positive.");
+        if (countdownDuration is { } cd && cd < TimeSpan.FromSeconds(5))
+            throw new ArgumentOutOfRangeException(nameof(countdownDuration), "Must be at least 5 seconds.");
 
         int effectiveLookAhead = lookAheadWindow ?? shape.TotalPlayers;
         if (effectiveLookAhead < shape.TotalPlayers)
@@ -128,7 +128,7 @@ public sealed class QueueDefinition
         MaxSpawnDriftTiles = maxSpawnDriftTiles;
         WarpOnSpawn = warpOnSpawn;
         StagingDuration = stagingDuration ?? TimeSpan.FromSeconds(10);
-        CountdownDuration = countdownDuration ?? TimeSpan.FromSeconds(3);
+        CountdownDuration = countdownDuration ?? TimeSpan.FromSeconds(5);
         LookAheadWindow = effectiveLookAhead;
         PromoteWinnersToFront = promoteWinnersToFront;
         MaxConsecutiveDefenses = maxConsecutiveDefenses;
@@ -190,9 +190,10 @@ public sealed class QueueDefinition
     public TimeSpan StagingDuration { get; }
 
     /// <summary>
-    /// Length of the pre-GO countdown. The orchestrator broadcasts a tick every second
-    /// (<c>"Starting in N seconds!"</c> → <c>"-2-"</c> → <c>"-1-"</c> → <c>"GO!"</c>); set this
-    /// to N seconds to control how many ticks players see. Default 3 seconds.
+    /// Length of the pre-GO countdown. The orchestrator broadcasts <c>"All set!"</c> up-front
+    /// (with <c>"Starting in N seconds!"</c> appended for N&gt;10), then ticks <c>"-3-"</c>
+    /// → <c>"-2-"</c> → <c>"-1-"</c> → <c>"GO!"</c> over the final 3s. Minimum and default
+    /// 5 seconds.
     /// </summary>
     public TimeSpan CountdownDuration { get; }
 
