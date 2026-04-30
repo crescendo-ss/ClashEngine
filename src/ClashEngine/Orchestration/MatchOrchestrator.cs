@@ -391,7 +391,7 @@ public sealed class MatchOrchestrator
         }
 
         _pendingKnockoutSpec.Add(victim);
-        _timer.SetTimer(OnDeferredKnockoutSpec, (int)delay.TotalMilliseconds, 0, victim, this);
+        _timer.SetTimer(OnDeferredKnockoutSpec, (int)delay.TotalMilliseconds, Timeout.Infinite, victim, this);
     }
 
     /// <summary>Specs the victim if they're still resolvable and not already in spec.</summary>
