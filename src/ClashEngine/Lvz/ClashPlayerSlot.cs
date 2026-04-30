@@ -11,13 +11,8 @@ namespace ClashEngine.Lvz;
 /// MatchLvz's per-kill statbox refresh always sees current state.
 /// </summary>
 /// <remarks>
-/// <para>Item counts (Bursts, Repels, Thors, Bricks, Decoys, Rockets, Portals) are stubbed to 0
-/// for now. ClashEngine's stats pipeline tracks <c>ItemUses</c> but not currently-held inventory
-/// at the slot level; until that's wired, MatchLvz's item digits will read 0. The slot still
-/// otherwise renders correctly.</para>
-///
-/// <para>PremadeGroupId and LagOuts are stubbed to 0 / null -- both are stats-side concepts the
-/// SS league pipeline persists but the ClashEngine adapter doesn't surface yet.</para>
+/// PremadeGroupId and LagOuts are stubbed to 0 / null -- both are stats-side concepts the
+/// SS league pipeline persists but the ClashEngine adapter doesn't surface yet.
 /// </remarks>
 internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
 {
@@ -82,10 +77,8 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
 
     public ShipType Ship => _ship;
 
-    // Live-read from the recorder's per-life inventory (initial loadout - uses). Inventory
-    // resets to the ship's initial loadout on every OnSpawn; mid-life green pickups aren't
-    // currently tracked, so the count is "items the player has used at most" rather than
-    // guaranteed-current-truth.
+    // Live-read from the recorder's per-life inventory: reset to the ship's initial loadout on
+    // OnSpawn, decremented on OnItemUsed, and incremented on green-prize pickups.
     public byte Bursts => ReadInventory(Core.Stats.ItemKind.Burst);
     public byte Repels => ReadInventory(Core.Stats.ItemKind.Repel);
     public byte Thors => ReadInventory(Core.Stats.ItemKind.Thor);

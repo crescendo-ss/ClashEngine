@@ -100,8 +100,8 @@ public sealed class PlayerStats
 
     /// <summary>
     /// Currently-held item inventory for this player. Reset to the ship's initial loadout on
-    /// every <c>OnSpawn</c>; decremented on <c>OnItemUsed</c>. The host doesn't currently track
-    /// in-match green pickups, so a player who picks up a prize will be undercounted here.
+    /// every <c>OnSpawn</c>, decremented on <c>OnItemUsed</c>, and incremented on
+    /// <c>OnPrizePickup</c> (clamped at the ship's per-item cap).
     /// </summary>
     public IReadOnlyDictionary<ItemKind, int> Inventory => _inventory;
 
