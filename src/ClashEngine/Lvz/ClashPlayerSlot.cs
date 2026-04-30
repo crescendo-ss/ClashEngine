@@ -65,13 +65,18 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
     public int? PremadeGroupId => null;
     public int LagOuts => 0;
 
+    // IPlayerSlot.Lives contract: "remaining lives, *including* the current one." The engine's
+    // LivesRemaining counts respawns left (LivesPerPlayer=3 seeds 2), so we add 1 for the in-flight
+    // life. ExitedAt is the elimination marker -- LivesRemaining stays at 0 once it's set, so we
+    // gate on ExitedAt to distinguish "on last life" (Lives=1) from "knocked out" (Lives=0).
     public int Lives
     {
         get
         {
             var match = _matchData.Match;
             if (!match.LivesPerPlayer.HasValue) return int.MaxValue;
-            return match.LivesRemaining.TryGetValue(_key, out var v) ? v : 0;
+            if (match.ExitedAt.ContainsKey(_key)) return 0;
+            return match.LivesRemaining.TryGetValue(_key, out var v) ? v + 1 : 0;
         }
     }
 
