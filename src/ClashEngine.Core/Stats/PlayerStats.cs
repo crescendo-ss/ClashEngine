@@ -188,20 +188,14 @@ public sealed class PlayerStats
             if (count > 0) _inventory[item] = count;
     }
 
-    /// <summary>Decrement an item from the inventory, clamping at 0. No-op if the player has
-    /// no items of that kind (e.g. no inventory tracked yet, or a green pickup was missed).</summary>
-    internal void DecrementInventory(ItemKind item)
+    /// <summary>Set an item's inventory count to an absolute value. Wire-authoritative writer used
+    /// by the host adapter to mirror the count Continuum reports in <c>ExtraPositionData</c> on
+    /// every position packet -- the client is the source of truth, not a reconstructive event
+    /// stream. <paramref name="count"/> &lt;= 0 removes the entry.</summary>
+    internal void SetInventoryItem(ItemKind item, int count)
     {
-        if (!_inventory.TryGetValue(item, out var n) || n <= 0) return;
-        if (n == 1) _inventory.Remove(item);
-        else _inventory[item] = n - 1;
-    }
-
-    /// <summary>Increment an item in the inventory by one. Called on green-prize pickups so the
-    /// running inventory tracks acquisitions in addition to the per-spawn initial loadout.</summary>
-    internal void IncrementInventory(ItemKind item)
-    {
-        _inventory[item] = _inventory.TryGetValue(item, out var n) ? n + 1 : 1;
+        if (count > 0) _inventory[item] = count;
+        else _inventory.Remove(item);
     }
 
     /// <summary>Accumulate the current life's leftover inventory into <see cref="WastedItems"/>

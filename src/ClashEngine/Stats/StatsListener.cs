@@ -130,6 +130,23 @@ public sealed class StatsListener
         uint tick = (uint)packet.Time;
         recorder.OnPositionPacket(pkey, tick, packet.Energy);
 
+        // Wire-authoritative inventory: when Continuum included ExtraPositionData (gated by the
+        // server-side AddExtraPositionDataWatch installed by MatchLvzAdapter), mirror the
+        // reported item counts straight into the recorder. Replaces the reconstructive decrement
+        // model that was off-by-one on repels and never fired for rockets / bricks / portals.
+        if (hasExtra)
+        {
+            recorder.OnExtraPositionData(
+                pkey,
+                bursts: extra.Bursts,
+                repels: extra.Repels,
+                thors: extra.Thors,
+                bricks: extra.Bricks,
+                decoys: extra.Decoys,
+                rockets: extra.Rockets,
+                portals: extra.Portals);
+        }
+
         if (packet.Weapon.Type == WeaponCodes.Null) return;
 
         var ev = WeaponMapping.FromPositionPacket(packet.Weapon);

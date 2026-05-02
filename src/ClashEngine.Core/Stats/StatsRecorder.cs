@@ -183,24 +183,47 @@ public sealed class StatsRecorder
     }
 
     /// <summary>
-    /// A stockpilable item was picked up via green-prize. Increments the player's tracked
-    /// inventory (clamped at the ship's per-item cap, since Continuum silently drops greens that
-    /// would push past the cap) so a subsequent <see cref="OnItemUsed"/> doesn't undercount, and
-    /// so the end-of-life <see cref="PlayerStats.SnapshotInventoryAsWasted"/> reflects acquired
-    /// items the player never deployed without inflating wasted-item totals with pickups the
-    /// client never actually retained.
+    /// A stockpilable item was picked up via green-prize. Now a no-op: inventory is wire-
+    /// authoritative (driven by <see cref="OnExtraPositionData"/>), and Continuum reports the
+    /// post-pickup count in the next position packet's <c>ExtraPositionData</c>. Kept on the
+    /// public surface to avoid breaking adapter callers; can be removed once the SS-side
+    /// listener stops invoking it.
     /// </summary>
     public void OnPrizePickup(PlayerKey player, ItemKind item)
     {
+        // Intentionally empty. See remarks above.
+    }
+
+    /// <summary>
+    /// Wire-authoritative inventory update from a position packet's <c>ExtraPositionData</c>.
+    /// Continuum reports the player's actual current item counts in every extra-position packet,
+    /// so we mirror those values directly into <see cref="PlayerStats.Inventory"/>. Replaces the
+    /// reconstructive decrement-on-use / increment-on-pickup model that was vulnerable to
+    /// duplicate-packet drift (repels) and missed entirely the items not delivered via the
+    /// position-packet weapon field (rockets, bricks, portals).
+    /// </summary>
+    /// <remarks>
+    /// Counts are <see cref="int"/> for caller convenience but originate as <see cref="byte"/>
+    /// fields in <c>ExtraPositionData</c>. Negative or zero values clear the entry.
+    /// </remarks>
+    public void OnExtraPositionData(
+        PlayerKey player,
+        int bursts,
+        int repels,
+        int thors,
+        int bricks,
+        int decoys,
+        int rockets,
+        int portals)
+    {
         if (!_stats.TryGetValue(player, out var stats)) return;
-        if (_profiles.TryGetValue(player, out var profile)
-            && profile.MaxInventory is not null
-            && profile.MaxInventory.TryGetValue(item, out var max))
-        {
-            int current = stats.Inventory.TryGetValue(item, out var n) ? n : 0;
-            if (current >= max) return;
-        }
-        stats.IncrementInventory(item);
+        stats.SetInventoryItem(ItemKind.Burst, bursts);
+        stats.SetInventoryItem(ItemKind.Repel, repels);
+        stats.SetInventoryItem(ItemKind.Thor, thors);
+        stats.SetInventoryItem(ItemKind.Brick, bricks);
+        stats.SetInventoryItem(ItemKind.Decoy, decoys);
+        stats.SetInventoryItem(ItemKind.Rocket, rockets);
+        stats.SetInventoryItem(ItemKind.Portal, portals);
     }
 
     /// <summary>
@@ -341,16 +364,17 @@ public sealed class StatsRecorder
     }
 
     /// <summary>
-    /// Player used an item. Bumps the per-item counter; for <see cref="ItemKind.Repel"/>,
-    /// additionally snapshots the user's recovery state and credits each recent attacker with
-    /// decay-weighted forced-repel damage. The recovery state is <em>not</em> cleared by a
-    /// repel -- the underlying damage is still unrecovered.
+    /// Player used an item. Bumps the per-item-press counter (used by the stats payload) and,
+    /// for <see cref="ItemKind.Repel"/>, snapshots the user's recovery state and credits each
+    /// recent attacker with decay-weighted forced-repel damage. The recovery state is <em>not</em>
+    /// cleared by a repel -- the underlying damage is still unrecovered. Inventory tracking is
+    /// wire-authoritative now (see <see cref="OnExtraPositionData"/>); this method no longer
+    /// decrements the running inventory.
     /// </summary>
     public void OnItemUsed(PlayerKey player, ItemKind item, uint atTick)
     {
         if (!_stats.TryGetValue(player, out var stats)) return;
         stats.RecordItemUse(item);
-        stats.DecrementInventory(item);
 
         if (item != ItemKind.Repel) return;
 

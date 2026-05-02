@@ -314,7 +314,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // statbox / scoreboard render automatically. Registered after stats so the recorder
         // is available for IMemberStats reads. Skipped silently if SS.Matchmaking module
         // graph isn't loaded -- the callbacks fire harmlessly with no subscribers.
-        _lvzAdapter = new MatchLvzAdapter(broker, _engine, _matchStats, _resolver, _arenaManager, _log);
+        _lvzAdapter = new MatchLvzAdapter(broker, _engine, _matchStats, _resolver, _arenaManager, _game, _log);
 
         // Per-life ship lock + per-match freq lock. Implements IFreqManagerEnforcerAdvisor and
         // registers on every configured match arena; SS Core's FreqManager consults it on each

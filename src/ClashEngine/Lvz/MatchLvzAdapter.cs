@@ -47,10 +47,19 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     private readonly MatchStatsRegistry _stats;
     private readonly PlayerKeyResolver _resolver;
     private readonly IArenaManager _arenaManager;
+    private readonly IGame _game;
     private readonly ILogManager _log;
 
     private readonly Dictionary<Guid, QueueDefinition> _queueByMatch = new();
     private readonly Dictionary<Guid, ClashMatchData> _byMatch = new();
+
+    // Players we installed an ExtraPositionData watch on, per match. Continuum doesn't send
+    // ExtraPositionData unless the server explicitly subscribes via IGame.AddExtraPositionDataWatch;
+    // without it, StatsListener's wire-authoritative inventory read sees hasExtra == false and
+    // silently does nothing. Kept per-match so OnMatchEnded can RemoveExtraPositionDataWatch
+    // exactly the players we added (no risk of stomping a watch installed by a different module).
+    private readonly Dictionary<Guid, List<Player>> _watchedByMatch = new();
+
     private AdvisorRegistrationToken<IMatchFocusAdvisor>? _matchFocusAdvisorToken;
     private bool _registeredCallbacks;
 
@@ -60,6 +69,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         MatchStatsRegistry stats,
         PlayerKeyResolver resolver,
         IArenaManager arenaManager,
+        IGame game,
         ILogManager log)
     {
         _broker = broker ?? throw new ArgumentNullException(nameof(broker));
@@ -67,6 +77,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         _stats = stats ?? throw new ArgumentNullException(nameof(stats));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _arenaManager = arenaManager ?? throw new ArgumentNullException(nameof(arenaManager));
+        _game = game ?? throw new ArgumentNullException(nameof(game));
         _log = log ?? throw new ArgumentNullException(nameof(log));
     }
 
@@ -180,13 +191,24 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
             // match for tracking; subsequent MatchAddPlayingCallback calls then attach players
             // to it. MatchLvz then renders on TeamVersusMatchStartedCallback.
             MatchStartingCallback.Fire(_broker, matchData);
+            var watched = new List<Player>();
             for (int t = 0; t < match.Teams.Count; t++)
                 for (int j = 0; j < match.Teams[t].Count; j++)
                 {
                     var key = match.Teams[t][j];
                     var player = _resolver.Resolve(key);
                     MatchAddPlayingCallback.Fire(_broker, matchData, key.Name, player);
+
+                    // Subscribe to ExtraPositionData so StatsListener can read item counts
+                    // wire-authoritatively. Skip players we can't currently resolve (e.g.
+                    // disconnected mid-Setup); a re-watch on reconnect would need an SS-side
+                    // hook that doesn't exist yet, but the alternative -- queueing the add for
+                    // later -- adds complexity for a vanishingly rare case.
+                    if (player is not null) watched.Add(player);
                 }
+            _watchedByMatch[match.MatchId] = watched;
+            for (int i = 0; i < watched.Count; i++)
+                _game.AddExtraPositionDataWatch(watched[i]);
             MatchStartedCallback.Fire(_broker, matchData);
 
             var ssArena = matchData.Arena;
@@ -204,6 +226,22 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     {
         // Always clean up the queue-by-match entry, symmetric with OnMatchProposed.
         _queueByMatch.Remove(outcome.MatchId);
+
+        // Symmetric ExtraPositionData watch teardown for whatever was installed in OnMatchStarted.
+        // Done unconditionally up here so the watches still get released even if the matchData
+        // bookkeeping below was already torn down (defensive against double-fire / partial init).
+        if (_watchedByMatch.Remove(outcome.MatchId, out var watched))
+        {
+            for (int i = 0; i < watched.Count; i++)
+            {
+                try { _game.RemoveExtraPositionDataWatch(watched[i]); }
+                catch (Exception ex)
+                {
+                    _log.LogM(LogLevel.Warn, LogCategory,
+                        $"RemoveExtraPositionDataWatch failed for {watched[i].Name}: {ex.Message}");
+                }
+            }
+        }
 
         if (!_byMatch.Remove(outcome.MatchId, out var matchData)) return;
 
