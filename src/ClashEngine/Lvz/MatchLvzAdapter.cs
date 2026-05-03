@@ -69,6 +69,14 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
 
     private readonly record struct ItemSnapshot(byte Bursts, byte Repels, byte Thors, byte Bricks, byte Decoys, byte Rockets, byte Portals);
 
+    // Monotonically-increasing counter appended to ClashMatchData.MatchIdentifier.MatchType so
+    // consecutive matches don't share an identifier. Continuum caches LVZ ImageIds for disabled
+    // objects per identifier; reusing one across matches makes the client ignore update packets
+    // for the next match's statbox and the new team's items render as the previous match's
+    // (stale-statbox bleed). Mirrors CaptainsMatch decfb74. Global rather than per-arena because
+    // the client cache lives on the client and uniqueness is the only invariant we need.
+    private int _matchGeneration;
+
     private AdvisorRegistrationToken<IMatchFocusAdvisor>? _matchFocusAdvisorToken;
     private bool _registeredCallbacks;
 
@@ -193,7 +201,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
                 arenaNumber = arena.BaseName == arena.Name ? 0 : ParseArenaNumber(arena.Name, arena.BaseName);
 
             var matchData = new ClashMatchData(
-                match, queue, statsRecorder, _resolver, _arenaManager, arenaNumber);
+                match, queue, statsRecorder, _resolver, _arenaManager, arenaNumber, _matchGeneration++);
             _byMatch[match.MatchId] = matchData;
 
             // Order matters: MatchFocus subscribes to MatchStartingCallback to register the

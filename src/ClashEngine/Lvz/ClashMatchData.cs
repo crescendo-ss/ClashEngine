@@ -40,7 +40,8 @@ internal sealed class ClashMatchData : IMatchData
         StatsRecorder? statsRecorder,
         PlayerKeyResolver resolver,
         IArenaManager arenaManager,
-        int arenaNumber)
+        int arenaNumber,
+        int generation)
     {
         ArgumentNullException.ThrowIfNull(match);
         ArgumentNullException.ThrowIfNull(queue);
@@ -55,8 +56,12 @@ internal sealed class ClashMatchData : IMatchData
         _arenaName = queue.MatchArenaName ?? string.Empty;
 
         // Match identity stable across the whole match. ArenaNumber is constant per arena
-        // attach; BoxIdx defaults to 0 since ClashEngine doesn't multi-box yet.
-        MatchIdentifier = new MatchIdentifier(MatchType: queue.Name, ArenaNumber: arenaNumber, BoxIdx: 0);
+        // attach; BoxIdx defaults to 0 since ClashEngine doesn't multi-box yet. The generation
+        // counter -- appended to MatchType -- guarantees consecutive matches in the same
+        // queue/arena get different MatchIdentifiers so Continuum doesn't reuse cached LVZ
+        // ImageIds across matches (mirrors SS.Matchmaking.Modules.CaptainsMatch decfb74:
+        // "Use unique MatchIdentifier per captains match").
+        MatchIdentifier = new MatchIdentifier(MatchType: $"{queue.Name}#{generation}", ArenaNumber: arenaNumber, BoxIdx: 0);
 
         _configuration = new ClashMatchConfiguration(match, queue);
 
