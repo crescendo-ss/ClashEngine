@@ -108,7 +108,8 @@ internal static class QueueParser
                 livesPerPlayer: gt.Lives > 0 ? gt.Lives : null,
                 teamCollapseGrace: gt.TeamCollapseGrace,
                 tier: casual ? MatchmakingTier.Casual : MatchmakingTier.Competitive,
-                shipChangeGracePeriod: gt.ShipChangeGracePeriod);
+                shipChangeGracePeriod: gt.ShipChangeGracePeriod,
+                timeLimit: gt.TimeLimit);
         }
         catch (Exception ex)
         {

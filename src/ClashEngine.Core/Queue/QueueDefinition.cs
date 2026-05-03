@@ -48,7 +48,8 @@ public sealed class QueueDefinition
         int? livesPerPlayer = null,
         TimeSpan? teamCollapseGrace = null,
         MatchmakingTier tier = MatchmakingTier.Competitive,
-        TimeSpan? shipChangeGracePeriod = null)
+        TimeSpan? shipChangeGracePeriod = null,
+        TimeSpan? timeLimit = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(shape);
@@ -71,6 +72,8 @@ public sealed class QueueDefinition
             throw new ArgumentOutOfRangeException(nameof(teamCollapseGrace), "Must be non-negative.");
         if (shipChangeGracePeriod is { } scgp && scgp < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(shipChangeGracePeriod), "Must be non-negative.");
+        if (timeLimit is { } tl && tl <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeLimit), "Must be positive when set.");
 
         if (shipBySlot is not null)
         {
@@ -139,6 +142,7 @@ public sealed class QueueDefinition
         TeamCollapseGrace = teamCollapseGrace;
         Tier = tier;
         ShipChangeGracePeriod = shipChangeGracePeriod ?? TimeSpan.FromSeconds(10);
+        TimeLimit = timeLimit;
         Queue = new PlayerQueue(name);
     }
 
@@ -260,6 +264,14 @@ public sealed class QueueDefinition
     /// set to <see cref="TimeSpan.Zero"/> to forbid all ship changes during a match.
     /// </summary>
     public TimeSpan ShipChangeGracePeriod { get; }
+
+    /// <summary>
+    /// Wall-clock duration after which the engine ends the match (via <c>TimeLimitEndPolicy</c>),
+    /// and which the host adapter exposes through <c>IMatchConfiguration.TimeLimit</c> so the
+    /// scoreboard timer renders. <see langword="null"/> means kill-count / lives-only -- no timer
+    /// display either.
+    /// </summary>
+    public TimeSpan? TimeLimit { get; }
 
     /// <summary>Conventional team-index -> freq number (100, 200, 300, ...).</summary>
     public static short FreqOf(int teamIndex) => (short)(100 * (teamIndex + 1));
