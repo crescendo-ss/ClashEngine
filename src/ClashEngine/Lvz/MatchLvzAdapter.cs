@@ -60,6 +60,15 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     // exactly the players we added (no risk of stomping a watch installed by a different module).
     private readonly Dictionary<Guid, List<Player>> _watchedByMatch = new();
 
+    // Last seen ExtraPositionData item counts per player. OnPosition diffs against this snapshot
+    // to fire TeamVersusMatchPlayerItemsChangedCallback for any column whose count changed --
+    // the pattern CaptainsMatch / TeamVersusMatch use. Catches rockets / bricks / portals that
+    // aren't reported via position-packet weapon flags. Cleared when the player's watch is torn
+    // down at match end.
+    private readonly Dictionary<PlayerKey, ItemSnapshot> _lastExtra = new();
+
+    private readonly record struct ItemSnapshot(byte Bursts, byte Repels, byte Thors, byte Bricks, byte Decoys, byte Rockets, byte Portals);
+
     private AdvisorRegistrationToken<IMatchFocusAdvisor>? _matchFocusAdvisorToken;
     private bool _registeredCallbacks;
 
@@ -234,12 +243,15 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         {
             for (int i = 0; i < watched.Count; i++)
             {
-                try { _game.RemoveExtraPositionDataWatch(watched[i]); }
+                var p = watched[i];
+                try { _game.RemoveExtraPositionDataWatch(p); }
                 catch (Exception ex)
                 {
                     _log.LogM(LogLevel.Warn, LogCategory,
-                        $"RemoveExtraPositionDataWatch failed for {watched[i].Name}: {ex.Message}");
+                        $"RemoveExtraPositionDataWatch failed for {p.Name}: {ex.Message}");
                 }
+                if (_resolver.KeyOf(p) is PlayerKey k)
+                    _lastExtra.Remove(k);
             }
         }
 
@@ -374,46 +386,61 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     }
 
     /// <summary>
-    /// Position-packet handler. When a packet carries an item-use weapon (Repel/Burst/Decoy),
-    /// fires <c>TeamVersusMatchPlayerItemsChangedCallback</c> for the matching column so MatchLvz
-    /// refreshes the statbox right after the recorder decrements inventory. StatsListener is
-    /// registered first and updates the recorder synchronously on the same callback, so reading
-    /// <c>slot.Bursts</c>/etc. here yields the post-decrement count.
+    /// Position-packet handler. Diffs the wire-reported <see cref="ExtraPositionData"/> item
+    /// counts against a per-player snapshot and fires <c>TeamVersusMatchPlayerItemsChangedCallback</c>
+    /// for any item whose count changed. Mirrors the pattern in
+    /// <c>SS.Matchmaking.Modules.CaptainsMatch</c> / <c>TeamVersusMatch</c>.
     /// </summary>
+    /// <remarks>
+    /// Catches all seven items uniformly -- including rockets, bricks, and portals, which are NOT
+    /// reported as position-packet weapon flags and therefore wouldn't fire on the prior
+    /// weapon-flag-based dispatch. <see cref="StatsListener"/> is registered earlier and absorbs
+    /// the same packet's <c>extra</c> into the recorder synchronously, so reading <c>slot.&lt;Item&gt;</c>
+    /// from MatchLvz here yields the post-update count.
+    /// </remarks>
     private void OnPosition(Player player, ref readonly C2S_PositionPacket packet, ref readonly ExtraPositionData extra, bool hasExtra)
     {
         try
         {
-            if (packet.Weapon.Type == WeaponCodes.Null) return;
-            var ev = WeaponMapping.FromPositionPacket(packet.Weapon);
-            if (!ev.IsItemUse) return;
-
+            if (!hasExtra) return;
             if (_resolver.KeyOf(player) is not PlayerKey key) return;
             if (!TryFindSlot(key, out var matchData, out var slot)) return;
             var ssArena = matchData.Arena;
             if (ssArena is null) return;
 
-            var changes = ItemKindToFlag(ev.Item!.Value);
-            if (changes == ItemChanges.None) return;
-            TeamVersusMatchPlayerItemsChangedCallback.Fire(ssArena, slot, changes);
+            ItemChanges changes;
+            if (_lastExtra.TryGetValue(key, out var prev))
+            {
+                changes = ItemChanges.None;
+                if (prev.Bursts  != extra.Bursts)  changes |= ItemChanges.Bursts;
+                if (prev.Repels  != extra.Repels)  changes |= ItemChanges.Repels;
+                if (prev.Thors   != extra.Thors)   changes |= ItemChanges.Thors;
+                if (prev.Bricks  != extra.Bricks)  changes |= ItemChanges.Bricks;
+                if (prev.Decoys  != extra.Decoys)  changes |= ItemChanges.Decoys;
+                if (prev.Rockets != extra.Rockets) changes |= ItemChanges.Rockets;
+                if (prev.Portals != extra.Portals) changes |= ItemChanges.Portals;
+            }
+            else
+            {
+                // First post-watch packet for this player: refresh every column so the statbox
+                // aligns with the wire-reported initial loadout (also handles the
+                // RegisterPlayer-set fallback differing from what Continuum actually has).
+                changes =
+                    ItemChanges.Bursts | ItemChanges.Repels | ItemChanges.Thors |
+                    ItemChanges.Bricks | ItemChanges.Decoys | ItemChanges.Rockets | ItemChanges.Portals;
+            }
+
+            _lastExtra[key] = new ItemSnapshot(
+                extra.Bursts, extra.Repels, extra.Thors, extra.Bricks, extra.Decoys, extra.Rockets, extra.Portals);
+
+            if (changes != ItemChanges.None)
+                TeamVersusMatchPlayerItemsChangedCallback.Fire(ssArena, slot, changes);
         }
         catch (Exception ex)
         {
             _log.LogM(LogLevel.Error, LogCategory, $"OnPosition fan-out failed: {ex}");
         }
     }
-
-    private static ItemChanges ItemKindToFlag(ItemKind item) => item switch
-    {
-        ItemKind.Burst => ItemChanges.Bursts,
-        ItemKind.Repel => ItemChanges.Repels,
-        ItemKind.Decoy => ItemChanges.Decoys,
-        ItemKind.Thor => ItemChanges.Thors,
-        ItemKind.Brick => ItemChanges.Bricks,
-        ItemKind.Rocket => ItemChanges.Rockets,
-        ItemKind.Portal => ItemChanges.Portals,
-        _ => ItemChanges.None,
-    };
 
     private bool TryFindSlot(PlayerKey key, out ClashMatchData matchData, out IPlayerSlot slot)
     {
