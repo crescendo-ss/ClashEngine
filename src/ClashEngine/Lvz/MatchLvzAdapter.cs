@@ -47,10 +47,28 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     private readonly MatchStatsRegistry _stats;
     private readonly PlayerKeyResolver _resolver;
     private readonly IArenaManager _arenaManager;
+    private readonly IGame _game;
     private readonly ILogManager _log;
 
     private readonly Dictionary<Guid, QueueDefinition> _queueByMatch = new();
     private readonly Dictionary<Guid, ClashMatchData> _byMatch = new();
+
+    // Players we installed an ExtraPositionData watch on, per match. Continuum doesn't send
+    // ExtraPositionData unless the server explicitly subscribes via IGame.AddExtraPositionDataWatch;
+    // without it, StatsListener's wire-authoritative inventory read sees hasExtra == false and
+    // silently does nothing. Kept per-match so OnMatchEnded can RemoveExtraPositionDataWatch
+    // exactly the players we added (no risk of stomping a watch installed by a different module).
+    private readonly Dictionary<Guid, List<Player>> _watchedByMatch = new();
+
+    // Last seen ExtraPositionData item counts per player. OnPosition diffs against this snapshot
+    // to fire TeamVersusMatchPlayerItemsChangedCallback for any column whose count changed --
+    // the pattern CaptainsMatch / TeamVersusMatch use. Catches rockets / bricks / portals that
+    // aren't reported via position-packet weapon flags. Cleared when the player's watch is torn
+    // down at match end.
+    private readonly Dictionary<PlayerKey, ItemSnapshot> _lastExtra = new();
+
+    private readonly record struct ItemSnapshot(byte Bursts, byte Repels, byte Thors, byte Bricks, byte Decoys, byte Rockets, byte Portals);
+
     private AdvisorRegistrationToken<IMatchFocusAdvisor>? _matchFocusAdvisorToken;
     private bool _registeredCallbacks;
 
@@ -60,6 +78,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         MatchStatsRegistry stats,
         PlayerKeyResolver resolver,
         IArenaManager arenaManager,
+        IGame game,
         ILogManager log)
     {
         _broker = broker ?? throw new ArgumentNullException(nameof(broker));
@@ -67,6 +86,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         _stats = stats ?? throw new ArgumentNullException(nameof(stats));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _arenaManager = arenaManager ?? throw new ArgumentNullException(nameof(arenaManager));
+        _game = game ?? throw new ArgumentNullException(nameof(game));
         _log = log ?? throw new ArgumentNullException(nameof(log));
     }
 
@@ -180,13 +200,24 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
             // match for tracking; subsequent MatchAddPlayingCallback calls then attach players
             // to it. MatchLvz then renders on TeamVersusMatchStartedCallback.
             MatchStartingCallback.Fire(_broker, matchData);
+            var watched = new List<Player>();
             for (int t = 0; t < match.Teams.Count; t++)
                 for (int j = 0; j < match.Teams[t].Count; j++)
                 {
                     var key = match.Teams[t][j];
                     var player = _resolver.Resolve(key);
                     MatchAddPlayingCallback.Fire(_broker, matchData, key.Name, player);
+
+                    // Subscribe to ExtraPositionData so StatsListener can read item counts
+                    // wire-authoritatively. Skip players we can't currently resolve (e.g.
+                    // disconnected mid-Setup); a re-watch on reconnect would need an SS-side
+                    // hook that doesn't exist yet, but the alternative -- queueing the add for
+                    // later -- adds complexity for a vanishingly rare case.
+                    if (player is not null) watched.Add(player);
                 }
+            _watchedByMatch[match.MatchId] = watched;
+            for (int i = 0; i < watched.Count; i++)
+                _game.AddExtraPositionDataWatch(watched[i]);
             MatchStartedCallback.Fire(_broker, matchData);
 
             var ssArena = matchData.Arena;
@@ -204,6 +235,25 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     {
         // Always clean up the queue-by-match entry, symmetric with OnMatchProposed.
         _queueByMatch.Remove(outcome.MatchId);
+
+        // Symmetric ExtraPositionData watch teardown for whatever was installed in OnMatchStarted.
+        // Done unconditionally up here so the watches still get released even if the matchData
+        // bookkeeping below was already torn down (defensive against double-fire / partial init).
+        if (_watchedByMatch.Remove(outcome.MatchId, out var watched))
+        {
+            for (int i = 0; i < watched.Count; i++)
+            {
+                var p = watched[i];
+                try { _game.RemoveExtraPositionDataWatch(p); }
+                catch (Exception ex)
+                {
+                    _log.LogM(LogLevel.Warn, LogCategory,
+                        $"RemoveExtraPositionDataWatch failed for {p.Name}: {ex.Message}");
+                }
+                if (_resolver.KeyOf(p) is PlayerKey k)
+                    _lastExtra.Remove(k);
+            }
+        }
 
         if (!_byMatch.Remove(outcome.MatchId, out var matchData)) return;
 
@@ -336,46 +386,61 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     }
 
     /// <summary>
-    /// Position-packet handler. When a packet carries an item-use weapon (Repel/Burst/Decoy),
-    /// fires <c>TeamVersusMatchPlayerItemsChangedCallback</c> for the matching column so MatchLvz
-    /// refreshes the statbox right after the recorder decrements inventory. StatsListener is
-    /// registered first and updates the recorder synchronously on the same callback, so reading
-    /// <c>slot.Bursts</c>/etc. here yields the post-decrement count.
+    /// Position-packet handler. Diffs the wire-reported <see cref="ExtraPositionData"/> item
+    /// counts against a per-player snapshot and fires <c>TeamVersusMatchPlayerItemsChangedCallback</c>
+    /// for any item whose count changed. Mirrors the pattern in
+    /// <c>SS.Matchmaking.Modules.CaptainsMatch</c> / <c>TeamVersusMatch</c>.
     /// </summary>
+    /// <remarks>
+    /// Catches all seven items uniformly -- including rockets, bricks, and portals, which are NOT
+    /// reported as position-packet weapon flags and therefore wouldn't fire on the prior
+    /// weapon-flag-based dispatch. <see cref="StatsListener"/> is registered earlier and absorbs
+    /// the same packet's <c>extra</c> into the recorder synchronously, so reading <c>slot.&lt;Item&gt;</c>
+    /// from MatchLvz here yields the post-update count.
+    /// </remarks>
     private void OnPosition(Player player, ref readonly C2S_PositionPacket packet, ref readonly ExtraPositionData extra, bool hasExtra)
     {
         try
         {
-            if (packet.Weapon.Type == WeaponCodes.Null) return;
-            var ev = WeaponMapping.FromPositionPacket(packet.Weapon);
-            if (!ev.IsItemUse) return;
-
+            if (!hasExtra) return;
             if (_resolver.KeyOf(player) is not PlayerKey key) return;
             if (!TryFindSlot(key, out var matchData, out var slot)) return;
             var ssArena = matchData.Arena;
             if (ssArena is null) return;
 
-            var changes = ItemKindToFlag(ev.Item!.Value);
-            if (changes == ItemChanges.None) return;
-            TeamVersusMatchPlayerItemsChangedCallback.Fire(ssArena, slot, changes);
+            ItemChanges changes;
+            if (_lastExtra.TryGetValue(key, out var prev))
+            {
+                changes = ItemChanges.None;
+                if (prev.Bursts  != extra.Bursts)  changes |= ItemChanges.Bursts;
+                if (prev.Repels  != extra.Repels)  changes |= ItemChanges.Repels;
+                if (prev.Thors   != extra.Thors)   changes |= ItemChanges.Thors;
+                if (prev.Bricks  != extra.Bricks)  changes |= ItemChanges.Bricks;
+                if (prev.Decoys  != extra.Decoys)  changes |= ItemChanges.Decoys;
+                if (prev.Rockets != extra.Rockets) changes |= ItemChanges.Rockets;
+                if (prev.Portals != extra.Portals) changes |= ItemChanges.Portals;
+            }
+            else
+            {
+                // First post-watch packet for this player: refresh every column so the statbox
+                // aligns with the wire-reported initial loadout (also handles the
+                // RegisterPlayer-set fallback differing from what Continuum actually has).
+                changes =
+                    ItemChanges.Bursts | ItemChanges.Repels | ItemChanges.Thors |
+                    ItemChanges.Bricks | ItemChanges.Decoys | ItemChanges.Rockets | ItemChanges.Portals;
+            }
+
+            _lastExtra[key] = new ItemSnapshot(
+                extra.Bursts, extra.Repels, extra.Thors, extra.Bricks, extra.Decoys, extra.Rockets, extra.Portals);
+
+            if (changes != ItemChanges.None)
+                TeamVersusMatchPlayerItemsChangedCallback.Fire(ssArena, slot, changes);
         }
         catch (Exception ex)
         {
             _log.LogM(LogLevel.Error, LogCategory, $"OnPosition fan-out failed: {ex}");
         }
     }
-
-    private static ItemChanges ItemKindToFlag(ItemKind item) => item switch
-    {
-        ItemKind.Burst => ItemChanges.Bursts,
-        ItemKind.Repel => ItemChanges.Repels,
-        ItemKind.Decoy => ItemChanges.Decoys,
-        ItemKind.Thor => ItemChanges.Thors,
-        ItemKind.Brick => ItemChanges.Bricks,
-        ItemKind.Rocket => ItemChanges.Rockets,
-        ItemKind.Portal => ItemChanges.Portals,
-        _ => ItemChanges.None,
-    };
 
     private bool TryFindSlot(PlayerKey key, out ClashMatchData matchData, out IPlayerSlot slot)
     {
