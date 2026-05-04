@@ -236,12 +236,15 @@ public class ActiveMatchTests
     }
 
     [Fact]
-    public void Teamkill_does_not_decrement_lives()
+    public void Teamkill_decrements_victim_lives()
     {
+        // Aligned with CaptainsMatch / TeamVersusMatch: a TK victim loses a life just like a
+        // cross-team victim does, so the statbox doesn't render the player as immortal under
+        // friendly fire. Lives=3 -> initial respawns=2; after one TK, B has 1 respawn left.
         var m = JoinAll(BuildMatch(livesPerPlayer: 3));
         m.OnKill(K("A"), K("B"), T0.AddSeconds(10));
 
-        Assert.Equal(2, m.LivesRemaining[K("B")]);
+        Assert.Equal(1, m.LivesRemaining[K("B")]);
     }
 
     [Fact]
