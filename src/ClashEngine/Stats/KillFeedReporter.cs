@@ -61,31 +61,53 @@ public sealed class KillFeedReporter
         }
         _chat.SendArenaMessage(arena, line1.ToString());
 
-        // Line 2 (optional): lives remaining for the victim, only when the match tracks lives.
-        if (match.LivesPerPlayer.HasValue
-            && match.LivesRemaining.TryGetValue(victim, out var lives)
-            && lives > 0)
+        // Line 2 (optional): lives status for the victim. KillFeedReporter is a pre-engine
+        // reader, so LivesRemaining still holds the count BEFORE this death is processed:
+        //   - lives > 0  -> the victim respawns; pre-decrement count happens to equal the
+        //                   user-friendly "lives left after this death" (current life +
+        //                   remaining respawns), so display verbatim.
+        //   - lives == 0 -> the engine is about to set ExitedAt; this is the eliminating
+        //                   death. Captains/TVM convention: "X is OUT".
+        if (match.LivesPerPlayer.HasValue && match.LivesRemaining.TryGetValue(victim, out var lives))
         {
-            string suffix = lives == 1 ? "life" : "lives";
-            _chat.SendArenaMessage(arena, $"{victim.Name} has {lives} {suffix} remaining");
+            if (lives > 0)
+            {
+                string suffix = lives == 1 ? "life" : "lives";
+                _chat.SendArenaMessage(arena, $"{victim.Name} has {lives} {suffix} remaining");
+            }
+            else if (!match.ExitedAt.ContainsKey(victim))
+            {
+                _chat.SendArenaMessage(arena, $"{victim.Name} is OUT");
+            }
         }
 
-        // Line 3: "Score: a-b TEAM_NAME -- [m:ss]" with TEAM_NAME = killer's team.
-        var (killerScore, victimScore) = FormatScore(match, killer, victim);
-        var killerTeamLabel = LabelOfTeamContaining(match, killer);
+        // Line 3: "Score: a-b TEAM_NAME -- [m:ss]". The labeled team is whichever just scored
+        // (so the same kill never reads as 0-0). For a normal kill that's the killer's team;
+        // for a 2-team teamkill it's the opposing team (which gets the anti-grief point); for
+        // 3+ team TKs no team scored, fall back to killer's team for a stable label.
+        //
+        // KillFeedReporter runs as a pre-engine reader (StatsListener.OnKill registers in
+        // MatchKillRouter._preEngineReaders), so match.KillsByTeam still holds the PRE-kill
+        // counts. We predict the post-engine score by adding +1 to whichever team is about to
+        // score. The 2-team TK gating mirrors the engine fix in ActiveMatch.OnKill.
+        int killerTeam = TeamOf(match, killer);
+        int victimTeam = TeamOf(match, victim);
+        bool isTeamkill = killerTeam >= 0 && killerTeam == victimTeam;
+        bool scored = !isTeamkill || match.Teams.Count == 2;
+        int scoringTeam = (!isTeamkill || match.Teams.Count != 2)
+            ? killerTeam
+            : (killerTeam == 0 ? 1 : 0);
+        int otherTeam = (scoringTeam == 0) ? 1 : 0;
+
+        int scoringPre = (scoringTeam >= 0 && scoringTeam < match.KillsByTeam.Count) ? match.KillsByTeam[scoringTeam] : 0;
+        int scoringScore = scoringPre + (scored ? 1 : 0);
+        int otherScore = (otherTeam >= 0 && otherTeam < match.KillsByTeam.Count) ? match.KillsByTeam[otherTeam] : 0;
+        string scoringLabel = LabelOfTeam(match, scoringTeam);
+
         var elapsed = _clock.UtcNow - (match.StartedAt ?? _clock.UtcNow);
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
         _chat.SendArenaMessage(arena,
-            $"Score: {killerScore}-{victimScore} {killerTeamLabel} -- [{(int)elapsed.TotalMinutes}:{elapsed.Seconds:D2}]");
-    }
-
-    private static (int KillerScore, int VictimScore) FormatScore(ActiveMatch match, PlayerKey killer, PlayerKey victim)
-    {
-        int killerTeam = TeamOf(match, killer);
-        int victimTeam = TeamOf(match, victim);
-        int kScore = killerTeam >= 0 && killerTeam < match.KillsByTeam.Count ? match.KillsByTeam[killerTeam] : 0;
-        int vScore = victimTeam >= 0 && victimTeam < match.KillsByTeam.Count ? match.KillsByTeam[victimTeam] : 0;
-        return (kScore, vScore);
+            $"Score: {scoringScore}-{otherScore} {scoringLabel} -- [{(int)elapsed.TotalMinutes}:{elapsed.Seconds:D2}]");
     }
 
     private static int TeamOf(ActiveMatch match, PlayerKey key)
@@ -96,11 +118,11 @@ public sealed class KillFeedReporter
         return -1;
     }
 
-    private static string LabelOfTeamContaining(ActiveMatch match, PlayerKey key)
+    private static string LabelOfTeam(ActiveMatch match, int teamIdx)
     {
-        int t = TeamOf(match, key);
-        if (t < 0) return "?";
-        var team = match.Teams[t];
+        if (teamIdx < 0 || teamIdx >= match.Teams.Count) return "?";
+        var team = match.Teams[teamIdx];
+        if (team.Count == 0) return "?";
         if (team.Count == 1) return team[0].Name;
         var sb = new StringBuilder();
         for (int i = 0; i < team.Count; i++)

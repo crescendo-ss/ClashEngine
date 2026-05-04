@@ -376,16 +376,34 @@ public sealed class ActiveMatch
         if (!_teamOf.TryGetValue(victim, out var victimTeam)) return;
 
         Increment(_deathsByPlayer, victim);
+        bool isTeamkill = killerTeam == victimTeam;
 
-        if (killerTeam == victimTeam)
+        if (isTeamkill)
         {
             Increment(_teamkillsByPlayer, killer);
-            return;
+
+            // 2-team penalty (matches CaptainsMatch / TeamVersusMatch): the opposing team
+            // gets a point. In 3+ team matches there is no canonical "other" team to award,
+            // so the score-side penalty is skipped -- the lives decrement and griefing-flag
+            // tracking below still apply.
+            if (Teams.Count == 2)
+            {
+                int otherTeam = killerTeam == 0 ? 1 : 0;
+                _killsByTeam[otherTeam]++;
+            }
+        }
+        else
+        {
+            Increment(_killsByPlayer, killer);
+            _killsByTeam[killerTeam]++;
         }
 
-        Increment(_killsByPlayer, killer);
-        _killsByTeam[killerTeam]++;
-
+        // Always decrement the victim's remaining lives, regardless of TK. CaptainsMatch
+        // (Lives-- at CaptainsMatch.cs:741) and TeamVersusMatch (Lives-- at
+        // TeamVersusMatch.cs:1158) both decrement unconditionally; the early-return-on-TK
+        // pattern that used to live here was the outlier and silently let griefers wipe the
+        // statbox without consequence.
+        //
         // The counter is remaining respawns: a death with respawns left consumes one and the
         // player lives on; a death with none left is the eliminating one. LivesPerPlayer = 1
         // seeds 0 respawns so the first death qualifies; LivesPerPlayer = 2 seeds 1 respawn so
@@ -399,7 +417,8 @@ public sealed class ActiveMatch
                 _exitedAt[victim] = at;
         }
 
-        // After a death, refresh collapse timers and check for immediate forfeit/collapse.
+        // After a death, refresh collapse timers and check for immediate forfeit/collapse --
+        // including TK-driven eliminations, since a team can theoretically self-wipe.
         UpdateTeamCollapseTimers(at);
         if (TryForfeitOrAbandon(at)) return;
 
