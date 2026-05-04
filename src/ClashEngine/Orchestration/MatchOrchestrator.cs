@@ -37,6 +37,13 @@ public sealed class MatchOrchestrator
     private readonly PlayerKeyResolver _resolver;
     private readonly ClashLog _verbose;
     private readonly MatchAudience? _audience;
+    private readonly MatchFreqAllocator? _freqAllocator;
+
+    /// <summary>Team-0 freq for this match; team-t uses <c>_freqBase + t * 100</c>. Defaults to
+    /// the legacy 100/200/... convention until <see cref="BeginSetup"/> reserves a rotating base
+    /// from <see cref="MatchFreqAllocator"/>. Read by <see cref="MatchFreqAdvisor"/> and the LVZ
+    /// team adapter via the allocator so they all see the same numbers.</summary>
+    private short _freqBase = MatchFreqAllocator.BaseFreq;
 
     /// <summary>Staging-phase idle detection (per-player).</summary>
     private readonly IdleStateTracker _idleTracker = new();
@@ -74,6 +81,7 @@ public sealed class MatchOrchestrator
         PlayerKeyResolver resolver,
         ClashLog verbose,
         MatchAudience? audience = null,
+        MatchFreqAllocator? freqAllocator = null,
         IRandomSource? rng = null)
     {
         _matchId = matchId;
@@ -89,6 +97,7 @@ public sealed class MatchOrchestrator
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _verbose = verbose ?? throw new ArgumentNullException(nameof(verbose));
         _audience = audience;
+        _freqAllocator = freqAllocator;
         _rng = rng ?? DefaultRandomSource.Instance;
         _drift = new SpawnDriftEnforcer(_queue, _proposal);
 
@@ -131,9 +140,15 @@ public sealed class MatchOrchestrator
 
         _drift.ChooseSpawnForEachTeam(_proposal, _rng);
 
+        // Reserve a rotating freq base for this match so concurrent matches in the same arena
+        // don't all stack their teams on freqs 100/200. Falls back to the static convention when
+        // no allocator was injected (e.g. test paths constructing the orchestrator directly).
+        _freqBase = _freqAllocator?.Allocate(_matchId, arenaName, _proposal.Teams.Count)
+            ?? MatchFreqAllocator.BaseFreq;
+
         for (int t = 0; t < _proposal.Teams.Count; t++)
         {
-            short freq = QueueDefinition.FreqOf(t);
+            short freq = (short)(_freqBase + t * MatchFreqAllocator.FreqStep);
             var spawn = _drift.ChosenSpawn(t);
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
@@ -342,6 +357,10 @@ public sealed class MatchOrchestrator
         // match-end spec below (TState-typed and untyped variants are tracked separately).
         _timer.ClearTimer<PlayerKey>(OnDeferredKnockoutSpec, this);
         _pendingKnockoutSpec.Clear();
+
+        // Free the freq slot back to the rotating pool so a future match in the same arena can
+        // pick it up after we've cycled past it. Symmetric with the BeginSetup allocate.
+        _freqAllocator?.Release(_matchId);
 
         // Broadcast the summary to everyone (participants + focused spectators) before
         // returning the participants to spec so watchers learn the outcome too.

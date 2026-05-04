@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using ClashEngine.Adapter;
 using ClashEngine.Core;
@@ -12,22 +13,36 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Stats;
 
 /// <summary>
-/// Composes the in-arena kill-feed line(s) for a match kill and broadcasts them to the arena.
-/// Reads attribution from <see cref="StatsRecorder"/> (must be called <em>before</em> the
-/// recorder clears its recovery state) and pulls scoreline / lives-remaining state from the
-/// engine's <see cref="ActiveMatch"/>.
+/// Composes the in-arena kill-feed line(s) for a match kill and broadcasts them to the
+/// match-scoped audience (participants + spectators with the match in focus). Reads attribution
+/// from <see cref="StatsRecorder"/> (must be called <em>before</em> the recorder clears its
+/// recovery state) and pulls scoreline / lives-remaining state from the engine's
+/// <see cref="ActiveMatch"/>.
 /// </summary>
+/// <remarks>
+/// Uses <see cref="MatchAudience"/> rather than <c>SendArenaMessage</c> so concurrent matches in
+/// the same arena (via SS.Matchmaking.MatchFocus) don't bleed kill lines across matches.
+/// </remarks>
 public sealed class KillFeedReporter
 {
     private readonly IChat _chat;
     private readonly MatchmakingEngine _engine;
     private readonly IClock _clock;
+    private readonly PlayerKeyResolver? _resolver;
+    private readonly MatchAudience? _audience;
 
-    public KillFeedReporter(IChat chat, MatchmakingEngine engine, IClock clock)
+    public KillFeedReporter(
+        IChat chat,
+        MatchmakingEngine engine,
+        IClock clock,
+        PlayerKeyResolver? resolver = null,
+        MatchAudience? audience = null)
     {
         _chat = chat ?? throw new ArgumentNullException(nameof(chat));
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _resolver = resolver;
+        _audience = audience;
     }
 
     /// <summary>
@@ -45,6 +60,9 @@ public sealed class KillFeedReporter
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!_engine.ActiveMatches.TryGetValue(matchId, out var match)) return;
 
+        // Resolve the participant set once -- every line below targets the same recipients.
+        var participants = ResolveParticipants(match);
+
         // Line 1: "Victim kb Killer (dmg) -- Add: A1 (d1), A2 (d2)"
         var line1 = new StringBuilder();
         line1.Append(victim.Name).Append(" kb ").Append(killer.Name)
@@ -59,7 +77,7 @@ public sealed class KillFeedReporter
                 line1.Append(a.Player.Name).Append(" (").Append(a.Damage).Append(')');
             }
         }
-        _chat.SendArenaMessage(arena, line1.ToString());
+        Send(matchId, arena, participants, line1.ToString());
 
         // Line 2 (optional): lives status for the victim. KillFeedReporter is a pre-engine
         // reader, so LivesRemaining still holds the count BEFORE this death is processed:
@@ -73,11 +91,11 @@ public sealed class KillFeedReporter
             if (lives > 0)
             {
                 string suffix = lives == 1 ? "life" : "lives";
-                _chat.SendArenaMessage(arena, $"{victim.Name} has {lives} {suffix} remaining");
+                Send(matchId, arena, participants, $"{victim.Name} has {lives} {suffix} remaining");
             }
             else if (!match.ExitedAt.ContainsKey(victim))
             {
-                _chat.SendArenaMessage(arena, $"{victim.Name} is OUT");
+                Send(matchId, arena, participants, $"{victim.Name} is OUT");
             }
         }
 
@@ -106,8 +124,30 @@ public sealed class KillFeedReporter
 
         var elapsed = _clock.UtcNow - (match.StartedAt ?? _clock.UtcNow);
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
-        _chat.SendArenaMessage(arena,
+        Send(matchId, arena, participants,
             $"Score: {scoringScore}-{otherScore} {scoringLabel} -- [{(int)elapsed.TotalMinutes}:{elapsed.Seconds:D2}]");
+    }
+
+    private List<Player> ResolveParticipants(ActiveMatch match)
+    {
+        var list = new List<Player>();
+        if (_resolver is null) return list;
+        for (int t = 0; t < match.Teams.Count; t++)
+        {
+            for (int j = 0; j < match.Teams[t].Count; j++)
+            {
+                if (_resolver.Resolve(match.Teams[t][j]) is { } p) list.Add(p);
+            }
+        }
+        return list;
+    }
+
+    private void Send(Guid matchId, Arena arena, List<Player> participants, string message)
+    {
+        if (_audience is not null)
+            _audience.Broadcast(matchId, arena.Name, participants, message);
+        else
+            _chat.SendArenaMessage(arena, message);
     }
 
     private static int TeamOf(ActiveMatch match, PlayerKey key)

@@ -221,9 +221,14 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // staging / countdown / cleanup / collapse messages reach watchers as well.
         var matchAudience = new MatchAudience(broker, _playerData, _arenaManager, _chat);
 
+        // Rotates per-match team freqs (100..2000) so concurrent matches in the same arena don't
+        // all park on freq 100/200. Shared by the orchestrator, the LVZ team adapter, and the
+        // freq-lock advisor so they all agree on what freq this match's team-t is on.
+        var freqAllocator = new MatchFreqAllocator();
+
         _orchestrators = new MatchOrchestratorRegistry(
             broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
-            matchAudience);
+            matchAudience, freqAllocator);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 
@@ -272,13 +277,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
             : null;
         _matchStatsTelemetry = new ClashStatsTelemetry(
             _engine, _matchStats, _config, _arenaManager, _clock, _matchUploader, _log,
-            _chat, _resolver, _watchDamage, recordingPathLookup);
+            _chat, _resolver, _watchDamage, recordingPathLookup, matchAudience);
         if (_watchDamage is null)
             _log.LogM(LogLevel.Warn, LogCategory,
                 "IWatchDamage not available; damage stats (DDealt/DTaken/HitCount) will be zero.");
 
         var empLookup = new EmpShutdownLookup(_config);
-        var killFeedReporter = new KillFeedReporter(_chat, _engine, _clock);
+        var killFeedReporter = new KillFeedReporter(_chat, _engine, _clock, _resolver, matchAudience);
         _statsListener = new StatsListener(
             broker, _engine, _matchStats, _playerData, _resolver, empLookup, killFeedReporter, _log);
         _statsListener.Register();
@@ -314,13 +319,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // statbox / scoreboard render automatically. Registered after stats so the recorder
         // is available for IMemberStats reads. Skipped silently if SS.Matchmaking module
         // graph isn't loaded -- the callbacks fire harmlessly with no subscribers.
-        _lvzAdapter = new MatchLvzAdapter(broker, _engine, _matchStats, _resolver, _arenaManager, _game, _log);
+        _lvzAdapter = new MatchLvzAdapter(broker, _engine, _matchStats, _resolver, _arenaManager, _game, _log, freqAllocator);
 
         // Per-life ship lock + per-match freq lock. Implements IFreqManagerEnforcerAdvisor and
         // registers on every configured match arena; SS Core's FreqManager consults it on each
         // ship/freq change request from a player. Direct API placements via IGame.SetShipAndFreq
         // (orchestrator setup, knockout-spec) bypass the advisor and remain unaffected.
-        _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log);
+        _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, freqAllocator);
 
         var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { _listener, _orchestrators };
         if (_replayRecorder is not null) listeners.Add(_replayRecorder);

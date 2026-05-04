@@ -41,7 +41,8 @@ internal sealed class ClashMatchData : IMatchData
         PlayerKeyResolver resolver,
         IArenaManager arenaManager,
         int arenaNumber,
-        int generation)
+        int generation,
+        short freqBase)
     {
         ArgumentNullException.ThrowIfNull(match);
         ArgumentNullException.ThrowIfNull(queue);
@@ -69,7 +70,7 @@ internal sealed class ClashMatchData : IMatchData
         // and to this MatchData, so MatchLvz can navigate the structure without recomputing.
         var teams = new ITeam[match.Teams.Count];
         for (int t = 0; t < match.Teams.Count; t++)
-            teams[t] = new ClashTeam(this, t, match.Teams[t]);
+            teams[t] = new ClashTeam(this, t, match.Teams[t], freqBase);
         _teamsRO = Array.AsReadOnly(teams);
     }
 

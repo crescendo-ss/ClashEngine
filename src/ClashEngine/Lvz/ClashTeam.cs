@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using ClashEngine.Adapter;
 using ClashEngine.Core.Identity;
-using ClashEngine.Core.Queue;
 using SS.Matchmaking.League;
 using SS.Matchmaking.TeamVersus;
 
@@ -18,13 +18,13 @@ internal sealed class ClashTeam : ITeam
     private readonly ClashMatchData _matchData;
     private readonly ReadOnlyCollection<IPlayerSlot> _slotsRO;
 
-    public ClashTeam(ClashMatchData matchData, int teamIdx, IReadOnlyList<PlayerKey> slotKeys)
+    public ClashTeam(ClashMatchData matchData, int teamIdx, IReadOnlyList<PlayerKey> slotKeys, short freqBase)
     {
         ArgumentNullException.ThrowIfNull(matchData);
         ArgumentNullException.ThrowIfNull(slotKeys);
         _matchData = matchData;
         TeamIdx = teamIdx;
-        Freq = QueueDefinition.FreqOf(teamIdx);
+        Freq = (short)(freqBase + teamIdx * MatchFreqAllocator.FreqStep);
 
         var slots = new IPlayerSlot[slotKeys.Count];
         for (int j = 0; j < slotKeys.Count; j++)

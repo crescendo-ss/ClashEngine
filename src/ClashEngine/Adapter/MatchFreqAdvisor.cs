@@ -48,6 +48,7 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
     private readonly PlayerKeyResolver _resolver;
     private readonly IClock _clock;
     private readonly ILogManager _log;
+    private readonly MatchFreqAllocator? _freqAllocator;
 
     /// <summary>
     /// Per-match-participant lock state. Populated at <see cref="OnMatchStarted"/>, mutated by
@@ -74,7 +75,8 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         IArenaManager arenaManager,
         PlayerKeyResolver resolver,
         IClock clock,
-        ILogManager log)
+        ILogManager log,
+        MatchFreqAllocator? freqAllocator = null)
     {
         _broker = broker ?? throw new ArgumentNullException(nameof(broker));
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
@@ -82,6 +84,7 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _freqAllocator = freqAllocator;
     }
 
     /// <summary>Subscribe to arena lifecycle so we can register the advisor on each match
@@ -136,7 +139,10 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         if (!_queueByMatch.TryGetValue(match.MatchId, out var queue)) return;
         for (int t = 0; t < match.Teams.Count; t++)
         {
-            short freq = QueueDefinition.FreqOf(t);
+            // Read the actual freq the orchestrator placed this team on rather than re-deriving
+            // from the static convention -- with rotating freq allocation across concurrent
+            // matches, team-0 may not be on freq 100.
+            short freq = _freqAllocator?.FreqOf(match.MatchId, t) ?? QueueDefinition.FreqOf(t);
             for (int j = 0; j < match.Teams[t].Count; j++)
             {
                 var key = match.Teams[t][j];

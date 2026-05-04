@@ -38,6 +38,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
     private readonly PlayerKeyResolver _resolver;
     private readonly MatchDamageWatcher _damageWatcher;
     private readonly Func<Guid, string?>? _recordingPathLookup;
+    private readonly MatchAudience? _audience;
 
     // Captured at OnMatchProposed by walking ActiveMatches for the proposal's Teams reference.
     // Read at OnMatchStarted to look up ship config. Same pattern MatchOrchestratorRegistry uses.
@@ -58,7 +59,8 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
         IChat chat,
         PlayerKeyResolver resolver,
         IWatchDamage? watchDamage = null,
-        Func<Guid, string?>? recordingPathLookup = null)
+        Func<Guid, string?>? recordingPathLookup = null,
+        MatchAudience? audience = null)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -71,6 +73,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _damageWatcher = new MatchDamageWatcher(watchDamage, _resolver);
         _recordingPathLookup = recordingPathLookup;
+        _audience = audience;
     }
 
     public void OnMatchProposed(MatchProposal proposal)
@@ -213,8 +216,8 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
 
             if (payload is not null)
             {
-                BroadcastScoreboard(payload, postOrdinalByName, info.Teams);
-                BroadcastStatsUrl(payload.MatchId, info.Arena);
+                BroadcastScoreboard(payload, postOrdinalByName, info.Teams, info.Arena);
+                BroadcastStatsUrl(payload.MatchId, info.Arena, info.Teams);
             }
         }
 
@@ -224,11 +227,19 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
 
     /// <summary>
     /// If <c>[ClashEngine] StatsViewUrl</c> is configured, format it with the match id and
-    /// broadcast the resulting line as an arena message after the scoreboard. The template may
-    /// contain a <c>{matchId}</c> placeholder (replaced with the dashed GUID); absent that, the
-    /// id is appended.
+    /// broadcast the resulting line to the match's audience after the scoreboard. The template
+    /// may contain a <c>{matchId}</c> placeholder (replaced with the dashed GUID); absent that,
+    /// the id is appended.
     /// </summary>
-    private void BroadcastStatsUrl(Guid matchId, string? arenaName)
+    /// <remarks>
+    /// Routed through <see cref="MatchAudience"/> rather than <c>SendArenaMessage</c> so a
+    /// concurrent match in the same arena (via SS.Matchmaking.MatchFocus) doesn't see this
+    /// match's URL. Falls back to the arena broadcast if no audience is configured.
+    /// </remarks>
+    private void BroadcastStatsUrl(
+        Guid matchId,
+        string? arenaName,
+        IReadOnlyList<IReadOnlyList<PlayerKey>> teams)
     {
         var template = _config.GetStr(_config.Global, "ClashEngine", "StatsViewUrl");
         if (string.IsNullOrWhiteSpace(template)) return;
@@ -240,17 +251,25 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
         string url = template.Contains("{matchId}", StringComparison.Ordinal)
             ? template.Replace("{matchId}", formattedId)
             : template + formattedId;
-        _chat.SendArenaMessage(arena, $"Match stats: {url}");
+        string message = $"Match stats: {url}";
+
+        if (_audience is not null)
+            _audience.Broadcast(matchId, arenaName, ResolveParticipants(teams), message);
+        else
+            _chat.SendArenaMessage(arena, message);
     }
 
     /// <summary>
-    /// Sends the formatted scoreboard to every resolvable participant. Failures are logged but
-    /// do not propagate -- a chat hiccup must not break match teardown.
+    /// Sends the formatted scoreboard to the match's audience: every resolvable participant plus
+    /// any spectator with the match in focus (via <see cref="MatchAudience"/>). Falls back to
+    /// participant-only delivery if no audience is configured. Failures are logged but do not
+    /// propagate -- a chat hiccup must not break match teardown.
     /// </summary>
     private void BroadcastScoreboard(
         MatchPayload payload,
         IReadOnlyDictionary<string, double> postOrdinalByName,
-        IReadOnlyList<IReadOnlyList<Core.Identity.PlayerKey>> teams)
+        IReadOnlyList<IReadOnlyList<Core.Identity.PlayerKey>> teams,
+        string? arenaName)
     {
         IReadOnlyList<string> lines;
         try { lines = ScoreboardFormatter.Format(payload, postOrdinalByName); }
@@ -261,15 +280,30 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
             return;
         }
 
+        var participants = ResolveParticipants(teams);
+        if (_audience is not null)
+        {
+            for (int i = 0; i < lines.Count; i++)
+                _audience.Broadcast(payload.MatchId, arenaName, participants, lines[i]);
+            return;
+        }
+
+        for (int j = 0; j < participants.Count; j++)
+            for (int i = 0; i < lines.Count; i++)
+                _chat.SendMessage(participants[j], lines[i]);
+    }
+
+    private List<Player> ResolveParticipants(IReadOnlyList<IReadOnlyList<PlayerKey>> teams)
+    {
+        var list = new List<Player>();
         for (int t = 0; t < teams.Count; t++)
         {
             for (int j = 0; j < teams[t].Count; j++)
             {
-                var p = _resolver.Resolve(teams[t][j]);
-                if (p is null) continue;
-                for (int i = 0; i < lines.Count; i++) _chat.SendMessage(p, lines[i]);
+                if (_resolver.Resolve(teams[t][j]) is { } p) list.Add(p);
             }
         }
+        return list;
     }
 
     private ConfigHandle? ResolveArenaConfig(string? arenaName)

@@ -49,6 +49,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
     private readonly IArenaManager _arenaManager;
     private readonly IGame _game;
     private readonly ILogManager _log;
+    private readonly MatchFreqAllocator? _freqAllocator;
 
     private readonly Dictionary<Guid, QueueDefinition> _queueByMatch = new();
     private readonly Dictionary<Guid, ClashMatchData> _byMatch = new();
@@ -87,7 +88,8 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         PlayerKeyResolver resolver,
         IArenaManager arenaManager,
         IGame game,
-        ILogManager log)
+        ILogManager log,
+        MatchFreqAllocator? freqAllocator = null)
     {
         _broker = broker ?? throw new ArgumentNullException(nameof(broker));
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
@@ -96,6 +98,7 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
         _arenaManager = arenaManager ?? throw new ArgumentNullException(nameof(arenaManager));
         _game = game ?? throw new ArgumentNullException(nameof(game));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _freqAllocator = freqAllocator;
     }
 
     /// <summary>
@@ -200,8 +203,12 @@ public sealed class MatchLvzAdapter : IMatchmakingTelemetry, IMatchFocusAdvisor
             if (_arenaManager.FindArena(queue.MatchArenaName) is { } arena)
                 arenaNumber = arena.BaseName == arena.Name ? 0 : ParseArenaNumber(arena.Name, arena.BaseName);
 
+            // The orchestrator allocated this match's freq base on its own OnMatchProposed (which
+            // fires before any OnMatchStarted), so by here the allocator already has an entry for
+            // matchId. If the allocator wasn't injected we fall back to the legacy 100 base.
+            short freqBase = _freqAllocator?.GetBase(match.MatchId) ?? MatchFreqAllocator.BaseFreq;
             var matchData = new ClashMatchData(
-                match, queue, statsRecorder, _resolver, _arenaManager, arenaNumber, _matchGeneration++);
+                match, queue, statsRecorder, _resolver, _arenaManager, arenaNumber, _matchGeneration++, freqBase);
             _byMatch[match.MatchId] = matchData;
 
             // Order matters: MatchFocus subscribes to MatchStartingCallback to register the
