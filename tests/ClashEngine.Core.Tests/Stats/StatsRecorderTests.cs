@@ -445,26 +445,67 @@ public class StatsRecorderTests
             [ItemKind.Thor] = thors,
         };
 
+    /// <summary>
+    /// Convenience wrapper for OnExtraPositionData: positional args are tedious for tests that
+    /// only care about a couple of items, so this lets a test name only the columns it touches
+    /// and leave the rest at zero. Mirrors the signature of the wire-authoritative writer.
+    /// </summary>
+    private static void Wire(
+        StatsRecorder r, PlayerKey player,
+        int bursts = 0, int repels = 0, int thors = 0,
+        int bricks = 0, int decoys = 0, int rockets = 0, int portals = 0)
+        => r.OnExtraPositionData(player, bursts, repels, thors, bricks, decoys, rockets, portals);
+
     [Fact]
-    public void OnItemUsed_decrements_inventory_and_clamps_at_zero()
+    public void OnItemUsed_records_use_count_without_touching_inventory()
     {
+        // Inventory is wire-authoritative now (driven by OnExtraPositionData). OnItemUsed only
+        // bumps the per-key-press ItemUses counter and -- for repels -- triggers the
+        // forced-repel attribution; it must not mutate Inventory, otherwise a self-reported
+        // use racing the next position packet could double-count against the wire-reported state.
         var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
         r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
         r.OnSpawn(K("A"), 10);
 
         r.OnItemUsed(K("A"), ItemKind.Repel, 20);
         r.OnItemUsed(K("A"), ItemKind.Repel, 25);
-        Assert.Equal(1, r.Stats[K("A")].Inventory[ItemKind.Repel]);
-        Assert.Equal(2, r.Stats[K("A")].ItemUses[ItemKind.Repel]);
-
-        // Burst goes to zero -- the entry is removed, not stored as 0.
         r.OnItemUsed(K("A"), ItemKind.Burst, 30);
-        Assert.False(r.Stats[K("A")].Inventory.ContainsKey(ItemKind.Burst));
-
-        // Using past empty doesn't go negative; ItemUses still increments (we observed a use).
         r.OnItemUsed(K("A"), ItemKind.Burst, 35);
-        Assert.False(r.Stats[K("A")].Inventory.ContainsKey(ItemKind.Burst));
+
+        // ItemUses tracks the press count regardless of whether any item was actually held.
+        Assert.Equal(2, r.Stats[K("A")].ItemUses[ItemKind.Repel]);
         Assert.Equal(2, r.Stats[K("A")].ItemUses[ItemKind.Burst]);
+
+        // Inventory is unchanged from the spawn-time loadout: OnItemUsed never writes to it.
+        Assert.Equal(3, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+        Assert.Equal(1, r.Stats[K("A")].Inventory[ItemKind.Burst]);
+    }
+
+    [Fact]
+    public void OnExtraPositionData_mirrors_wire_counts_verbatim()
+    {
+        // The recorder no longer clamps or validates inventory counts -- Continuum reports the
+        // post-cap, post-pickup, post-use number on the wire and we mirror it. Negative or zero
+        // clears the entry (so a player who fires their last brick and the wire reports 0
+        // doesn't keep a stale 1 in Inventory).
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 1, bursts: 0));
+
+        // Wire reports counts above the initial loadout (greens picked up): mirrored as-is.
+        r.OnExtraPositionData(K("A"), bursts: 4, repels: 5, thors: 2, bricks: 3, decoys: 1, rockets: 7, portals: 1);
+        var inv = r.Stats[K("A")].Inventory;
+        Assert.Equal(4, inv[ItemKind.Burst]);
+        Assert.Equal(5, inv[ItemKind.Repel]);
+        Assert.Equal(2, inv[ItemKind.Thor]);
+        Assert.Equal(3, inv[ItemKind.Brick]);
+        Assert.Equal(1, inv[ItemKind.Decoy]);
+        Assert.Equal(7, inv[ItemKind.Rocket]);
+        Assert.Equal(1, inv[ItemKind.Portal]);
+
+        // Subsequent packet reports a zero column: the entry is removed, not stored as 0.
+        r.OnExtraPositionData(K("A"), bursts: 4, repels: 0, thors: 2, bricks: 3, decoys: 1, rockets: 7, portals: 1);
+        Assert.False(r.Stats[K("A")].Inventory.ContainsKey(ItemKind.Repel));
+        Assert.Equal(4, r.Stats[K("A")].Inventory[ItemKind.Burst]);
     }
 
     [Fact]
@@ -473,11 +514,14 @@ public class StatsRecorderTests
         var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
         r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 0));
         r.OnSpawn(K("A"), 10);
-        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
-        r.OnItemUsed(K("A"), ItemKind.Repel, 25);
+
+        // Mid-life the wire reports the player has used two repels.
+        Wire(r, K("A"), repels: 1);
         Assert.Equal(1, r.Stats[K("A")].Inventory[ItemKind.Repel]);
 
-        // Re-spawn after a death: inventory back to 3 (fresh life).
+        // Re-spawn after a death: inventory back to 3 (fresh life). The next position packet
+        // from the new life will overwrite this with the wire count, but until then a reader
+        // (e.g. statbox refresh on spawn) sees the loadout instead of stale end-of-prior-life.
         r.OnSpawn(K("A"), 100);
         Assert.Equal(3, r.Stats[K("A")].Inventory[ItemKind.Repel]);
     }
@@ -490,7 +534,8 @@ public class StatsRecorderTests
         r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 3, bursts: 1, thors: 1));
         r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
         r.OnSpawn(K("A"), 10);
-        r.OnItemUsed(K("A"), ItemKind.Repel, 20);   // used 1 of 3
+        // Wire reports A has used 1 of 3 repels (post-position-packet inventory).
+        Wire(r, K("A"), repels: 2, bursts: 1, thors: 1);
         r.OnSpawn(K("B"), 10);
 
         // Final death (lives==0 -> isKnockout=true).
@@ -510,7 +555,7 @@ public class StatsRecorderTests
         r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 3, bursts: 1));
         r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
         r.OnSpawn(K("A"), 10);
-        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
+        Wire(r, K("A"), repels: 2, bursts: 1);
 
         r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: false);
 
@@ -529,14 +574,15 @@ public class StatsRecorderTests
         r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
         r.OnSpawn(K("B"), 5);
 
-        // Life 1: A used 1 repel, dies non-knockout with 2 repels + 1 burst left.
+        // Life 1: A used 1 repel, dies non-knockout with 2 repels + 1 burst left on the wire.
         r.OnSpawn(K("A"), 10);
-        r.OnItemUsed(K("A"), ItemKind.Repel, 20);
+        Wire(r, K("A"), repels: 2, bursts: 1);
         r.OnKill(victim: K("A"), killer: K("B"), atTick: 30, isKnockout: false);
 
-        // Life 2: A spawns fresh (back to 3 repels + 1 burst), uses 0 repels + 1 burst, dies knockout.
+        // Life 2: A spawns fresh (back to 3 repels + 1 burst), uses 1 burst, dies knockout
+        // with 3 repels + 0 bursts on the wire.
         r.OnSpawn(K("A"), 50);
-        r.OnItemUsed(K("A"), ItemKind.Burst, 60);
+        Wire(r, K("A"), repels: 3, bursts: 0);
         r.OnKill(victim: K("A"), killer: K("B"), atTick: 70, isKnockout: true);
 
         // Total wasted across both lives: 2 + 3 = 5 repels, 1 + 0 = 1 burst.
@@ -575,7 +621,7 @@ public class StatsRecorderTests
     }
 
     [Fact]
-    public void Green_pickups_increase_wasted_when_unused_at_life_close()
+    public void Wire_reported_pickups_increase_wasted_when_unused_at_life_close()
     {
         var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
         var energy = SimpleEnergy();
@@ -584,12 +630,15 @@ public class StatsRecorderTests
         r.OnSpawn(K("A"), 10);
         r.OnSpawn(K("B"), 10);
 
-        // A picks up two repels and a burst mid-life, never uses any.
+        // A picks up two repels and a burst mid-life: the wire reports the post-pickup
+        // counts on the next position packet. OnPrizePickup itself is a no-op now.
         r.OnPrizePickup(K("A"), ItemKind.Repel);
+        Wire(r, K("A"), repels: 2);
         r.OnPrizePickup(K("A"), ItemKind.Repel);
         r.OnPrizePickup(K("A"), ItemKind.Burst);
+        Wire(r, K("A"), repels: 3, bursts: 1);
 
-        // Knockout: 1 (initial) + 2 (greens) = 3 repels + 1 burst go to wasted.
+        // Knockout with 3 repels + 1 burst still on the wire -> all go to wasted.
         r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: true);
         var wasted = r.Stats[K("A")].WastedItems;
         Assert.Equal(3, wasted[ItemKind.Repel]);
@@ -597,42 +646,20 @@ public class StatsRecorderTests
     }
 
     [Fact]
-    public void Green_pickups_clamp_at_per_item_cap()
+    public void OnPrizePickup_is_a_no_op_under_wire_authoritative_inventory()
     {
+        // Continuum reports the post-pickup count on the next position packet, so the recorder
+        // no longer reconstructs from pickup events. Calling OnPrizePickup must not change
+        // Inventory; until a wire update arrives the count stays at the spawn-time loadout.
         var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
-        var energy = SimpleEnergy();
-        var initial = Loadout(repels: 3, bursts: 0);
-        var caps = new Dictionary<ItemKind, int> { [ItemKind.Repel] = 5 };
-        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, initial, caps);
-        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 1, bursts: 0));
         r.OnSpawn(K("A"), 10);
-        r.OnSpawn(K("B"), 10);
 
-        // Five greens, but cap is 5 and initial is 3 -- only the first two stick.
         for (int i = 0; i < 5; i++) r.OnPrizePickup(K("A"), ItemKind.Repel);
-        Assert.Equal(5, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+        for (int i = 0; i < 5; i++) r.OnPrizePickup(K("A"), ItemKind.Burst);
 
-        r.OnKill(victim: K("A"), killer: K("B"), atTick: 50, isKnockout: true);
-        Assert.Equal(5, r.Stats[K("A")].WastedItems[ItemKind.Repel]);
-    }
-
-    [Fact]
-    public void Green_pickups_uncapped_when_no_max_configured_for_item()
-    {
-        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
-        var energy = SimpleEnergy();
-        // Cap configured for repels but not bursts: bursts grow unbounded.
-        var caps = new Dictionary<ItemKind, int> { [ItemKind.Repel] = 2 };
-        r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, 0, Loadout(repels: 0, bursts: 0), caps);
-        r.RegisterPlayer(K("B"), 1, 1000, 0.0, energy, 0);
-        r.OnSpawn(K("A"), 10);
-        r.OnSpawn(K("B"), 10);
-
-        for (int i = 0; i < 4; i++) r.OnPrizePickup(K("A"), ItemKind.Burst);
-        for (int i = 0; i < 4; i++) r.OnPrizePickup(K("A"), ItemKind.Repel);
-
-        Assert.Equal(4, r.Stats[K("A")].Inventory[ItemKind.Burst]);
-        Assert.Equal(2, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+        Assert.Equal(1, r.Stats[K("A")].Inventory[ItemKind.Repel]);
+        Assert.False(r.Stats[K("A")].Inventory.ContainsKey(ItemKind.Burst));
     }
 
     // --- active ticks via position packets ---
