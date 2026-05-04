@@ -40,6 +40,14 @@ public interface IMatchmakingTelemetry
     void OnAbandonment(PlayerKey player, int offenseCount, DateTimeOffset timeoutUntil) { }
 
     /// <summary>
+    /// A player was released from the match roster mid-match (e.g. lives-out elimination) but the
+    /// match itself is still live. They stay in the match's stats record for end-of-match
+    /// rating/upload purposes; this hook lets stats consumers close the player's open life and
+    /// release any per-match index entry so the player can be matched into a new match.
+    /// </summary>
+    void OnPlayerReleasedFromMatch(PlayerKey player, Guid matchId, DateTimeOffset at) { }
+
+    /// <summary>
     /// A team just lost its last live member; the team-collapse grace timer started at
     /// <paramref name="since"/> and the team will forfeit at <paramref name="forfeitAt"/> unless
     /// at least one player returns to active before then.

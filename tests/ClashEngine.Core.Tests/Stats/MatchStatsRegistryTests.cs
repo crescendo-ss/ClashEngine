@@ -110,4 +110,61 @@ public class MatchStatsRegistryTests
         var reg = new MatchStatsRegistry(new DamageDecay());
         Assert.Null(reg.RecorderFor(K("ZZZ")));
     }
+
+    [Fact]
+    public void Released_player_can_be_added_to_a_new_match_while_old_match_lives()
+    {
+        var reg = new MatchStatsRegistry(new DamageDecay());
+        var y = Guid.NewGuid();
+        var x = Guid.NewGuid();
+        reg.BeginMatch(y);
+        reg.AddPlayer(y, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 0);
+        reg.RecorderFor(K("happy_004"))!.OnSpawn(K("happy_004"), atTick: 0);
+
+        reg.OnPlayerReleased(y, K("happy_004"), atTick: 500);
+
+        Assert.Null(reg.MatchIdOf(K("happy_004")));
+        // The release closed the open life on Y but kept the player's stats in Y's recorder.
+        Assert.Equal(LifeEndReason.LeftMatch, reg.ActiveRecorders[y].Stats[K("happy_004")].Lives.Single().EndReason);
+
+        // Same player can now be registered in a different live match -- this is the elim+requeue path.
+        reg.BeginMatch(x);
+        reg.AddPlayer(x, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 600);
+        Assert.Equal(x, reg.MatchIdOf(K("happy_004")));
+    }
+
+    [Fact]
+    public void Releasing_player_not_in_match_is_a_noop()
+    {
+        var reg = new MatchStatsRegistry(new DamageDecay());
+        var y = Guid.NewGuid();
+        reg.BeginMatch(y);
+        reg.AddPlayer(y, K("A"), 0, 1000, 1.0, Energy(), atTick: 0);
+
+        // Different match id -- no-op, doesn't clobber the existing index entry.
+        reg.OnPlayerReleased(Guid.NewGuid(), K("A"), atTick: 100);
+        Assert.Equal(y, reg.MatchIdOf(K("A")));
+
+        // Unknown player -- no-op.
+        reg.OnPlayerReleased(y, K("never-added"), atTick: 100);
+    }
+
+    [Fact]
+    public void End_match_after_release_still_uploads_player_stats()
+    {
+        var reg = new MatchStatsRegistry(new DamageDecay());
+        var y = Guid.NewGuid();
+        reg.BeginMatch(y);
+        reg.AddPlayer(y, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 0);
+        reg.RecorderFor(K("happy_004"))!.OnSpawn(K("happy_004"), atTick: 0);
+        reg.OnPlayerReleased(y, K("happy_004"), atTick: 500);
+
+        var final = reg.EndMatch(y, atTick: 1000);
+
+        Assert.NotNull(final);
+        Assert.Contains(K("happy_004"), final!.Stats.Keys);
+        // Released player's life closed at the release tick, not at match-end -- second EndMatch
+        // pass for an already-closed life is a no-op, so the original LeftMatch reason stands.
+        Assert.Equal(LifeEndReason.LeftMatch, final.Stats[K("happy_004")].Lives.Single().EndReason);
+    }
 }

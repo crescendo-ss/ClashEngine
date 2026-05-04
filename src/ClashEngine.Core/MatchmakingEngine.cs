@@ -187,6 +187,7 @@ public sealed class MatchmakingEngine
             && stillMappedMatch == killerMatch)
         {
             _matchOf.Remove(victim);
+            _telemetry.OnPlayerReleasedFromMatch(victim, killerMatch, at);
             if (_penalties.HasPolicy(PenaltyKind.EliminationCooldown))
                 _penalties.RecordPenalty(victim, PenaltyKind.EliminationCooldown, at);
         }

@@ -161,6 +161,11 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
             RatingsAtStart: ratingsAtStart);
     }
 
+    public void OnPlayerReleasedFromMatch(PlayerKey player, Guid matchId, DateTimeOffset at)
+    {
+        _registry.OnPlayerReleased(matchId, player, (uint)ServerTick.Now);
+    }
+
     public void OnMatchEnded(MatchOutcome outcome)
     {
         uint atTick = (uint)ServerTick.Now;

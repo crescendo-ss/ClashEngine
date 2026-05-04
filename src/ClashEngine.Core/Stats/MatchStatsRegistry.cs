@@ -95,6 +95,21 @@ public sealed class MatchStatsRegistry
         _matchOf[incoming] = matchId;
     }
 
+    /// <summary>
+    /// Release <paramref name="player"/> from the match-roster index mid-match (e.g. lives-out
+    /// elimination): closes their open life on the recorder and clears the player->match index so
+    /// a subsequent <see cref="AddPlayer"/> call can re-register them in a different match. Their
+    /// stats remain in <see cref="StatsRecorder.Stats"/> for the eventual <see cref="EndMatch"/>
+    /// upload. No-op if the player isn't currently mapped to <paramref name="matchId"/>.
+    /// </summary>
+    public void OnPlayerReleased(Guid matchId, PlayerKey player, uint atTick)
+    {
+        if (!_matchOf.TryGetValue(player, out var existing) || existing != matchId) return;
+        if (_recorders.TryGetValue(matchId, out var recorder))
+            recorder.OnLeaveMatch(player, atTick);
+        _matchOf.Remove(player);
+    }
+
     /// <summary>Close the match's accounting: any open lives are closed with
     /// <see cref="LifeEndReason.MatchEnded"/>, then the recorder is removed.</summary>
     public StatsRecorder? EndMatch(Guid matchId, uint atTick)
