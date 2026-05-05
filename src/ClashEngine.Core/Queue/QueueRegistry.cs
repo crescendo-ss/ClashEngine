@@ -41,7 +41,8 @@ public sealed class QueueRegistry
         TimeSpan? teamCollapseGrace = null,
         MatchmakingTier tier = MatchmakingTier.Competitive,
         TimeSpan? shipChangeGracePeriod = null,
-        TimeSpan? timeLimit = null)
+        TimeSpan? timeLimit = null,
+        ItemsAction returnItemsAction = ItemsAction.Full)
     {
         if (_byName.ContainsKey(name))
             throw new ArgumentException($"Queue '{name}' already registered.", nameof(name));
@@ -55,7 +56,7 @@ public sealed class QueueRegistry
             lookAheadWindow, promoteWinnersToFront, maxConsecutiveDefenses,
             holdWindow, qualityCeiling, knockoutSpecDelay,
             livesPerPlayer, teamCollapseGrace, tier, shipChangeGracePeriod,
-            timeLimit);
+            timeLimit, returnItemsAction);
         _byName[name] = def;
         return def;
     }

@@ -50,6 +50,8 @@ namespace ClashEngine.Config;
 ///                                                ; which a player may swap ships (mid-life
 ///                                                ; changes are otherwise blocked). Default 10s;
 ///                                                ; set to 0 to forbid all in-match changes.
+/// GameType1ReturnItemsAction = full              ; full | restore | burn -- inventory policy
+///                                                ; on ?return after self-spec. Default full.
 ///
 /// QueueCount = 2
 /// Queue1Name              = 3v3comp

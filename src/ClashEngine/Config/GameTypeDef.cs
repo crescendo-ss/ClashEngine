@@ -26,4 +26,5 @@ internal sealed record GameTypeDef(
     TimeSpan? KnockoutSpecDelay,
     TimeSpan? TeamCollapseGrace,
     IReadOnlyList<IReadOnlyList<int>>? ShipBySlot,
-    TimeSpan? ShipChangeGracePeriod);
+    TimeSpan? ShipChangeGracePeriod,
+    ItemsAction ReturnItemsAction);

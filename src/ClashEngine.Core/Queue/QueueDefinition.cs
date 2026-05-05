@@ -277,10 +277,11 @@ public sealed class QueueDefinition
 
     /// <summary>
     /// What to do with a player's stockpilable item counts when they <c>?return</c> to this match
-    /// after self-speccing. <see cref="ItemsAction.Full"/> (default) leaves them with the fresh
-    /// ship's spawn loadout. <see cref="ItemsAction.Restore"/> deducts the spawn loadout back down
-    /// to whatever items they had when they specced (closes the burst/repel free-reload loophole).
-    /// <see cref="ItemsAction.Burn"/> zeros their loadout entirely.
+    /// after self-speccing. Inherited from the queue's game type
+    /// (<c>GameType&lt;i&gt;ReturnItemsAction</c>). <see cref="ItemsAction.Full"/> (default) leaves
+    /// them with the fresh ship's spawn loadout. <see cref="ItemsAction.Restore"/> deducts the
+    /// spawn loadout back down to whatever items they had when they specced (closes the burst/repel
+    /// free-reload loophole). <see cref="ItemsAction.Burn"/> zeros their loadout entirely.
     /// </summary>
     public ItemsAction ReturnItemsAction { get; }
 

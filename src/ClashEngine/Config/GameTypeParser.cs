@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ClashEngine.Core.Queue;
 using SS.Core.ComponentInterfaces;
 
 namespace ClashEngine.Config;
@@ -107,6 +108,7 @@ internal static class GameTypeParser
         TimeSpan? knockoutSpecDelay = ReadOptionalNonNegativeTimeSpan(config, p + "KnockoutSpecDelay", p, log);
         TimeSpan? teamCollapseGrace = ReadOptionalNonNegativeTimeSpan(config, p + "TeamCollapseGrace", p, log);
         TimeSpan? shipChangeGracePeriod = ReadOptionalNonNegativeTimeSpan(config, p + "ShipChangeGracePeriod", p, log);
+        ItemsAction returnItemsAction = ReadReturnItemsAction(config, p, log);
 
         var shipBySlot = ShipBySlotParser.Read(config, p, teamCount, perTeam, log);
 
@@ -114,7 +116,21 @@ internal static class GameTypeParser
             name, id, teamCount, perTeam, killTarget, lives, timeLimit,
             spawnSetByTeam, maxDrift, warpOnSpawn,
             stagingDuration, countdownDuration, knockoutSpecDelay,
-            teamCollapseGrace, shipBySlot, shipChangeGracePeriod);
+            teamCollapseGrace, shipBySlot, shipChangeGracePeriod,
+            returnItemsAction);
+    }
+
+    /// <summary>Reads <c>GameType&lt;i&gt;ReturnItemsAction</c>. Accepts <c>full</c>, <c>restore</c>,
+    /// or <c>burn</c> (case-insensitive). Missing or invalid values fall back to
+    /// <see cref="ItemsAction.Full"/> (the legacy behavior).</summary>
+    private static ItemsAction ReadReturnItemsAction(IConfigManager config, string prefix, ClashLog? log)
+    {
+        var raw = config.GetStr(config.Global, ConfigConstants.Section, prefix + "ReturnItemsAction");
+        if (string.IsNullOrWhiteSpace(raw)) return ItemsAction.Full;
+        if (Enum.TryParse<ItemsAction>(raw, ignoreCase: true, out var parsed)) return parsed;
+        log?.Warn(ConfigConstants.LogCategory,
+            $"{prefix}ReturnItemsAction='{raw}' not recognized (expected full/restore/burn); using Full.");
+        return ItemsAction.Full;
     }
 
     /// <summary>Reads an optional <c>TimeSpan</c> that must be strictly positive when set.
@@ -165,6 +181,7 @@ internal static class GameTypeParser
             $"CountdownDuration={(def.CountdownDuration is { } cd ? cd.ToString() : "(default 5s)")}, " +
             $"KnockoutSpecDelay={(def.KnockoutSpecDelay is { } ks ? ks.ToString() : "(default 0)")}, " +
             $"TeamCollapseGrace={(def.TeamCollapseGrace is { } tg ? tg.ToString() : "(default 10s)")}, " +
-            $"ShipChangeGracePeriod={(def.ShipChangeGracePeriod is { } sg ? sg.ToString() : "(default 10s)")}.");
+            $"ShipChangeGracePeriod={(def.ShipChangeGracePeriod is { } sg ? sg.ToString() : "(default 10s)")}, " +
+            $"ReturnItemsAction={def.ReturnItemsAction}.");
     }
 }

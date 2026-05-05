@@ -320,7 +320,7 @@ public sealed class MatchOrchestrator
             : ShipFor(teamIdx, slotIdx);
         _game.SetShipAndFreq(player, ship, freq);
 
-        // Apply the queue's items policy to the freshly-respawned loadout.
+        // Apply the game type's items policy to the freshly-respawned loadout.
         ApplyReturnItemsAction(player, key);
 
         // Snapshot consumed; clear so the next leave-cycle isn't tainted by a stale value.
@@ -359,7 +359,7 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// Applies the queue's <see cref="QueueDefinition.ReturnItemsAction"/> to the just-placed
+    /// Applies the game type's <see cref="QueueDefinition.ReturnItemsAction"/> to the just-placed
     /// <paramref name="player"/> right after <see cref="IGame.SetShipAndFreq"/>. The fresh ship
     /// spawns with Continuum's full initial loadout; this method may deduct prizes back down to
     /// the saved counts (Restore) or zero them entirely (Burn). <see cref="ItemsAction.Full"/> is
