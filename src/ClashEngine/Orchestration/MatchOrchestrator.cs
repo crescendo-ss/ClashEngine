@@ -317,6 +317,18 @@ public sealed class MatchOrchestrator
                 else
                     foreach (var p in notAfkParticipants) _chat.SendMessage(p, cancelMessage);
 
+                // Drive non-AFK participants to Active before cancelling. PlayerStateObserver only
+                // fires OnPlayerJoinedArena on a spec->active ship change, so a participant who was
+                // already in a non-spec ship at placement time stays Pending in the engine. Without
+                // this, FinalizeCancellation's "Pending = no-show" sweep marks them as abandoners
+                // alongside the genuine AFKs.
+                for (int t = 0; t < _proposal.Teams.Count; t++)
+                    for (int j = 0; j < _proposal.Teams[t].Count; j++)
+                    {
+                        var k = _proposal.Teams[t][j];
+                        if (afk.Contains(k)) continue;
+                        _engine.OnPlayerJoinedArena(k, _clock.UtcNow);
+                    }
                 _engine.CancelMatchAsAfk(_matchId, afk, _clock.UtcNow);
                 // Cleanup is invoked by the registry's OnMatchEnded handler.
                 return false;
