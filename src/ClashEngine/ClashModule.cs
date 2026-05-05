@@ -213,7 +213,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
             },
             invitationTtl: TimeSpan.FromSeconds(15));
 
-        _listener = new EngineEventListener(_chat, _log, _resolver, _clashLog, _engine.Queues);
+        _listener = new EngineEventListener(_chat, _log, _resolver, _clashLog, _engine.Queues, _engine.Groups, _clock);
 
         _persistPenalties = new PersistPenaltyStore(_engine.Penalties);
 

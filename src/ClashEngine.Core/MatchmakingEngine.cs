@@ -43,6 +43,14 @@ public sealed class MatchmakingEngine
     // when the player isn't a winner.
     private readonly Dictionary<(PlayerKey Player, string QueueName), int> _consecutiveDefenses = new();
 
+    // Names of queues whose "near-full" notification has already fired in the current fill cycle.
+    // An entry is removed once the queue's count drops back below TotalPlayers - 1, re-arming it
+    // for the next near-full transition. Only queues with TotalPlayers >= 4 ever participate.
+    private readonly HashSet<string> _nearFullFired = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Minimum match shape (in total players) eligible for near-full chat notifications.</summary>
+    private const int NearFullMinShape = 4;
+
     public MatchmakingEngine(
         IRatingStore ratings,
         IClock clock,
@@ -67,7 +75,9 @@ public sealed class MatchmakingEngine
         _graceWindow = graceWindow ?? TimeSpan.FromSeconds(30);
         _ratingUpdater = ratingUpdater ?? new RatingUpdater();
         _queues = new QueueRegistry();
-        _matcher = new Matcher(_queues, _multiQueue, _balancer, _quality, _clock);
+        // Telemetry-getter passthrough so the matcher always observes the engine's current sink,
+        // including post-construction swaps via SetTelemetry.
+        _matcher = new Matcher(_queues, _multiQueue, _balancer, _quality, _clock, () => _telemetry);
         _eligibility = new PlayerEligibility(_penalties, _clock);
         _groups = new GroupRegistry(invitationTtl ?? TimeSpan.FromSeconds(15));
     }
@@ -442,6 +452,40 @@ public sealed class MatchmakingEngine
             var proposal = _matcher.TryProposeMatch();
             if (proposal is null) break;
             FormMatchFromProposal(proposal, at);
+        }
+
+        // Run after proposal popping so a queue whose 7+1 just got formed into a match doesn't
+        // briefly trip the near-full event on its way back to empty.
+        SweepNearFullThresholds();
+    }
+
+    /// <summary>
+    /// Fires <see cref="IMatchmakingTelemetry.OnQueueNearFull"/> the first tick a queue reaches
+    /// <c>TotalPlayers - 1</c> waiters and re-arms when its count drops back below the threshold.
+    /// Skipped entirely for queues with fewer than <see cref="NearFullMinShape"/> total slots.
+    /// </summary>
+    private void SweepNearFullThresholds()
+    {
+        foreach (var def in _queues.Definitions)
+        {
+            if (def.Shape.TotalPlayers < NearFullMinShape) continue;
+            int threshold = def.Shape.TotalPlayers - 1;
+            int count = def.Queue.Count;
+
+            if (count >= threshold)
+            {
+                if (_nearFullFired.Add(def.Name))
+                {
+                    var snapshot = def.Queue.Snapshot();
+                    var waiting = new PlayerKey[snapshot.Count];
+                    for (int i = 0; i < snapshot.Count; i++) waiting[i] = snapshot[i].Player;
+                    _telemetry.OnQueueNearFull(def.Name, waiting, count, def.Shape.TotalPlayers);
+                }
+            }
+            else
+            {
+                _nearFullFired.Remove(def.Name);
+            }
         }
     }
 

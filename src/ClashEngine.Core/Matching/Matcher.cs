@@ -23,11 +23,19 @@ namespace ClashEngine.Core.Matching;
 /// </remarks>
 public sealed class Matcher
 {
+    /// <summary>
+    /// Minimum quality delta for a held-candidate replacement to fire
+    /// <see cref="IMatchmakingTelemetry.OnQueueHoldImproved"/>. Tiny improvements still update the
+    /// internal candidate but stay silent so chat doesn't churn.
+    /// </summary>
+    private const double HoldImprovementMinDelta = 0.1;
+
     private readonly QueueRegistry _registry;
     private readonly MultiQueueIndex _multiQueue;
     private readonly TeamBalancer _balancer;
     private readonly IMatchQualityFunction _quality;
     private readonly IClock _clock;
+    private readonly Func<IMatchmakingTelemetry> _telemetry;
 
     /// <summary>Per-queue held candidate awaiting hold-window expiry or quality-ceiling hit.</summary>
     private readonly Dictionary<string, HeldCandidate> _held = new(StringComparer.OrdinalIgnoreCase);
@@ -39,7 +47,8 @@ public sealed class Matcher
         MultiQueueIndex multiQueue,
         TeamBalancer balancer,
         IMatchQualityFunction quality,
-        IClock clock)
+        IClock clock,
+        Func<IMatchmakingTelemetry>? telemetry = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(multiQueue);
@@ -52,6 +61,8 @@ public sealed class Matcher
         _balancer = balancer;
         _quality = quality;
         _clock = clock;
+        // Resolved per-call so engine swaps via SetTelemetry are picked up immediately.
+        _telemetry = telemetry ?? (() => NoOpTelemetry.Instance);
     }
 
     public bool Enqueue(PlayerKey player, Rating rating, string queueName, GroupId? group = null)
@@ -129,15 +140,23 @@ public sealed class Matcher
                 continue;
             }
 
-            // Update the held candidate if quality improved (or none was held yet).
+            // Update the held candidate if quality improved (or none was held yet). Hold-start
+            // and (notable) hold-improvement are surfaced via telemetry so the adapter can keep
+            // candidates informed during the lookahead window.
             if (_held.TryGetValue(def.Name, out var prior))
             {
                 if (current.Quality > prior.Result.Quality)
+                {
+                    double oldQ = prior.Result.Quality;
                     _held[def.Name] = prior with { Result = current };
+                    if (current.Quality - oldQ >= HoldImprovementMinDelta)
+                        _telemetry().OnQueueHoldImproved(def.Name, FlattenPlayers(current), oldQ, current.Quality);
+                }
             }
             else
             {
                 _held[def.Name] = new HeldCandidate(current, now);
+                _telemetry().OnQueueHoldStarted(def.Name, FlattenPlayers(current), current.Quality, def.HoldWindow);
             }
 
             var held = _held[def.Name];
@@ -188,6 +207,18 @@ public sealed class Matcher
     {
         var arr = new QueueEntry[count];
         for (int i = 0; i < count; i++) arr[i] = source[i];
+        return arr;
+    }
+
+    private static IReadOnlyList<PlayerKey> FlattenPlayers(BalanceResult result)
+    {
+        int total = 0;
+        for (int t = 0; t < result.Teams.Count; t++) total += result.Teams[t].Count;
+        var arr = new PlayerKey[total];
+        int idx = 0;
+        for (int t = 0; t < result.Teams.Count; t++)
+            for (int j = 0; j < result.Teams[t].Count; j++)
+                arr[idx++] = result.Teams[t][j];
         return arr;
     }
 }

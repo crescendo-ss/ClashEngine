@@ -20,19 +20,78 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
 {
     private const string LogCategory = nameof(EngineEventListener);
 
+    /// <summary>Per-player floor on time between consecutive queue-status DMs.</summary>
+    private static readonly TimeSpan MmStatusCooldown = TimeSpan.FromSeconds(20);
+
+    /// <summary>Below this hold window, the matcher would pop before the player notices the message.</summary>
+    private static readonly TimeSpan HoldStartMinWindow = TimeSpan.FromSeconds(3);
+
     private readonly IChat _chat;
     private readonly ILogManager _log;
     private readonly PlayerKeyResolver _resolver;
     private readonly ClashLog _verbose;
     private readonly QueueRegistry _queues;
+    private readonly GroupRegistry _groups;
+    private readonly IClock _clock;
+    private readonly Dictionary<PlayerKey, DateTimeOffset> _lastMmStatusAt = new();
 
-    public EngineEventListener(IChat chat, ILogManager log, PlayerKeyResolver resolver, ClashLog verbose, QueueRegistry queues)
+    public EngineEventListener(
+        IChat chat,
+        ILogManager log,
+        PlayerKeyResolver resolver,
+        ClashLog verbose,
+        QueueRegistry queues,
+        GroupRegistry groups,
+        IClock clock)
     {
         _chat = chat ?? throw new ArgumentNullException(nameof(chat));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _verbose = verbose ?? throw new ArgumentNullException(nameof(verbose));
         _queues = queues ?? throw new ArgumentNullException(nameof(queues));
+        _groups = groups ?? throw new ArgumentNullException(nameof(groups));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+    }
+
+    /// <summary>
+    /// Returns true and records "now" if <paramref name="player"/> hasn't received a queue-status
+    /// DM within <see cref="MmStatusCooldown"/>; otherwise false (caller should suppress).
+    /// </summary>
+    private bool TryClaimMmStatusSlot(PlayerKey player)
+    {
+        var now = _clock.UtcNow;
+        if (_lastMmStatusAt.TryGetValue(player, out var last) && now - last < MmStatusCooldown)
+            return false;
+        _lastMmStatusAt[player] = now;
+        return true;
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="player"/> should receive a per-group matchmaking DM:
+    /// they're solo, or they are the leader of their current group. Non-leader group members are
+    /// suppressed so we don't multi-DM the same notice across a party.
+    /// </summary>
+    private bool ShouldDmForGroup(PlayerKey player)
+    {
+        var group = _groups.GroupOf(player);
+        if (group is null) return true;
+        return _groups.IsLeader(player, group.Value);
+    }
+
+    /// <summary>
+    /// Renders a queue's display name with its tier prefix, matching <see cref="FormatQueuedMessage"/>'s
+    /// style ("competitive 4v4" / "casual 4v4"). Falls back to the bare queue name when the queue
+    /// isn't registered (which shouldn't happen for any name we receive from the engine).
+    /// </summary>
+    private string FormatQueueDescriptor(string queueName)
+    {
+        if (!_queues.TryGet(queueName, out var def)) return queueName;
+        var tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
+        var suffix = "_" + tierLabel;
+        var display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? queueName[..^suffix.Length]
+            : queueName;
+        return $"{tierLabel} {display}";
     }
 
     public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null)
@@ -88,6 +147,67 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"QueueRemoved: {player.Name} <- {queueName}");
         if (_resolver.Resolve(player) is { } p)
             _chat.SendMessage(p, $"Left {queueName} queue.");
+    }
+
+    public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"QueueNearFull: {queueName} ({waitingCount}/{needed})");
+
+        var descriptor = FormatQueueDescriptor(queueName);
+        var message = $"{waitingCount}/{needed} in {descriptor} — one more to go.";
+
+        for (int i = 0; i < waiting.Count; i++)
+        {
+            var key = waiting[i];
+            if (!ShouldDmForGroup(key)) continue;
+            if (!TryClaimMmStatusSlot(key)) continue;
+            if (_resolver.Resolve(key) is { } p)
+                _chat.SendMessage(p, message);
+        }
+    }
+
+    public void OnQueueHoldStarted(string queueName, IReadOnlyList<PlayerKey> candidates, double currentQuality, TimeSpan holdWindow)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"QueueHoldStarted: {queueName} q={currentQuality:F2} window={Format(holdWindow)}");
+
+        // Hold windows under a few seconds resolve before the player would notice the message --
+        // skip to keep chat clean.
+        if (holdWindow <= HoldStartMinWindow) return;
+
+        var descriptor = FormatQueueDescriptor(queueName);
+        var seconds = (int)Math.Ceiling(holdWindow.TotalSeconds);
+        var message = $"Match candidates found in {descriptor} — looking for a fairer split (up to {seconds}s).";
+        BroadcastToCandidates(candidates, message);
+    }
+
+    public void OnQueueHoldImproved(string queueName, IReadOnlyList<PlayerKey> candidates, double oldQuality, double newQuality)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"QueueHoldImproved: {queueName} {oldQuality:F2} -> {newQuality:F2}");
+
+        var descriptor = FormatQueueDescriptor(queueName);
+        var message = $"Better match-up found in {descriptor} — locking in shortly.";
+        BroadcastToCandidates(candidates, message);
+    }
+
+    /// <summary>
+    /// DMs <paramref name="message"/> to each candidate, gated by the per-player cooldown and the
+    /// party-leader-only rule (so a 4-player party gets one DM, not four).
+    /// </summary>
+    private void BroadcastToCandidates(IReadOnlyList<PlayerKey> candidates, string message)
+    {
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var key = candidates[i];
+            if (!ShouldDmForGroup(key)) continue;
+            if (!TryClaimMmStatusSlot(key)) continue;
+            if (_resolver.Resolve(key) is { } p)
+                _chat.SendMessage(p, message);
+        }
     }
 
     public void OnInviteSent(PlayerKey inviter, PlayerKey invitee, DateTimeOffset at, TimeSpan ttl)

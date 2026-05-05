@@ -22,11 +22,20 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public List<(PendingGriefingPenalty Pending, PlayerKey Voter)> VetoesRecorded { get; } = new();
     public List<PendingGriefingPenalty> GriefingVetoed { get; } = new();
     public List<PendingGriefingPenalty> GriefingConfirmed { get; } = new();
+    public List<(string Queue, IReadOnlyList<PlayerKey> Waiting, int WaitingCount, int Needed)> QueueNearFulls { get; } = new();
+    public List<(string Queue, IReadOnlyList<PlayerKey> Candidates, double Quality, TimeSpan HoldWindow)> HoldStarted { get; } = new();
+    public List<(string Queue, IReadOnlyList<PlayerKey> Candidates, double OldQ, double NewQ)> HoldImproved { get; } = new();
 
     public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) =>
         QueueAdds.Add((player, queueName, initiator));
     public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) =>
         QueueRemovals.Add((player, queueName));
+    public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed) =>
+        QueueNearFulls.Add((queueName, waiting, waitingCount, needed));
+    public void OnQueueHoldStarted(string queueName, IReadOnlyList<PlayerKey> candidates, double currentQuality, TimeSpan holdWindow) =>
+        HoldStarted.Add((queueName, candidates, currentQuality, holdWindow));
+    public void OnQueueHoldImproved(string queueName, IReadOnlyList<PlayerKey> candidates, double oldQuality, double newQuality) =>
+        HoldImproved.Add((queueName, candidates, oldQuality, newQuality));
     public void OnMatchProposed(MatchProposal proposal) => Proposed.Add(proposal);
     public void OnMatchStarted(ActiveMatch match) => Started.Add(match);
     public void OnMatchEnded(MatchOutcome outcome) => Ended.Add(outcome);

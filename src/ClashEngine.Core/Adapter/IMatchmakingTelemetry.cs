@@ -25,6 +25,29 @@ public interface IMatchmakingTelemetry
     void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) { }
     void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) { }
 
+    /// <summary>
+    /// The queue just reached <c>TotalPlayers - 1</c> waiters (one short of forming a match) for
+    /// the first time since it last dropped below that threshold. Gated to queues with
+    /// <c>TotalPlayers &gt;= 4</c> -- the "near-full" framing is meaningless on tiny shapes (1v1,
+    /// 2v2). <paramref name="waiting"/> is a snapshot of the queue's current waiter list at fire
+    /// time, in queue order.
+    /// </summary>
+    void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed) { }
+
+    /// <summary>
+    /// The matcher has found a viable partition for <paramref name="queueName"/> and is now
+    /// holding it for up to <paramref name="holdWindow"/> in case additional arrivals improve the
+    /// quality. Fired exactly once per hold-cycle (transition from no-held to held).
+    /// </summary>
+    void OnQueueHoldStarted(string queueName, IReadOnlyList<PlayerKey> candidates, double currentQuality, TimeSpan holdWindow) { }
+
+    /// <summary>
+    /// A held candidate was replaced with a higher-quality partition during the hold window. Fired
+    /// only when the quality delta exceeds the matcher's improvement threshold so chat updates stay
+    /// sparse.
+    /// </summary>
+    void OnQueueHoldImproved(string queueName, IReadOnlyList<PlayerKey> candidates, double oldQuality, double newQuality) { }
+
     /// <summary>A new group invitation was just accepted by the registry. Fired only on the
     /// successful (<see cref="Groups.InviteResult.Sent"/>) path; the adapter typically translates
     /// this into a DM to <paramref name="invitee"/> so they know to <c>?accept</c>.</summary>
