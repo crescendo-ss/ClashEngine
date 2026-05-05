@@ -17,6 +17,25 @@ public class QueueDefinitionTests
     }
 
     [Fact]
+    public void Default_return_items_action_is_full()
+    {
+        // The default keeps existing behavior (?return gives a fresh ship). Queues opt in to
+        // Restore / Burn explicitly.
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
+        Assert.Equal(ItemsAction.Full, def.ReturnItemsAction);
+    }
+
+    [Theory]
+    [InlineData(ItemsAction.Full)]
+    [InlineData(ItemsAction.Restore)]
+    [InlineData(ItemsAction.Burn)]
+    public void Return_items_action_round_trips(ItemsAction action)
+    {
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), returnItemsAction: action);
+        Assert.Equal(action, def.ReturnItemsAction);
+    }
+
+    [Fact]
     public void Casual_rating_weight_can_be_below_one()
     {
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), ratingWeight: 0.5);

@@ -778,4 +778,123 @@ public class StatsRecorderTests
         r.OnKill(victim: K("A"), killer: K("C"), atTick: 105);
         Assert.Equal(1, r.Stats[K("A")].Deaths);
     }
+
+    // --- last-leave inventory snapshot (consumed by ?return restore path) ---
+
+    [Fact]
+    public void CaptureLastLeaveInventory_freezes_current_inventory()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
+        r.OnSpawn(K("A"), 10);
+
+        // Wire reports mid-life: 1 of 3 repels and 0 of 1 bursts left.
+        Wire(r, K("A"), repels: 1, bursts: 0);
+
+        r.CaptureLastLeaveInventory(K("A"));
+        Assert.True(r.TryGetLastLeaveInventory(K("A"), out var snap));
+        Assert.NotNull(snap);
+        Assert.Equal(1, snap![ItemKind.Repel]);
+        Assert.False(snap.ContainsKey(ItemKind.Burst));
+    }
+
+    [Fact]
+    public void CaptureLastLeaveInventory_decouples_from_live_inventory()
+    {
+        // The snapshot must be a deep copy: subsequent OnExtraPositionData updates to the live
+        // inventory must not bleed into the captured snapshot. Otherwise a stray spec-mode
+        // packet (or a stale tick) would silently mutate the value the orchestrator is about
+        // to consume.
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
+        r.OnSpawn(K("A"), 10);
+        Wire(r, K("A"), repels: 2, bursts: 1);
+
+        r.CaptureLastLeaveInventory(K("A"));
+
+        // Live inventory churns after the capture.
+        Wire(r, K("A"), repels: 0, bursts: 0);
+
+        Assert.True(r.TryGetLastLeaveInventory(K("A"), out var snap));
+        Assert.Equal(2, snap![ItemKind.Repel]);
+        Assert.Equal(1, snap[ItemKind.Burst]);
+    }
+
+    [Fact]
+    public void OnSpawn_clears_last_leave_inventory()
+    {
+        // A real respawn supersedes any saved return-snapshot: the orchestrator should have
+        // already consumed it before SpawnCallback fires, and a stale snapshot left behind would
+        // be the wrong loadout to restore on a *future* spec-and-return cycle.
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
+        r.OnSpawn(K("A"), 10);
+        Wire(r, K("A"), repels: 2, bursts: 1);
+        r.CaptureLastLeaveInventory(K("A"));
+        Assert.True(r.TryGetLastLeaveInventory(K("A"), out _));
+
+        r.OnSpawn(K("A"), 100);
+        Assert.False(r.TryGetLastLeaveInventory(K("A"), out var snap));
+        Assert.Null(snap);
+    }
+
+    [Fact]
+    public void OnLeaveMatch_clears_last_leave_inventory()
+    {
+        // A true exit (sub-out, post-grace release) means the player isn't coming back via
+        // ?return; the saved snapshot must be evicted so a re-registered player on the same key
+        // doesn't inherit it.
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 0));
+        r.OnSpawn(K("A"), 10);
+        Wire(r, K("A"), repels: 2);
+        r.CaptureLastLeaveInventory(K("A"));
+
+        r.OnLeaveMatch(K("A"), atTick: 50);
+        Assert.False(r.TryGetLastLeaveInventory(K("A"), out _));
+    }
+
+    [Fact]
+    public void TryGetLastLeaveInventory_returns_false_for_unknown_player()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        Assert.False(r.TryGetLastLeaveInventory(K("nobody"), out var snap));
+        Assert.Null(snap);
+    }
+
+    [Fact]
+    public void CaptureLastLeaveInventory_for_unregistered_player_is_a_noop()
+    {
+        // Capture against a key the recorder doesn't know about must not throw, must not create
+        // a phantom snapshot. Defensive: the orchestrator may racily call this for a player who
+        // was just released from the match-roster.
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.CaptureLastLeaveInventory(K("ghost"));
+        Assert.False(r.TryGetLastLeaveInventory(K("ghost"), out _));
+    }
+
+    [Fact]
+    public void TryGetInitialInventory_returns_registered_loadout()
+    {
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
+        Assert.True(r.TryGetInitialInventory(K("A"), out var initial));
+        Assert.Equal(3, initial![ItemKind.Repel]);
+        Assert.Equal(1, initial[ItemKind.Burst]);
+    }
+
+    [Fact]
+    public void TryGetInitialInventory_reflects_post_ship_change_loadout()
+    {
+        // OnShipChange may swap the per-ship initial loadout (different ship has different
+        // InitialBurst / InitialRepel). The ?return restore path needs the *current* ship's
+        // initial counts so the deduction math (initial - saved) lands on the right baseline.
+        var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200));
+        r.RegisterPlayer(K("A"), 0, 1000, 0.0, SimpleEnergy(), 0, Loadout(repels: 3, bursts: 1));
+        r.OnShipChange(K("A"), newMaxEnergy: 1200, newRechargeRate: 1.0, SimpleEnergy(), atTick: 50,
+            newInitialInventory: Loadout(repels: 1, bursts: 4));
+        Assert.True(r.TryGetInitialInventory(K("A"), out var initial));
+        Assert.Equal(1, initial![ItemKind.Repel]);
+        Assert.Equal(4, initial[ItemKind.Burst]);
+    }
 }
