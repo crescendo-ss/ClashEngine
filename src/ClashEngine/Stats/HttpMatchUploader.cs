@@ -175,7 +175,14 @@ public sealed class HttpMatchUploader : IMatchUploader, IDisposable
 
         using var content = new MultipartFormDataContent();
         var jsonContent = new StringContent(json, Encoding.UTF8, "application/json");
-        content.Add(jsonContent, "metadata");
+        // Set Content-Disposition manually so the `name` parameter is quoted
+        // ("metadata", not metadata). MultipartFormDataContent.Add(content, name)
+        // emits the value as a bare token when it parses as one, which RFC 7578
+        // disallows -- strict parsers (Node/undici) reject the part with
+        // "Failed to parse body as FormData."
+        jsonContent.Headers.ContentDisposition =
+            new ContentDispositionHeaderValue("form-data") { Name = "\"metadata\"" };
+        content.Add(jsonContent);
 
         FileStream? recordingStream = null;
         if (filePath is not null)
@@ -185,7 +192,13 @@ public sealed class HttpMatchUploader : IMatchUploader, IDisposable
                 recordingStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
                 var streamContent = new StreamContent(recordingStream);
                 streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-                content.Add(streamContent, "recording", Path.GetFileName(filePath));
+                streamContent.Headers.ContentDisposition =
+                    new ContentDispositionHeaderValue("form-data")
+                    {
+                        Name = "\"recording\"",
+                        FileName = "\"" + Path.GetFileName(filePath) + "\""
+                    };
+                content.Add(streamContent);
             }
             catch (Exception ex)
             {
