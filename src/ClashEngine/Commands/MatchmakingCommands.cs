@@ -186,10 +186,12 @@ public sealed class MatchmakingCommands
         var now = _clock.UtcNow;
         var groupId = _engine.Groups.GroupOf(k);
         EnqueueResult result;
+        IReadOnlyList<PlayerKey>? partyMembers = null;
         if (groupId is GroupId g)
         {
             var members = new System.Collections.Generic.List<PlayerKey>();
             foreach (var m in _engine.Groups.MembersOf(g)) members.Add(m);
+            partyMembers = members;
             result = _engine.TryEnqueueGroup(members, resolvedName, now, out _, existingGroup: g, initiator: k);
         }
         else
@@ -199,10 +201,15 @@ public sealed class MatchmakingCommands
         if (_log.IsDebug)
             _log.Debug(LogCategory, $"?play {k.Name} -> queue '{resolvedName}' result={result}" +
                 (groupId is GroupId gg ? $" (group {gg})" : ""));
-        ReplyForEnqueue(player, k, resolvedName, result);
+        ReplyForEnqueue(player, k, resolvedName, result, partyMembers);
     }
 
-    private void ReplyForEnqueue(Player player, PlayerKey key, string queueName, EnqueueResult result)
+    private void ReplyForEnqueue(
+        Player player,
+        PlayerKey key,
+        string queueName,
+        EnqueueResult result,
+        IReadOnlyList<PlayerKey>? partyMembers = null)
     {
         var msg = result switch
         {
@@ -210,7 +217,7 @@ public sealed class MatchmakingCommands
             EnqueueResult.UnknownQueue => $"Queue '{queueName}' not found.",
             EnqueueResult.NotConnected => "You aren't connected.",
             EnqueueResult.InMatch => "You're already in a match.",
-            EnqueueResult.InTimeout => RenderInTimeoutMessage(key),
+            EnqueueResult.InTimeout => RenderInTimeoutMessage(key, partyMembers),
             EnqueueResult.AlreadyQueued => $"You're already in '{queueName}'.",
             EnqueueResult.GroupTooLarge => $"Your group is too large for '{queueName}'.",
             _ => null,
@@ -219,13 +226,51 @@ public sealed class MatchmakingCommands
     }
 
     /// <summary>
-    /// Builds the in-timeout reply with a human-readable remaining duration when the caller
-    /// themselves is in timeout. In the group-enqueue path the caller may not be the offender,
-    /// so falls back to a generic phrase if their own eligibility says they're available.
+    /// Builds the in-timeout reply. For solo enqueues (<paramref name="partyMembers"/> null) the
+    /// caller is the offender and the reply renders their own remaining timeout. For party
+    /// enqueues, scans the full membership and lists every player still in timeout (with each
+    /// one's remaining duration), since the blocker is often a teammate the caller didn't know
+    /// about.
     /// </summary>
-    private string RenderInTimeoutMessage(PlayerKey key)
+    private string RenderInTimeoutMessage(PlayerKey caller, IReadOnlyList<PlayerKey>? partyMembers)
     {
-        var elig = _engine.CheckEligibility(key);
+        if (partyMembers is null)
+            return RenderSelfTimeout(caller);
+
+        var now = _clock.UtcNow;
+        var offenders = new List<(PlayerKey Player, TimeSpan? Remaining)>();
+        foreach (var m in partyMembers)
+        {
+            var elig = _engine.CheckEligibility(m);
+            if (elig.Status != Core.Eligibility.EligibilityStatus.InTimeout) continue;
+            TimeSpan? remaining = null;
+            if (elig.TimeoutUntil is { } until)
+            {
+                var r = until - now;
+                if (r > TimeSpan.Zero) remaining = r;
+            }
+            offenders.Add((m, remaining));
+        }
+
+        if (offenders.Count == 0)
+            return "Your party can't queue: a member is serving a queue-timeout penalty.";
+
+        if (offenders.Count == 1 && offenders[0].Player.Equals(caller))
+            return RenderSelfTimeout(caller);
+
+        var parts = new List<string>(offenders.Count);
+        foreach (var (p, remaining) in offenders)
+        {
+            parts.Add(remaining is { } r
+                ? $"{p.Name} ({HumanDuration.Humanize(r)} remaining)"
+                : p.Name);
+        }
+        return $"Your party can't queue -- on timeout: {string.Join(", ", parts)}.";
+    }
+
+    private string RenderSelfTimeout(PlayerKey caller)
+    {
+        var elig = _engine.CheckEligibility(caller);
         if (elig.Status == Core.Eligibility.EligibilityStatus.InTimeout && elig.TimeoutUntil is { } until)
         {
             var remaining = until - _clock.UtcNow;
