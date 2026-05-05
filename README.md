@@ -10,7 +10,7 @@ A skill-based matchmaking engine for [SubspaceServer .NET](https://github.com/gi
 |---|---|
 | `src/ClashEngine.Core/` | Pure-logic library: queues, matcher, team balancer, end-policies, FSMs, rating math, stats accounting. **No SubspaceServer dependencies.** |
 | `src/ClashEngine/` | The SubspaceServer plug-in: adapters that wire the engine to `IGame`, `IChat`, `IPersist`, `IArenaManager`, MatchFocus / MatchLvz callbacks, etc. |
-| `tests/ClashEngine.Core.Tests/` | xUnit test suite for the core library (≈500 tests). |
+| `tests/ClashEngine.Core.Tests/` | xUnit test suite for the core library (≈550 tests). |
 | `schema/match.schema.json` | JSON schema for the end-of-match upload envelope. |
 
 The plug-in is loaded as a SubspaceServer module; the core library is the engine. Pure logic lives where it can be tested in isolation; everything that needs SS APIs lives in the plug-in.
@@ -279,7 +279,7 @@ A match progresses through five orchestrator phases:
 1. **Setup.** Players are warped into the configured `MatchArena`, set to their assigned ship + freq, freq-locked, and (if `WarpOnSpawn`) warped to the team's chosen spawn. Ship changes are unrestricted through the end of Staging.
 2. **Staging** (`StagingDuration`, default 10 s). Idle detection: each player must demonstrate non-idleness via rotation, movement, or weapon fire. The first detected movement DMs the player `Got it -- you're ready. Standby for the countdown.` so they know the readiness check has registered. Players may change ships freely during this phase to pick their loadout. Drift enforcement runs here. Any player still idle at the end → match cancelled, idle players flagged AFK.
 3. **Countdown** (`CountdownDuration`, min/default 5 s). Broadcasts `All set!` up-front (with `Starting in N seconds!` appended when `N > 10`), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ship changes are now locked to the participant's current ship. Drift enforcement still active. At `GO!` the team re-warps to the chosen spawn.
-4. **Live.** Engine FSM runs end-policy, kill counting, lives tracking, team-collapse detection (if a team has no live members for the team-collapse grace window, they forfeit; surviving teams hear a 10 s warning).
+4. **Live.** Engine FSM runs end-policy, kill counting, lives tracking, team-collapse detection (if a team has no live members for the team-collapse grace window, they forfeit; surviving teams hear a 10 s warning). After each non-fatal death the player is DMed `You have Ns to change ships before being locked back to your current ship.` (`N` = `ShipChangeGracePeriod`); knockouts (last life) skip this since they go straight to spec.
 5. **Cleanup.** Match-end summary chat broadcast (`Match over! Team A/B wins.` plus the full scoreboard table). Players are unlocked and sent to spec.
 
 ---
@@ -303,11 +303,14 @@ The same payload structure is used to render the in-game scoreboard at match end
 | Command | Group | Notes |
 |---|---|---|
 | `?play [comp\|casual] <queue>` | player | Queue for the next match. Tier defaults to `comp`. Without a queue name, falls back to the arena's `DefaultQueue`. |
-| `?queue <queue>` | player | Show who's queued and how long they've been waiting. |
+| `?queue [name]` | player | List all queues, or show who's queued and how long they've been waiting in `<name>`. |
 | `?cancel` | player | Leave every queue you're in. |
-| `?party <player1>[,<player2>,...]` | player | Invite players to a group; group queues atomically and is matched as a unit. |
-| `?accept [inviter]` | player | Accept a pending group invitation. |
+| `?return` | player | Rejoin the match you were specced from. Bypasses the per-match freq lock by placing you directly on your assigned ship and team freq. |
+| `?party` / `?party <p1>[,<p2>,...]` | player | List your current party's members, or invite one or more players to your party. |
+| `?accept [inviter]` | player | Accept a pending group invitation. Inviter is optional when only one is pending. |
 | `?decline [inviter]` | player | Decline a pending invitation. |
+| `?leaveparty` | player | Leave your current party. If you're the leader of a closed party, the party disbands. |
+| `?partymode [open\|closed]` | player | View or change your party's mode. Closed parties have a leader who controls invites. |
 | `?rating` | player | Show your skill rating per game type. |
 | `?stats` | player | Show the live scoreboard for the match you're in or spectating. |
 | `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
