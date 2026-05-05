@@ -731,7 +731,7 @@ public sealed class MatchmakingEngine
                 VotesReceived: new HashSet<PlayerKey>());
 
             _pendingGriefs[(m.MatchId, flag.Player)] = pending;
-            _telemetry.OnGriefingFlagged(pending);
+            _telemetry.OnGriefingFlagged(pending, _penalties.TimeoutUntil(flag.Player) ?? at);
         }
     }
 

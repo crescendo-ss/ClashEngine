@@ -287,9 +287,10 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         _verbose.Info(LogCategory, $"Match {match.MatchId:N} team {teamIdx} recovered before forfeit.");
     }
 
-    public void OnGriefingFlagged(PendingGriefingPenalty pending)
+    public void OnGriefingFlagged(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil)
     {
-        var window = pending.VetoWindowEndsAt - pending.PenaltyAppliedAt;
+        var penaltyDuration = timeoutUntil - pending.PenaltyAppliedAt;
+        var penaltyMinutes = Math.Max(1, (int)Math.Round(penaltyDuration.TotalMinutes));
         var target = _resolver.Resolve(pending.Target);
         var targetName = target?.Name ?? pending.Target.Name;
 
@@ -298,17 +299,18 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             if (_resolver.Resolve(voter) is { } p)
             {
                 _chat.SendMessage(p,
-                    $"{targetName} was flagged for griefing ({pending.Reason}). " +
-                    $"Use ?veto {targetName} within {Format(window)} to overturn " +
-                    $"({pending.VetoesRequired} vetoes needed).");
+                    $"{targetName} has been assessed with a {penaltyMinutes} minute griefing penalty. " +
+                    $"Use ?forgive {targetName} to vote to have that penalty removed " +
+                    $"({pending.VetoesRequired} votes needed).");
             }
         }
 
         if (target is not null)
         {
+            var window = pending.VetoWindowEndsAt - pending.PenaltyAppliedAt;
             _chat.SendMessage(target,
                 $"You were flagged for griefing: {pending.Reason}. " +
-                $"Other players can ?veto within {Format(window)}.");
+                $"Other players can ?forgive within {Format(window)}.");
         }
     }
 
@@ -317,7 +319,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         if (_resolver.Resolve(voter) is { } p)
         {
             _chat.SendMessage(p,
-                $"Roger. Need {pending.VetoesRemaining} additional player(s) to also veto the penalty.");
+                $"Roger. Need {pending.VetoesRemaining} additional player(s) to also forgive the penalty.");
         }
     }
 
@@ -327,10 +329,10 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         foreach (var voter in pending.EligibleVoters)
         {
             if (_resolver.Resolve(voter) is { } p)
-                _chat.SendMessage(p, $"Penalty for {targetName} was vetoed by {pending.VotesReceived.Count} players.");
+                _chat.SendMessage(p, $"Penalty for {targetName} was forgiven by {pending.VotesReceived.Count} players.");
         }
         if (_resolver.Resolve(pending.Target) is { } t)
-            _chat.SendMessage(t, "Your griefing penalty was vetoed by your peers.");
+            _chat.SendMessage(t, "Your griefing penalty was forgiven by your peers.");
     }
 
     public void OnGriefingConfirmed(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil)

@@ -91,8 +91,9 @@ public interface IMatchmakingTelemetry
     void OnTeamRecovered(ActiveMatch match, int teamIdx) { }
 
     /// <summary>A heuristic flagged a player as a griefer; the penalty is now active and the veto
-    /// window is open.</summary>
-    void OnGriefingFlagged(PendingGriefingPenalty pending) { }
+    /// window is open. <paramref name="timeoutUntil"/> is when the player's queue-lock currently
+    /// ends if the penalty stands (already includes any in-effect Abandonment timeout).</summary>
+    void OnGriefingFlagged(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil) { }
 
     /// <summary>A match participant voted to veto a pending griefing penalty; threshold not yet met.</summary>
     void OnVetoRecorded(PendingGriefingPenalty pending, PlayerKey voter) { }

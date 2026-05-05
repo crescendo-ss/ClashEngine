@@ -105,7 +105,7 @@ cmd_rating
 cmd_cancel
 cmd_accept
 cmd_decline
-cmd_veto
+cmd_forgive
 cmd_helpclash
 ```
 
@@ -187,7 +187,7 @@ These keys move the match's pre-GO physical setup off the arena's default spawn 
 | `Queue<i>RelaxTime` | `HH:MM:SS` | `0:01:30` (comp), `0:00:45` (casual) | Quality-relaxation duration: how fast the quality threshold falls from `qStart` to `qFloor`. Longer = stricter early but eventually accepts weaker matches; shorter = takes whatever it can sooner. |
 | `Queue<i>HoldWindow` | `HH:MM:SS` | `0:00:10` | Once a viable partition is found, the matcher waits up to this duration to see if a better one arrives. Set to `0` to pop immediately. |
 | `Queue<i>QualityCeiling` | float [0,1] | `0.9` | If a held candidate's quality reaches this, pop without waiting out the hold window. |
-| `Queue<i>VetoesRequired` | int ≥ 1 | `2` | Number of distinct match participants who must `?veto` a pending griefing penalty within `VetoWindow` to rescind it. |
+| `Queue<i>VetoesRequired` | int ≥ 1 | `2` | Number of distinct match participants who must `?forgive` a pending griefing penalty within `VetoWindow` to rescind it. |
 | `Queue<i>VetoWindow` | `HH:MM:SS` | `0:01:00` | Open period for vetos after a griefing flag fires. Penalty becomes final at the end of the window if the threshold wasn't reached. |
 | `Queue<i>PromoteWinners` | 0/1 | `0` | KOTH ("king of the hill") mode: the winning team's players are auto-re-enqueued at the head of this queue after a Completed match. Off by default. |
 | `Queue<i>MaxConsecutiveDefenses` | int ≥ 1 | `3` | Max consecutive wins a champion can defend before being sent to the back of the queue to give challengers a clean shot. Only meaningful with `PromoteWinners = 1`. |
@@ -310,6 +310,6 @@ The same payload structure is used to render the in-game scoreboard at match end
 | `?decline [inviter]` | player | Decline a pending invitation. |
 | `?rating` | player | Show your skill rating per game type. |
 | `?stats` | player | Show the live scoreboard for the match you're in or spectating. |
-| `?veto <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
+| `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
 | `?helpclash` | player | List the player commands. |
 | `?clashlog [off\|normal\|verbose\|trace]` | mod | Read or set ClashEngine debug verbosity at runtime. |

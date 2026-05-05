@@ -68,9 +68,9 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnTeamRecovered(m, teamIdx);
     }
-    public void OnGriefingFlagged(PendingGriefingPenalty pending)
+    public void OnGriefingFlagged(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil)
     {
-        foreach (var l in _listeners) l.OnGriefingFlagged(pending);
+        foreach (var l in _listeners) l.OnGriefingFlagged(pending, timeoutUntil);
     }
     public void OnVetoRecorded(PendingGriefingPenalty pending, PlayerKey voter)
     {

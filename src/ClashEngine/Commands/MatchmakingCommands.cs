@@ -89,8 +89,8 @@ public sealed class MatchmakingCommands
             "?leaveparty -- Leave your current party. If you're the leader of a closed party, the party disbands.");
         _commands.AddCommand("partymode", PartyMode, helpText:
             "?partymode [open|closed] -- View or change your party's mode. Closed parties have a leader who controls invites.");
-        _commands.AddCommand("veto", Veto, helpText:
-            "?veto <player> -- Vote to overturn a pending griefing penalty for a match participant.");
+        _commands.AddCommand("forgive", Veto, helpText:
+            "?forgive <player> -- Vote to overturn a pending griefing penalty for a match participant.");
         _commands.AddCommand("clashlog", ClashLogCmd, helpText:
             "?clashlog [off|normal|verbose|trace] -- Show or set ClashEngine debug verbosity. " +
             "Affects only ClashEngine's verbose/trace logging; the host's global level still gates Info/Warn/Error.");
@@ -110,7 +110,7 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("decline", Decline);
         _commands.RemoveCommand("leaveparty", LeaveParty);
         _commands.RemoveCommand("partymode", PartyMode);
-        _commands.RemoveCommand("veto", Veto);
+        _commands.RemoveCommand("forgive", Veto);
         _commands.RemoveCommand("clashlog", ClashLogCmd);
         _commands.RemoveCommand("helpclash", HelpClash);
     }
@@ -740,17 +740,17 @@ public sealed class MatchmakingCommands
         }
     }
 
-    // ---- ?veto <player>
+    // ---- ?forgive <player>
 
     private void Veto(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
     {
-        LogCommand("veto", player, parameters);
+        LogCommand("forgive", player, parameters);
         if (_resolver.KeyOf(player) is not PlayerKey voter) return;
 
         var arg = parameters.Trim().ToString();
         if (arg.Length == 0)
         {
-            _chat.SendMessage(player, "Usage: ?veto <player>");
+            _chat.SendMessage(player, "Usage: ?forgive <player>");
             return;
         }
         var targetKey = new PlayerKey(arg);
@@ -766,21 +766,21 @@ public sealed class MatchmakingCommands
         }
         if (matchId == Guid.Empty)
         {
-            _chat.SendMessage(player, $"No pending griefing penalty for {arg} that you can veto.");
+            _chat.SendMessage(player, $"No pending griefing penalty for {arg} that you can forgive.");
             return;
         }
 
         var result = _engine.Veto(matchId, targetKey, voter, _clock.UtcNow);
         if (_log.IsDebug)
-            _log.Debug(LogCategory, $"?veto {voter.Name} -> {targetKey.Name} match={matchId:N} result={result}");
+            _log.Debug(LogCategory, $"?forgive {voter.Name} -> {targetKey.Name} match={matchId:N} result={result}");
         var msg = result switch
         {
             VetoResult.RecordedNeedMore => null,   // listener already messaged
             VetoResult.PenaltyRescinded => null,   // listener already messaged
             VetoResult.AlreadyVoted => "You already voted.",
-            VetoResult.NotEligible => "You're not eligible to veto that penalty.",
+            VetoResult.NotEligible => "You're not eligible to forgive that penalty.",
             VetoResult.NoPendingPenalty => "No pending penalty.",
-            VetoResult.WindowExpired => "The veto window has closed.",
+            VetoResult.WindowExpired => "The forgiveness window has closed.",
             _ => null,
         };
         if (msg is not null) _chat.SendMessage(player, msg);
@@ -845,7 +845,7 @@ public sealed class MatchmakingCommands
             ("?decline [inviter]",           "Decline a pending party invitation."),
             ("?leaveparty",                  "Leave your party (leader of a closed party = disband)."),
             ("?partymode [open|closed]",     "View or change your party's invite-control mode."),
-            ("?veto <player>",               "Vote to overturn a pending griefing penalty."),
+            ("?forgive <player>",            "Vote to overturn a pending griefing penalty."),
         };
 
         // Pad the command column to the longest row's length so every description starts at the

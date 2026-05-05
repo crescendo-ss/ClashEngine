@@ -46,7 +46,8 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt) =>
         TeamsCollapsing.Add((m.MatchId, teamIdx, since, forfeitAt));
     public void OnTeamRecovered(ActiveMatch m, int teamIdx) => TeamsRecovered.Add((m.MatchId, teamIdx));
-    public void OnGriefingFlagged(PendingGriefingPenalty pending) => GriefingFlagged.Add(pending);
+    public void OnGriefingFlagged(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil) =>
+        GriefingFlagged.Add(pending);
     public void OnVetoRecorded(PendingGriefingPenalty pending, PlayerKey voter) =>
         VetoesRecorded.Add((pending, voter));
     public void OnGriefingVetoed(PendingGriefingPenalty pending) => GriefingVetoed.Add(pending);
