@@ -57,6 +57,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     {
         string display;
         string? tierLabel;
+        int? waiting = null;
         if (_queues.TryGet(queueName, out var def))
         {
             tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
@@ -64,6 +65,9 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
                 ? queueName[..^suffix.Length]
                 : queueName;
+            // OnQueueAdded fires after the matcher has appended the player, so Count already
+            // includes the freshly-enqueued addition.
+            waiting = def.Queue.Count;
         }
         else
         {
@@ -73,9 +77,10 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
 
         bool attributed = initiator is PlayerKey ini && !ini.Equals(player);
         string descriptor = tierLabel is null ? display : $"{tierLabel} {display}";
+        string countSuffix = waiting is { } w ? $" ({w} in queue)" : "";
         return attributed
-            ? $"{initiator!.Value.Name} queued you for {descriptor}."
-            : $"Queued for {descriptor}.";
+            ? $"{initiator!.Value.Name} queued you for {descriptor}{countSuffix}."
+            : $"Queued for {descriptor}{countSuffix}.";
     }
 
     public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at)
