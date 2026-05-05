@@ -632,28 +632,26 @@ public class ActiveMatchTests
     [Fact]
     public void Leaving_during_Forming_immediately_abandons_no_grace()
     {
-        // No grace before match start: a player who joins and then bails strands the rest of
-        // the lobby waiting for the join-timeout. They're flagged as abandoner immediately and
-        // cannot recover via OnPlayerReturned.
+        // No grace before match start: a player who joins and then bails strands the rest of the
+        // lobby waiting for the join-timeout, so they're flagged as an abandoner immediately.
+        // They can still recover via OnPlayerReturned (e.g. ?return), but the abandon flag is
+        // sticky -- they're still recorded as an abandoner at match end.
         var m = BuildMatch(joinTimeout: TimeSpan.FromMinutes(1));
         m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
         m.OnPlayerLeft(K("A"), T0.AddSeconds(2));
 
         Assert.Equal(PlayerStatus.Abandoned, m.GetStatus(K("A")));
 
-        // Returning is a no-op: terminal status.
+        // Return flips A back to Active so they can keep playing.
         m.OnPlayerReturned(K("A"), T0.AddSeconds(3));
-        Assert.Equal(PlayerStatus.Abandoned, m.GetStatus(K("A")));
+        Assert.Equal(PlayerStatus.Active, m.GetStatus(K("A")));
 
-        // Match never goes Live: even if the rest of the lobby joins, A is no longer Active.
-        m.OnPlayerJoined(K("B"), T0.AddSeconds(4));
-        m.OnPlayerJoined(K("C"), T0.AddSeconds(5));
-        m.OnPlayerJoined(K("D"), T0.AddSeconds(6));
+        // Match never goes Live (only A and not B/C/D readied), so the join-timeout cancels it.
         Assert.Equal(MatchState.Forming, m.State);
-
-        // After join-timeout, match cancels. A is recorded as an abandoner.
         m.Tick(T0.AddMinutes(1).AddSeconds(1));
         Assert.Equal(MatchState.Cancelled, m.State);
+
+        // Sticky abandon flag: A is still recorded as an abandoner despite being Active at end.
         Assert.Contains(K("A"), m.Outcome!.AbandonedBy);
     }
 

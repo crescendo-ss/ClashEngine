@@ -250,6 +250,66 @@ public sealed class MatchOrchestrator
         player.Arena is { } a && string.Equals(a.Name, arenaName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Possible outcomes of a <see cref="TryReturn"/> request. <see cref="ReturnResult.Placed"/>
+    /// is the success case; the others are diagnostic so the command handler can phrase the
+    /// reply.
+    /// </summary>
+    public enum ReturnResult
+    {
+        Placed,
+        NotInArena,
+        AlreadyActive,
+        MatchEnded,
+        KnockedOut,
+        UnresolvedPlayer,
+    }
+
+    /// <summary>
+    /// Re-place <paramref name="key"/> onto their assigned ship + team freq, bypassing the
+    /// FreqManager advisor (direct <c>SetShipAndFreq</c>). Used by the <c>?return</c> command to
+    /// recover a participant who specced themselves out and would otherwise be blocked by
+    /// <see cref="ClashEngine.Adapter.MatchFreqAdvisor"/> from getting back to their team's
+    /// (private) freq. No-op for unknown players, players already on a ship, knocked-out players
+    /// (lives exhausted), or once the match has reached Cleanup.
+    /// </summary>
+    public ReturnResult TryReturn(PlayerKey key)
+    {
+        if (Phase is MatchPhase.Cleanup) return ReturnResult.MatchEnded;
+        if (!OwnsPlayer(key)) return ReturnResult.MatchEnded;
+        if (!_engine.ActiveMatches.TryGetValue(_matchId, out var match)) return ReturnResult.MatchEnded;
+        if (match.IsKnockedOut(key)) return ReturnResult.KnockedOut;
+
+        var player = _resolver.Resolve(key);
+        if (player is null) return ReturnResult.UnresolvedPlayer;
+
+        var arenaName = _queue.MatchArenaName;
+        if (!string.IsNullOrEmpty(arenaName) && !IsInArena(player, arenaName))
+            return ReturnResult.NotInArena;
+
+        if (player.Ship != ShipType.Spec)
+            return ReturnResult.AlreadyActive;
+
+        int teamIdx = -1, slotIdx = -1;
+        for (int t = 0; t < _proposal.Teams.Count && teamIdx < 0; t++)
+        {
+            for (int j = 0; j < _proposal.Teams[t].Count; j++)
+            {
+                if (_proposal.Teams[t][j] == key) { teamIdx = t; slotIdx = j; break; }
+            }
+        }
+        if (teamIdx < 0) return ReturnResult.MatchEnded;
+
+        short freq = (short)(_freqBase + teamIdx * MatchFreqAllocator.FreqStep);
+        var ship = ShipFor(teamIdx, slotIdx);
+        _game.SetShipAndFreq(player, ship, freq);
+
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq}.");
+        return ReturnResult.Placed;
+    }
+
+    /// <summary>
     /// Called by the registry on every position packet from a player participating in this match.
     /// Drives two things during pre-GO: (1) idle detection during Staging (used to fail the match
     /// if a player never moves), and (2) drift enforcement during Staging or Countdown -- if the

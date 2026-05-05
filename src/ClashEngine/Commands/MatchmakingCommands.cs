@@ -8,8 +8,10 @@ using ClashEngine.Core.Adapter;
 using ClashEngine.Core.Eligibility;
 using ClashEngine.Core.Groups;
 using ClashEngine.Core.Identity;
+using ClashEngine.Core.Matches;
 using ClashEngine.Core.Penalties;
 using ClashEngine.Core.Queue;
+using ClashEngine.Orchestration;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
 
@@ -30,6 +32,7 @@ public sealed class MatchmakingCommands
     private readonly PlayerKeyResolver _resolver;
     private readonly IConfigManager _config;
     private readonly ClashLog _log;
+    private readonly MatchOrchestratorRegistry _orchestrators;
 
     private static readonly string[] Tiers = { "competitive", "casual" };
 
@@ -40,7 +43,8 @@ public sealed class MatchmakingCommands
         IClock clock,
         PlayerKeyResolver resolver,
         IConfigManager config,
-        ClashLog log)
+        ClashLog log,
+        MatchOrchestratorRegistry orchestrators)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _commands = commands ?? throw new ArgumentNullException(nameof(commands));
@@ -49,6 +53,7 @@ public sealed class MatchmakingCommands
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _orchestrators = orchestrators ?? throw new ArgumentNullException(nameof(orchestrators));
     }
 
     public void Register()
@@ -70,6 +75,9 @@ public sealed class MatchmakingCommands
             "?rating -- Show your skill rating per game type.");
         _commands.AddCommand("cancel", Cancel, helpText:
             "?cancel -- Leave every ClashEngine matchmaking queue.");
+        _commands.AddCommand("return", Return, helpText:
+            "?return -- Rejoin the match you were specced from. Bypasses the per-match freq lock " +
+            "by placing you directly on your assigned ship and team freq.");
         _commands.AddCommand("party", Group, helpText:
             "?party -- List the members of your current party. " +
             "?party player1[,player2,...] -- Invite one or more players to your ClashEngine group.");
@@ -96,6 +104,7 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("queue", Queue);
         _commands.RemoveCommand("rating", Rating);
         _commands.RemoveCommand("cancel", Cancel);
+        _commands.RemoveCommand("return", Return);
         _commands.RemoveCommand("party", Group);
         _commands.RemoveCommand("accept", Accept);
         _commands.RemoveCommand("decline", Decline);
@@ -465,6 +474,37 @@ public sealed class MatchmakingCommands
         if (removed.Count == 0) _chat.SendMessage(player, "You weren't in any queue.");
     }
 
+    // ---- ?return
+
+    private void Return(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("return", player, parameters);
+        if (_resolver.KeyOf(player) is not PlayerKey k) return;
+
+        var orchestrator = _orchestrators.OrchestratorFor(k);
+        if (orchestrator is null)
+        {
+            _chat.SendMessage(player, "You aren't in an active match.");
+            return;
+        }
+
+        var result = orchestrator.TryReturn(k);
+        if (_log.IsDebug)
+            _log.Debug(LogCategory, $"?return {k.Name} match={orchestrator.MatchId:N} result={result}");
+
+        var msg = result switch
+        {
+            MatchOrchestrator.ReturnResult.Placed => null,
+            MatchOrchestrator.ReturnResult.AlreadyActive => "You're already on a ship.",
+            MatchOrchestrator.ReturnResult.NotInArena => "Return to your match arena first, then ?return.",
+            MatchOrchestrator.ReturnResult.KnockedOut => "You're out of lives -- can't rejoin this match.",
+            MatchOrchestrator.ReturnResult.MatchEnded => "That match has ended.",
+            MatchOrchestrator.ReturnResult.UnresolvedPlayer => null,
+            _ => null,
+        };
+        if (msg is not null) _chat.SendMessage(player, msg);
+    }
+
     // ---- ?party player1,player2,...
 
     private void Group(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
@@ -796,6 +836,7 @@ public sealed class MatchmakingCommands
         {
             ("?play [comp|casual] <queue>",  "Queue for the next match. \"comp\" is the default tier."),
             ("?cancel",                      "Leave every ClashEngine queue."),
+            ("?return",                      "Rejoin the match you were specced from."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
             ("?party",                       "List your current party's members (leader marked if closed)."),

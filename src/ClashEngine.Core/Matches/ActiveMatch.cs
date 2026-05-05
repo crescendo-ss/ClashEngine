@@ -24,6 +24,14 @@ public sealed class ActiveMatch
     private readonly Dictionary<PlayerKey, DateTimeOffset> _exitedAt = new();
     private readonly Dictionary<PlayerKey, List<ParticipationPeriod>> _participations = new();
     private readonly HashSet<PlayerKey> _candidateAbandoners = new();
+
+    /// <summary>
+    /// Players whose status flipped to <see cref="PlayerStatus.Abandoned"/> at any point during
+    /// the match (grace expired, no-show, AFK cancel). Sticky -- a subsequent <c>?return</c>
+    /// re-activates them but the flag remains so they're still counted as an abandoner at match
+    /// end.
+    /// </summary>
+    private readonly HashSet<PlayerKey> _everAbandoned = new();
     private readonly Dictionary<int, DateTimeOffset> _teamCollapsedSince = new();
     private readonly int[] _killsByTeam;
     private readonly IMatchEndPolicy _endPolicy;
@@ -252,6 +260,7 @@ public sealed class ActiveMatch
             if (s == PlayerStatus.Active)
             {
                 _status[player] = PlayerStatus.Abandoned;
+                _everAbandoned.Add(player);
                 CloseParticipation(player, at);
                 if (IsAbandonmentCandidateAt(player))
                     _candidateAbandoners.Add(player);
@@ -272,16 +281,28 @@ public sealed class ActiveMatch
         UpdateTeamCollapseTimers(at);
     }
 
-    /// <summary>Player returned to their ship/freq within the grace window.</summary>
+    /// <summary>
+    /// Player returned to their ship/freq. <see cref="PlayerStatus.InGrace"/> returns are within
+    /// the per-player grace window: the player is forgiven and dropped from the abandoner
+    /// candidate set. <see cref="PlayerStatus.Abandoned"/> returns happen via <c>?return</c>
+    /// after the grace expired: the player rejoins the match (flips back to Active and the
+    /// team-collapse timer clears) but the abandon flag is sticky -- they're still counted as an
+    /// abandoner at match end via <see cref="_everAbandoned"/>. Knocked-out players (lives
+    /// exhausted) cannot return.
+    /// </summary>
     public void OnPlayerReturned(PlayerKey player, DateTimeOffset at)
     {
         if (!_status.TryGetValue(player, out var s)) return;
-        if (s != PlayerStatus.InGrace) return;
+        if (s != PlayerStatus.InGrace && s != PlayerStatus.Abandoned) return;
         if (State != MatchState.Live && State != MatchState.Forming) return;
+        // Knocked out -- their slot is closed for the rest of the match.
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return;
 
         _status[player] = PlayerStatus.Active;
         _leftAt.Remove(player);
-        _candidateAbandoners.Remove(player);
+        // Within-grace return forgives the candidate flag; after-grace return does not (the
+        // sticky _everAbandoned set still counts them as an abandoner at match end).
+        if (s == PlayerStatus.InGrace) _candidateAbandoners.Remove(player);
         OpenParticipation(player, at);
 
         // Clear the team-collapse timer if this player's return brings their team back to life.
@@ -463,6 +484,7 @@ public sealed class ActiveMatch
                 {
                     _status[p] = PlayerStatus.Abandoned;
                     _leftAt.Remove(p);
+                    _everAbandoned.Add(p);
                 }
             }
         }
@@ -524,8 +546,11 @@ public sealed class ActiveMatch
     }
 
     /// <summary>
-    /// A team has a "recoverable" member if at least one player is in <see cref="PlayerStatus.InGrace"/>
-    /// AND has lives remaining (or unlimited). Such players can still rejoin via a return.
+    /// A team has a "recoverable" member if at least one player is <see cref="PlayerStatus.InGrace"/>
+    /// or <see cref="PlayerStatus.Abandoned"/>, AND has lives remaining (or unlimited). InGrace
+    /// players auto-recover by re-shipping; Abandoned players can recover via the <c>?return</c>
+    /// command. Either way, the team is given the team-collapse grace window to recover before
+    /// forfeiting -- only a fully-knocked-out roster forfeits immediately.
     /// </summary>
     private bool HasRecoverableMember(int teamIdx)
     {
@@ -533,7 +558,8 @@ public sealed class ActiveMatch
         for (int j = 0; j < team.Count; j++)
         {
             var p = team[j];
-            if (_status[p] != PlayerStatus.InGrace) continue;
+            var s = _status[p];
+            if (s != PlayerStatus.InGrace && s != PlayerStatus.Abandoned) continue;
             if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(p)) continue;
             return true;
         }
@@ -590,6 +616,7 @@ public sealed class ActiveMatch
             if (_status[p] == PlayerStatus.Pending)
             {
                 _status[p] = PlayerStatus.Abandoned;
+                _everAbandoned.Add(p);
                 _candidateAbandoners.Add(p);  // no-shows always count as abandoners
             }
         }
@@ -616,6 +643,7 @@ public sealed class ActiveMatch
         {
             if (!_status.ContainsKey(p)) continue;   // unknown player -- skip
             _status[p] = PlayerStatus.Abandoned;
+            _everAbandoned.Add(p);
             _candidateAbandoners.Add(p);
         }
         FinalizeCancellation(at);
@@ -655,8 +683,12 @@ public sealed class ActiveMatch
         foreach (var p in _candidateAbandoners)
         {
             if (!_status.TryGetValue(p, out var s)) continue;
-            // A candidate who is still in grace at match end never returned in time -- they're an abandoner.
-            if (s == PlayerStatus.Abandoned || s == PlayerStatus.InGrace)
+            // Three buckets count as abandoners at match end:
+            //   * Abandoned: never returned (or specced out at end without recovering).
+            //   * InGrace: still in grace at end -- never returned in time.
+            //   * Active + ever-Abandoned: returned via ?return after grace expired. Sticky flag
+            //     keeps them counted because they disrupted the match by being away too long.
+            if (s == PlayerStatus.Abandoned || s == PlayerStatus.InGrace || _everAbandoned.Contains(p))
                 list.Add(p);
         }
         return list;

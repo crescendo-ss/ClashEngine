@@ -161,6 +161,18 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         orchestrator.OnPlayerEnteredArena(key, arena);
     }
 
+    /// <summary>
+    /// Returns the orchestrator that owns <paramref name="key"/>, or <see langword="null"/> if no
+    /// active orchestrator has them on a roster. Used by the <c>?return</c> command to dispatch
+    /// the re-placement call.
+    /// </summary>
+    public MatchOrchestrator? OrchestratorFor(PlayerKey key)
+    {
+        foreach (var orchestrator in _orchestrators.Values)
+            if (orchestrator.OwnsPlayer(key)) return orchestrator;
+        return null;
+    }
+
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
     {
         if (_orchestrators.TryGetValue(m.MatchId, out var orchestrator))

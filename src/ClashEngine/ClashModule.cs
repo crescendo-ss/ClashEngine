@@ -380,7 +380,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
             await _persist.RegisterPersistentDataAsync(_penaltiesRegistration);
         }
 
-        _commandHandlers = new MatchmakingCommands(_engine, _commands, _chat, _clock, _resolver, _config, _clashLog);
+        _commandHandlers = new MatchmakingCommands(_engine, _commands, _chat, _clock, _resolver, _config, _clashLog, _orchestrators);
         _commandHandlers.Register();
         _unregisterActions.Add(_commandHandlers.Unregister);
 
