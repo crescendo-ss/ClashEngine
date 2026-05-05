@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using ClashEngine.Adapter;
+using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Stats;
 using SS.Core;
@@ -24,7 +25,7 @@ public sealed class ItemsCommand
     public void Register()
     {
         _commands.AddCommand("items", Run, helpText:
-            "?items -- Show each still-alive player's Repels/Rockets, grouped by team.");
+            "?items -- Show each still-alive player's Repels/Rockets, grouped by team. Your own counts are omitted.");
     }
 
     public void Unregister()
@@ -42,12 +43,12 @@ public sealed class ItemsCommand
 
         for (int t = 0; t < found.Match.Teams.Count; t++)
         {
-            var line = BuildTeamLine(found.Match, found.Recorder, t);
+            var line = BuildTeamLine(found.Match, found.Recorder, t, found.SelfKey);
             if (line is not null) _chat.SendMessage(player, line);
         }
     }
 
-    private static string? BuildTeamLine(ActiveMatch match, StatsRecorder recorder, int teamIdx)
+    private static string? BuildTeamLine(ActiveMatch match, StatsRecorder recorder, int teamIdx, PlayerKey selfKey)
     {
         var roster = match.Teams[teamIdx];
         var sb = new StringBuilder();
@@ -57,6 +58,7 @@ public sealed class ItemsCommand
         for (int j = 0; j < roster.Count; j++)
         {
             var key = roster[j];
+            if (key.Equals(selfKey)) continue;
             if (match.IsKnockedOut(key)) continue;
             if (!recorder.Stats.TryGetValue(key, out var ps)) continue;
             ps.Inventory.TryGetValue(ItemKind.Repel, out var reps);
