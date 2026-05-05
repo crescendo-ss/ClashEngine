@@ -63,10 +63,19 @@ public sealed class KillFeedReporter
         // Resolve the participant set once -- every line below targets the same recipients.
         var participants = ResolveParticipants(match);
 
-        // Line 1: "Victim kb Killer (dmg) -- Add: A1 (d1), A2 (d2)"
+        // Compute team relationship up-front so Line 1 can flag team kills and Line 3 can
+        // attribute the score correctly.
+        int killerTeam = TeamOf(match, killer);
+        int victimTeam = TeamOf(match, victim);
+        bool isTeamkill = killerTeam >= 0 && killerTeam == victimTeam;
+
+        // Line 1: "Victim kb Killer (dmg) [TEAMKILL] -- Add: A1 (d1), A2 (d2)". The "[TEAMKILL]"
+        // marker matches SS.Matchmaking's TeamVersusStats convention so chat readers familiar
+        // with that format recognize friendly-fire kills at a glance.
         var line1 = new StringBuilder();
         line1.Append(victim.Name).Append(" kb ").Append(killer.Name)
              .Append(" (").Append(snapshot.KillerDamage).Append(')');
+        if (isTeamkill) line1.Append(" [TEAMKILL]");
         if (snapshot.Assisters.Count > 0)
         {
             line1.Append(" -- Add: ");
@@ -108,9 +117,6 @@ public sealed class KillFeedReporter
         // MatchKillRouter._preEngineReaders), so match.KillsByTeam still holds the PRE-kill
         // counts. We predict the post-engine score by adding +1 to whichever team is about to
         // score. The 2-team TK gating mirrors the engine fix in ActiveMatch.OnKill.
-        int killerTeam = TeamOf(match, killer);
-        int victimTeam = TeamOf(match, victim);
-        bool isTeamkill = killerTeam >= 0 && killerTeam == victimTeam;
         bool scored = !isTeamkill || match.Teams.Count == 2;
         int scoringTeam = (!isTeamkill || match.Teams.Count != 2)
             ? killerTeam
