@@ -20,9 +20,9 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
         _listeners = listeners;
     }
 
-    public void OnQueueAdded(PlayerKey p, string q, DateTimeOffset at)
+    public void OnQueueAdded(PlayerKey p, string q, DateTimeOffset at, PlayerKey? initiator = null)
     {
-        foreach (var l in _listeners) l.OnQueueAdded(p, q, at);
+        foreach (var l in _listeners) l.OnQueueAdded(p, q, at, initiator);
     }
     public void OnQueueRemoved(PlayerKey p, string q, DateTimeOffset at)
     {

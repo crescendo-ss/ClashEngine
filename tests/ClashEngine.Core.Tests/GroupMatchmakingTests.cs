@@ -330,6 +330,69 @@ public class GroupMatchmakingTests
     }
 
     [Fact]
+    public void TryEnqueueGroup_in_open_party_attributes_initiator_to_other_members_only()
+    {
+        // The initiator's own row stays unattributed (so they see the standard "Queued for ..."
+        // reply); the rest of the party gets the initiator on their row so the listener can
+        // render "X queued you for ...".
+        var h = new Harness();
+        h.Engine.Queues.Register(
+            "4v4",
+            new MatchShape(2, 4),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            new GameTypeId(2));
+
+        h.Connect("A", "B", "C");
+        h.Engine.InviteToGroup(K("A"), K("B"), T0);
+        h.Engine.AcceptInvite(K("B"), K("A"), T0.AddSeconds(1), out _);
+        h.Engine.InviteToGroup(K("A"), K("C"), T0.AddSeconds(2));
+        h.Engine.AcceptInvite(K("C"), K("A"), T0.AddSeconds(3), out _);
+
+        h.Telemetry.QueueAdds.Clear();
+        var status = h.Engine.TryEnqueueGroup(
+            new[] { K("A"), K("B"), K("C") }, "4v4", T0.AddSeconds(4), out _, initiator: K("A"));
+
+        Assert.Equal(EnqueueResult.Ok, status);
+        Assert.Equal(3, h.Telemetry.QueueAdds.Count);
+        var addsByPlayer = h.Telemetry.QueueAdds.ToDictionary(e => e.Player);
+        Assert.Null(addsByPlayer[K("A")].Initiator);
+        Assert.Equal(K("A"), addsByPlayer[K("B")].Initiator);
+        Assert.Equal(K("A"), addsByPlayer[K("C")].Initiator);
+    }
+
+    [Fact]
+    public void TryEnqueueGroup_in_closed_party_does_not_attribute_initiator()
+    {
+        // Closed-party convention: the leader is the implicit queuer, so the bare "Queued for ..."
+        // reply is correct -- no attribution needed.
+        var h = new Harness();
+        h.Connect("A", "B");
+        h.Engine.InviteToGroup(K("A"), K("B"), T0);
+        h.Engine.AcceptInvite(K("B"), K("A"), T0.AddSeconds(1), out _);
+        h.Engine.SetGroupMode(K("A"), GroupMode.Closed, T0.AddSeconds(2));
+
+        h.Telemetry.QueueAdds.Clear();
+        var status = h.Engine.TryEnqueueGroup(
+            new[] { K("A"), K("B") }, "2v2", T0.AddSeconds(3), out _, initiator: K("A"));
+
+        Assert.Equal(EnqueueResult.Ok, status);
+        Assert.All(h.Telemetry.QueueAdds, e => Assert.Null(e.Initiator));
+    }
+
+    [Fact]
+    public void TryEnqueue_solo_records_no_initiator()
+    {
+        var h = new Harness();
+        h.Connect("A");
+
+        var status = h.Engine.TryEnqueue(K("A"), "2v2", T0);
+
+        Assert.Equal(EnqueueResult.Ok, status);
+        Assert.Single(h.Telemetry.QueueAdds);
+        Assert.Null(h.Telemetry.QueueAdds[0].Initiator);
+    }
+
+    [Fact]
     public void Tick_prunes_expired_invitations()
     {
         var h = new Harness();

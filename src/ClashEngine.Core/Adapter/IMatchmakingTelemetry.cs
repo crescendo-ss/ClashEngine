@@ -15,7 +15,14 @@ namespace ClashEngine.Core.Adapter;
 /// </summary>
 public interface IMatchmakingTelemetry
 {
-    void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at) { }
+    /// <summary>
+    /// A player has been added to a queue. <paramref name="initiator"/> is the party member who
+    /// actually issued the enqueue command, when that's a different player from
+    /// <paramref name="player"/> -- the engine sets this only for open-party group enqueues so the
+    /// adapter can attribute the message ("X queued you for ..."). Null on solo enqueues, on the
+    /// initiator's own row of a group enqueue, on closed-party enqueues, and on KOTH re-enqueue.
+    /// </summary>
+    void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) { }
     void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) { }
 
     /// <summary>A new group invitation was just accepted by the registry. Fired only on the

@@ -320,7 +320,8 @@ public sealed class MatchmakingEngine
         string queueName,
         DateTimeOffset at,
         out GroupId groupId,
-        GroupId? existingGroup = null)
+        GroupId? existingGroup = null,
+        PlayerKey? initiator = null)
     {
         groupId = default;
         ArgumentNullException.ThrowIfNull(members);
@@ -356,12 +357,18 @@ public sealed class MatchmakingEngine
             ?? _groups.GroupOf(members[0])
             ?? GroupId.New();
 
+        // Initiator attribution is only emitted for open parties: closed-party members already
+        // know the leader is the one who queues, so the bare "Queued for ..." reply is correct.
+        bool isOpenParty = _groups.ModeOf(groupId) == GroupMode.Open;
+
         for (int i = 0; i < members.Count; i++)
         {
             var p = members[i];
             var rating = _ratings.Get(p, def.GameType);
             _matcher.Enqueue(p, rating, queueName, groupId);
-            _telemetry.OnQueueAdded(p, queueName, at);
+            PlayerKey? attribution =
+                (isOpenParty && initiator is PlayerKey ini && !p.Equals(ini)) ? initiator : null;
+            _telemetry.OnQueueAdded(p, queueName, at, attribution);
         }
         return EnqueueResult.Ok;
     }

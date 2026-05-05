@@ -35,11 +35,11 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         _queues = queues ?? throw new ArgumentNullException(nameof(queues));
     }
 
-    public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at)
+    public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null)
     {
         if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"QueueAdded: {player.Name} -> {queueName}");
         if (_resolver.Resolve(player) is { } p)
-            _chat.SendMessage(p, FormatQueuedMessage(queueName));
+            _chat.SendMessage(p, FormatQueuedMessage(queueName, player, initiator));
     }
 
     /// <summary>
@@ -49,17 +49,33 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     /// so the prefix isn't redundantly echoed (e.g. "Queued for competitive 4v4", not
     /// "Queued for competitive 4v4_competitive"). Falls back to the bare queue name if the
     /// queue isn't registered.
+    /// <para>When <paramref name="initiator"/> is set and differs from <paramref name="player"/>
+    /// (open-party group enqueue, recipient row), attributes the queue to the initiating party
+    /// member ("X queued you for ..."). Otherwise renders the standard "Queued for ..." reply.</para>
     /// </summary>
-    private string FormatQueuedMessage(string queueName)
+    private string FormatQueuedMessage(string queueName, PlayerKey player, PlayerKey? initiator)
     {
-        if (!_queues.TryGet(queueName, out var def))
-            return $"Queued for {queueName}.";
-        string tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
-        string suffix = "_" + tierLabel;
-        string display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-            ? queueName[..^suffix.Length]
-            : queueName;
-        return $"Queued for {tierLabel} {display}.";
+        string display;
+        string? tierLabel;
+        if (_queues.TryGet(queueName, out var def))
+        {
+            tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
+            string suffix = "_" + tierLabel;
+            display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                ? queueName[..^suffix.Length]
+                : queueName;
+        }
+        else
+        {
+            tierLabel = null;
+            display = queueName;
+        }
+
+        bool attributed = initiator is PlayerKey ini && !ini.Equals(player);
+        string descriptor = tierLabel is null ? display : $"{tierLabel} {display}";
+        return attributed
+            ? $"{initiator!.Value.Name} queued you for {descriptor}."
+            : $"Queued for {descriptor}.";
     }
 
     public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at)

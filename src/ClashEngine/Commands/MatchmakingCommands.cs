@@ -190,7 +190,7 @@ public sealed class MatchmakingCommands
         {
             var members = new System.Collections.Generic.List<PlayerKey>();
             foreach (var m in _engine.Groups.MembersOf(g)) members.Add(m);
-            result = _engine.TryEnqueueGroup(members, resolvedName, now, out _, existingGroup: g);
+            result = _engine.TryEnqueueGroup(members, resolvedName, now, out _, existingGroup: g, initiator: k);
         }
         else
         {

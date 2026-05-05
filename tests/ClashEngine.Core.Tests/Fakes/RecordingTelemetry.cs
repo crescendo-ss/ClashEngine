@@ -9,7 +9,7 @@ namespace ClashEngine.Core.Tests.Fakes;
 
 public sealed class RecordingTelemetry : IMatchmakingTelemetry
 {
-    public List<(PlayerKey, string)> QueueAdds { get; } = new();
+    public List<(PlayerKey Player, string Queue, PlayerKey? Initiator)> QueueAdds { get; } = new();
     public List<(PlayerKey, string)> QueueRemovals { get; } = new();
     public List<MatchProposal> Proposed { get; } = new();
     public List<ActiveMatch> Started { get; } = new();
@@ -23,8 +23,8 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public List<PendingGriefingPenalty> GriefingVetoed { get; } = new();
     public List<PendingGriefingPenalty> GriefingConfirmed { get; } = new();
 
-    public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at) =>
-        QueueAdds.Add((player, queueName));
+    public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) =>
+        QueueAdds.Add((player, queueName, initiator));
     public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) =>
         QueueRemovals.Add((player, queueName));
     public void OnMatchProposed(MatchProposal proposal) => Proposed.Add(proposal);
