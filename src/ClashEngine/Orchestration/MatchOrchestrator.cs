@@ -8,6 +8,7 @@ using ClashEngine.Core.Adapter;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Queue;
+using ClashEngine.Core.Stats;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
 using SS.Packets.Game;
@@ -37,6 +38,13 @@ public sealed class MatchOrchestrator
     private readonly ClashLog _verbose;
     private readonly MatchAudience? _audience;
     private readonly MatchFreqAllocator? _freqAllocator;
+    private readonly MatchStatsRegistry? _matchStats;
+
+    /// <summary>Per-player ship the participant was on at the moment they last specced themselves
+    /// out. Populated by <see cref="OnPlayerSpecced"/>; consumed by <see cref="TryReturn"/> so the
+    /// returner re-enters in the exact ship they left, preserving any post-death ship-change they
+    /// made within the grace window. Cleared on successful return.</summary>
+    private readonly Dictionary<PlayerKey, ShipType> _shipAtLeave = new();
 
     /// <summary>Team-0 freq for this match; team-t uses <c>_freqBase + t * 100</c>. Defaults to
     /// the legacy 100/200/... convention until <see cref="BeginSetup"/> reserves a rotating base
@@ -81,7 +89,8 @@ public sealed class MatchOrchestrator
         ClashLog verbose,
         MatchAudience? audience = null,
         MatchFreqAllocator? freqAllocator = null,
-        IRandomSource? rng = null)
+        IRandomSource? rng = null,
+        MatchStatsRegistry? matchStats = null)
     {
         _matchId = matchId;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -98,6 +107,7 @@ public sealed class MatchOrchestrator
         _audience = audience;
         _freqAllocator = freqAllocator;
         _rng = rng ?? DefaultRandomSource.Instance;
+        _matchStats = matchStats;
         _drift = new SpawnDriftEnforcer(_queue, _proposal);
 
         for (int t = 0; t < _proposal.Teams.Count; t++)
@@ -302,14 +312,101 @@ public sealed class MatchOrchestrator
         if (teamIdx < 0) return ReturnResult.MatchEnded;
 
         short freq = (short)(_freqBase + teamIdx * MatchFreqAllocator.FreqStep);
-        var ship = ShipFor(teamIdx, slotIdx);
+        // Prefer the ship the player was actually on at the moment they specced -- preserves any
+        // post-death ship-change made within the grace window. Falls back to the queue's slotted
+        // ship for first-time placements (no spec snapshot yet) or if the snapshot was lost.
+        var ship = _shipAtLeave.TryGetValue(key, out var savedShip) && savedShip != ShipType.Spec
+            ? savedShip
+            : ShipFor(teamIdx, slotIdx);
         _game.SetShipAndFreq(player, ship, freq);
+
+        // Apply the queue's items policy to the freshly-respawned loadout.
+        ApplyReturnItemsAction(player, key);
+
+        // Snapshot consumed; clear so the next leave-cycle isn't tainted by a stale value.
+        _shipAtLeave.Remove(key);
 
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
-                $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq}.");
+                $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq} " +
+                $"(items={_queue.ReturnItemsAction}).");
         return ReturnResult.Placed;
     }
+
+    /// <summary>
+    /// Records that <paramref name="key"/> just specced themselves out of the match while still
+    /// rostered, freezing a return-snapshot the next <see cref="TryReturn"/> can consume:
+    /// <list type="bullet">
+    /// <item>The ship they were on (so they re-enter in the same one).</item>
+    /// <item>Their wire-authoritative item counts at this moment, captured into the recorder via
+    /// <see cref="StatsRecorder.CaptureLastLeaveInventory"/>.</item>
+    /// </list>
+    /// Routed by <see cref="MatchOrchestratorRegistry"/> on every ship->Spec transition for an
+    /// in-match participant. No-op for players we no longer own (e.g. already eliminated).
+    /// </summary>
+    public void OnPlayerSpecced(PlayerKey key, ShipType prevShip)
+    {
+        if (!OwnsPlayer(key)) return;
+        if (prevShip == ShipType.Spec) return;
+        _shipAtLeave[key] = prevShip;
+        if (_matchStats is not null
+            && _matchStats.ActiveRecorders.TryGetValue(_matchId, out var recorder))
+        {
+            recorder.CaptureLastLeaveInventory(key);
+        }
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"Match {_matchId:N}: {key.Name} specced from {prevShip}; return-snapshot saved.");
+    }
+
+    /// <summary>
+    /// Applies the queue's <see cref="QueueDefinition.ReturnItemsAction"/> to the just-placed
+    /// <paramref name="player"/> right after <see cref="IGame.SetShipAndFreq"/>. The fresh ship
+    /// spawns with Continuum's full initial loadout; this method may deduct prizes back down to
+    /// the saved counts (Restore) or zero them entirely (Burn). <see cref="ItemsAction.Full"/> is
+    /// a no-op.
+    /// </summary>
+    private void ApplyReturnItemsAction(Player player, PlayerKey key)
+    {
+        if (_queue.ReturnItemsAction == ItemsAction.Full) return;
+
+        if (_matchStats is null
+            || !_matchStats.ActiveRecorders.TryGetValue(_matchId, out var recorder))
+            return;
+
+        if (!recorder.TryGetInitialInventory(key, out var initial) || initial is null)
+            return;
+
+        IReadOnlyDictionary<ItemKind, int>? saved = null;
+        if (_queue.ReturnItemsAction == ItemsAction.Restore)
+            recorder.TryGetLastLeaveInventory(key, out saved);
+
+        // For each stockpilable item kind, deduct (initial - target) prizes. target = 0 for Burn,
+        // saved-or-zero for Restore. A negative prize tells SS Core to remove that many of the
+        // matching prize from the player's stockpile.
+        foreach (var (item, initialCount) in initial)
+        {
+            if (initialCount <= 0) continue;
+            int target = 0;
+            if (saved is not null && saved.TryGetValue(item, out var s)) target = s;
+            if (target >= initialCount) continue;
+            int deduct = initialCount - target;
+            var prize = PrizeForItem(item);
+            if (prize is null) continue;
+            _game.GivePrize(player, (Prize)(-(short)prize.Value), (short)deduct);
+        }
+    }
+
+    private static Prize? PrizeForItem(ItemKind item) => item switch
+    {
+        ItemKind.Burst => Prize.Burst,
+        ItemKind.Repel => Prize.Repel,
+        ItemKind.Thor => Prize.Thor,
+        ItemKind.Brick => Prize.Brick,
+        ItemKind.Decoy => Prize.Decoy,
+        ItemKind.Rocket => Prize.Rocket,
+        ItemKind.Portal => Prize.Portal,
+        _ => null,
+    };
 
     /// <summary>
     /// Called by the registry on every position packet from a player participating in this match.

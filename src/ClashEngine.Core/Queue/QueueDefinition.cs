@@ -49,7 +49,8 @@ public sealed class QueueDefinition
         TimeSpan? teamCollapseGrace = null,
         MatchmakingTier tier = MatchmakingTier.Competitive,
         TimeSpan? shipChangeGracePeriod = null,
-        TimeSpan? timeLimit = null)
+        TimeSpan? timeLimit = null,
+        ItemsAction returnItemsAction = ItemsAction.Full)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(shape);
@@ -143,6 +144,7 @@ public sealed class QueueDefinition
         Tier = tier;
         ShipChangeGracePeriod = shipChangeGracePeriod ?? TimeSpan.FromSeconds(10);
         TimeLimit = timeLimit;
+        ReturnItemsAction = returnItemsAction;
         Queue = new PlayerQueue(name);
     }
 
@@ -272,6 +274,15 @@ public sealed class QueueDefinition
     /// display either.
     /// </summary>
     public TimeSpan? TimeLimit { get; }
+
+    /// <summary>
+    /// What to do with a player's stockpilable item counts when they <c>?return</c> to this match
+    /// after self-speccing. <see cref="ItemsAction.Full"/> (default) leaves them with the fresh
+    /// ship's spawn loadout. <see cref="ItemsAction.Restore"/> deducts the spawn loadout back down
+    /// to whatever items they had when they specced (closes the burst/repel free-reload loophole).
+    /// <see cref="ItemsAction.Burn"/> zeros their loadout entirely.
+    /// </summary>
+    public ItemsAction ReturnItemsAction { get; }
 
     /// <summary>Conventional team-index -> freq number (100, 200, 300, ...).</summary>
     public static short FreqOf(int teamIndex) => (short)(100 * (teamIndex + 1));

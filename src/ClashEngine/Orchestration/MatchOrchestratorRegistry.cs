@@ -7,6 +7,7 @@ using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Penalties;
+using ClashEngine.Core.Stats;
 using SS.Core;
 using SS.Core.ComponentCallbacks;
 using SS.Core.ComponentInterfaces;
@@ -35,6 +36,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     private readonly ClashLog _verbose;
     private readonly MatchAudience? _audience;
     private readonly MatchFreqAllocator? _freqAllocator;
+    private readonly MatchStatsRegistry? _matchStats;
     private bool _registeredCallback;
 
     public MatchOrchestratorRegistry(
@@ -49,7 +51,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         PlayerKeyResolver resolver,
         ClashLog verbose,
         MatchAudience? audience = null,
-        MatchFreqAllocator? freqAllocator = null)
+        MatchFreqAllocator? freqAllocator = null,
+        MatchStatsRegistry? matchStats = null)
     {
         _broker = broker;
         _engine = engine;
@@ -63,6 +66,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         _verbose = verbose ?? throw new ArgumentNullException(nameof(verbose));
         _audience = audience;
         _freqAllocator = freqAllocator;
+        _matchStats = matchStats;
     }
 
     public void Register()
@@ -70,6 +74,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         if (_registeredCallback) return;
         PlayerPositionPacketCallback.Register(_broker, OnPositionPacket);
         PlayerActionCallback.Register(_broker, OnPlayerAction);
+        ShipFreqChangeCallback.Register(_broker, OnShipFreqChange);
         _registeredCallback = true;
     }
 
@@ -78,6 +83,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         if (!_registeredCallback) return;
         PlayerPositionPacketCallback.Unregister(_broker, OnPositionPacket);
         PlayerActionCallback.Unregister(_broker, OnPlayerAction);
+        ShipFreqChangeCallback.Unregister(_broker, OnShipFreqChange);
         _registeredCallback = false;
     }
 
@@ -90,7 +96,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
 
         var orchestrator = new MatchOrchestrator(
             matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log,
-            _resolver, _verbose, _audience, _freqAllocator);
+            _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats);
         _orchestrators[matchId] = orchestrator;
 
         // Track players for position-packet routing during staging.
@@ -128,6 +134,22 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         if (_resolver.KeyOf(player) is not PlayerKey key) return;
         if (!_stagingPlayers.TryGetValue(key, out var orchestrator)) return;
         orchestrator.OnPositionPacket(key, packet.Rotation, packet.X, packet.Y, packet.Weapon.Type);
+    }
+
+    /// <summary>
+    /// Routes ship-to-spec transitions for in-match participants to the owning orchestrator so it
+    /// can freeze a return-snapshot (last live ship + items at the moment of leave). Other
+    /// transitions (spec->ship, ship->ship) are not interesting to the orchestrator -- spec->ship
+    /// is handled either by <see cref="MatchOrchestrator.OnPlayerEnteredArena"/> on initial setup
+    /// or by <see cref="MatchOrchestrator.TryReturn"/> on <c>?return</c>.
+    /// </summary>
+    private void OnShipFreqChange(Player player, ShipType newShip, ShipType oldShip, short newFreq, short oldFreq)
+    {
+        if (newShip != ShipType.Spec || oldShip == ShipType.Spec) return;
+        if (_resolver.KeyOf(player) is not PlayerKey key) return;
+        var orchestrator = OrchestratorFor(key);
+        if (orchestrator is null) return;
+        orchestrator.OnPlayerSpecced(key, oldShip);
     }
 
     /// <summary>

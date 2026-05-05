@@ -21,6 +21,15 @@ public sealed class StatsRecorder
     private readonly Dictionary<PlayerKey, PlayerProfile> _profiles = new();
     private readonly Dictionary<PlayerKey, uint> _lastPositionTick = new();
     private readonly Dictionary<PlayerKey, uint> _pendingDeathTick = new();
+
+    /// <summary>
+    /// Per-player frozen item-count snapshot taken when they last specced themselves out, used by
+    /// the <c>?return</c> path to restore the loadout the player was carrying instead of giving
+    /// them a fresh ship's worth of items. Populated by <see cref="CaptureLastLeaveInventory"/>;
+    /// cleared by <see cref="OnSpawn"/> (a real respawn supersedes the saved snapshot) and
+    /// <see cref="OnLeaveMatch"/> (a true exit from the match).
+    /// </summary>
+    private readonly Dictionary<PlayerKey, IReadOnlyDictionary<ItemKind, int>> _lastLeaveInventory = new();
     private readonly DamageDecay _decay;
     private readonly double _assistThresholdFraction;
 
@@ -137,6 +146,67 @@ public sealed class StatsRecorder
         // OnPositionPacket is the wire-side fallback for cases where SpawnCallback
         // hasn't fired yet.
         _pendingDeathTick.Remove(player);
+        // A real respawn supersedes any saved last-leave inventory: if the player came back via
+        // ?return, the orchestrator already consumed the snapshot before SpawnCallback fired; if
+        // they came back any other way (rejoin after disconnect, sub flow), the snapshot is
+        // stale.
+        _lastLeaveInventory.Remove(player);
+    }
+
+    /// <summary>
+    /// Freeze a copy of <paramref name="player"/>'s currently-held inventory so a subsequent
+    /// <c>?return</c> can restore that loadout instead of awarding the fresh ship's full spawn
+    /// counts. Called by the orchestrator at the moment the player specs themselves while still
+    /// in-match (and therefore still recoverable). The snapshot is consumed on the next
+    /// <see cref="OnSpawn"/> or evicted by <see cref="OnLeaveMatch"/>.
+    /// </summary>
+    /// <remarks>
+    /// Captures into a fresh dictionary because <see cref="PlayerStats.Inventory"/> is a read-only
+    /// view over a live dictionary that <see cref="OnExtraPositionData"/> continues to mutate.
+    /// </remarks>
+    public void CaptureLastLeaveInventory(PlayerKey player)
+    {
+        if (!_stats.TryGetValue(player, out var stats)) return;
+        var snap = new Dictionary<ItemKind, int>(stats.Inventory.Count);
+        foreach (var (item, count) in stats.Inventory)
+            if (count > 0) snap[item] = count;
+        _lastLeaveInventory[player] = snap;
+    }
+
+    /// <summary>
+    /// Read the snapshot most recently saved by <see cref="CaptureLastLeaveInventory"/>. Returns
+    /// <see langword="false"/> if no snapshot exists for <paramref name="player"/> (never specced
+    /// after registering, snapshot already consumed by a respawn, or player not registered).
+    /// </summary>
+    public bool TryGetLastLeaveInventory(
+        PlayerKey player,
+        out IReadOnlyDictionary<ItemKind, int>? inventory)
+    {
+        if (_lastLeaveInventory.TryGetValue(player, out var snap))
+        {
+            inventory = snap;
+            return true;
+        }
+        inventory = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Read the per-ship initial inventory the player was registered with (or last
+    /// <see cref="OnShipChange"/>'d to). Used by the <c>?return</c> path to compute how much of
+    /// each item to deduct from a freshly-respawned ship's default loadout.
+    /// </summary>
+    public bool TryGetInitialInventory(
+        PlayerKey player,
+        out IReadOnlyDictionary<ItemKind, int>? initial)
+    {
+        if (_profiles.TryGetValue(player, out var profile))
+        {
+            initial = profile.InitialInventory;
+            return initial is not null;
+        }
+        initial = null;
+        return false;
     }
 
     /// <summary>
@@ -484,6 +554,9 @@ public sealed class StatsRecorder
         stats.CloseLife(atTick, LifeEndReason.LeftMatch, knockoutBy: null);
         _lastPositionTick.Remove(player);
         _pendingDeathTick.Remove(player);
+        // A true exit from the match invalidates any saved return-snapshot -- the player isn't
+        // coming back via ?return after this point.
+        _lastLeaveInventory.Remove(player);
     }
 
     /// <summary>Match ended. Closes any open life on every registered player. Wasted-items are

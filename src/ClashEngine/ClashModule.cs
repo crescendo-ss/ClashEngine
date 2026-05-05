@@ -226,15 +226,17 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // freq-lock advisor so they all agree on what freq this match's team-t is on.
         var freqAllocator = new MatchFreqAllocator();
 
-        _orchestrators = new MatchOrchestratorRegistry(
-            broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
-            matchAudience, freqAllocator);
-        _orchestrators.Register();
-        _unregisterActions.Add(_orchestrators.Unregister);
-
         // Per-match damage-aware stat tracking. The telemetry consumer drives
         // BeginMatch/EndMatch; the listener subscribes to wire events and dispatches.
+        // Constructed before the orchestrator registry so we can hand it the recorder reference
+        // for the ?return loadout-restore path.
         _matchStats = new MatchStatsRegistry(new DamageDecay());
+
+        _orchestrators = new MatchOrchestratorRegistry(
+            broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
+            matchAudience, freqAllocator, matchStats: _matchStats);
+        _orchestrators.Register();
+        _unregisterActions.Add(_orchestrators.Unregister);
 
         // Replay recorder (optional): the in-plug-in MatchRecorder captures a per-match,
         // per-session .replay file. Per-session scoping (not per-arena like the server's
