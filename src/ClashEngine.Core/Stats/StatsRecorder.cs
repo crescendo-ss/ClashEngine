@@ -293,22 +293,46 @@ public sealed class StatsRecorder
     }
 
     /// <summary>
-    /// Player <paramref name="victim"/> was killed by <paramref name="killer"/>. Snapshots the
-    /// victim's recovery state, decay-weights, and partitions the result among all attackers
-    /// (including teammates of the victim -- the "friendly fire still counts toward kill credit"
-    /// rule). Assists go to non-killer attackers on the opposite team whose decay-weighted
-    /// share met the assist threshold.
+    /// Player <paramref name="victim"/> was killed by <paramref name="killer"/>. Records the
+    /// kill lifecycle (death/knockout/teamkill counters, inventory wastage, life closure) AND
+    /// the damage attribution (KillDamage/KillCredit/Assist) in one synchronous pass.
     /// </summary>
+    /// <remarks>
+    /// Equivalent to <see cref="BeginKill"/> followed by <see cref="FinalizeKillAttribution"/>.
+    /// Production code paths that want to defer attribution to allow late-arriving C2S Damage
+    /// packets to land (mirroring SubspaceServer's TeamVersusStats 200 ms grace window) should
+    /// call the two-phase API directly instead.
+    /// </remarks>
     public void OnKill(PlayerKey victim, PlayerKey killer, uint atTick, bool isKnockout = false)
     {
-        if (!_stats.TryGetValue(victim, out var victimStats)) return;
-        if (!_profiles.TryGetValue(victim, out var victimProfile)) return;
+        if (BeginKill(victim, killer, atTick, isKnockout))
+            FinalizeKillAttribution(victim, killer, atTick);
+    }
+
+    /// <summary>
+    /// Phase 1 of the kill path: records counters, snapshots inventory, closes the victim's
+    /// life. Returns <see langword="true"/> when the caller must follow up with
+    /// <see cref="FinalizeKillAttribution"/> to compute damage attribution and clear the
+    /// recovery state; <see langword="false"/> when the call was suppressed (unknown victim
+    /// or duplicate-death gate active).
+    /// </summary>
+    /// <remarks>
+    /// Splitting attribution out of the lifecycle phase lets the caller wait ~200 ms for any
+    /// late-arriving C2S Damage packets (Continuum batches damage and the killing-blow packet
+    /// can land just after the Die packet) before reading the recovery state. The lifecycle
+    /// portion runs synchronously because <c>MatchKillRouter</c> requires the kill to be
+    /// recorded before <c>engine.OnKill</c> runs (the engine can synchronously finalize the
+    /// match and tear down per-match state).
+    /// </remarks>
+    public bool BeginKill(PlayerKey victim, PlayerKey killer, uint atTick, bool isKnockout = false)
+    {
+        if (!_stats.TryGetValue(victim, out var victimStats)) return false;
 
         // Drop duplicate death packets from the buggy client. The gate is cleared by a
         // post-death position packet showing the player back at >75% energy
         // (see OnPositionPacket); until that arrives, treat any further death as the
         // duplicate of the one we already recorded.
-        if (_pendingDeathTick.ContainsKey(victim)) return;
+        if (_pendingDeathTick.ContainsKey(victim)) return false;
         _pendingDeathTick[victim] = atTick;
 
         victimStats.RecordDeath();
@@ -320,14 +344,13 @@ public sealed class StatsRecorder
         // final knockout there is no next spawn and the snapshot is the player's last contribution.
         victimStats.SnapshotInventoryAsWasted();
 
-        // Self-kill (own splash, etc.): no kill credit, no attribution. Close life with
-        // KilledByEnemy and no knockoutBy -- the game's kill packet says it but the credit's
-        // empty.
+        // Self-kill (own splash, etc.): no kill credit. Close life with KilledByEnemy and no
+        // knockoutBy -- the game's kill packet says it but the credit's empty. Recovery is
+        // cleared in FinalizeKillAttribution along with the non-self path.
         if (killer == victim)
         {
             victimStats.CloseLife(atTick, LifeEndReason.KilledByEnemy, knockoutBy: null);
-            victimStats.Recovery.Clear();
-            return;
+            return true;
         }
 
         bool sameTeam = SameTeam(killer, victim);
@@ -335,6 +358,36 @@ public sealed class StatsRecorder
         {
             if (sameTeam) killerStats.RecordTeamkill();
             else killerStats.RecordKill();
+        }
+
+        victimStats.CloseLife(
+            atTick,
+            sameTeam ? LifeEndReason.KilledByTeammate : LifeEndReason.KilledByEnemy,
+            knockoutBy: killer);
+        return true;
+    }
+
+    /// <summary>
+    /// Phase 2 of the kill path: walks the victim's recovery state at <paramref name="atTick"/>
+    /// to assign per-attacker raw / decay-weighted damage, recording <c>KillDamage</c>,
+    /// <c>KillCredit</c>, and <c>Assist</c> on each contributor. Returns the kill-feed snapshot
+    /// (killer's raw damage + assister list) for chat broadcast, then clears the recovery state.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent: repeated calls after the first are no-ops (returns <see langword="null"/>)
+    /// because the recovery state has already been cleared. Self-kills produce a snapshot with
+    /// zero killer damage and no assisters (Continuum's death packet attributes it but no
+    /// cross-player damage is on the recovery state).
+    /// </remarks>
+    public KillFeedSnapshot? FinalizeKillAttribution(PlayerKey victim, PlayerKey killer, uint atTick)
+    {
+        if (!_stats.TryGetValue(victim, out var victimStats)) return null;
+        if (!_profiles.TryGetValue(victim, out var victimProfile)) return null;
+
+        if (killer == victim)
+        {
+            victimStats.Recovery.Clear();
+            return new KillFeedSnapshot(0, Array.Empty<KillFeedAssister>());
         }
 
         // Single pass producing per-attacker (raw, weighted) pairs. KillDamage takes the raw
@@ -356,11 +409,27 @@ public sealed class StatsRecorder
                 attackerStats.RecordAssist();
         }
 
-        victimStats.CloseLife(
-            atTick,
-            sameTeam ? LifeEndReason.KilledByTeammate : LifeEndReason.KilledByEnemy,
-            knockoutBy: killer);
+        // Build the kill-feed snapshot from the same attribution walk so we don't have to
+        // re-snapshot the recovery state. Killer's raw damage = parens after their name;
+        // assisters = opposing-team attackers other than the killer, descending by damage.
+        int killerDamage = 0;
+        if (attribution.TryGetValue(killer, out var killerShare))
+            killerDamage = (int)Math.Round(killerShare.Raw);
+
+        var assisters = new List<KillFeedAssister>();
+        foreach (var (atk, share) in attribution)
+        {
+            if (atk.Equals(killer)) continue;
+            if (atk.Equals(victim)) continue;
+            if (SameTeam(atk, victim)) continue;
+            int dmg = (int)Math.Round(share.Raw);
+            if (dmg <= 0) continue;
+            assisters.Add(new KillFeedAssister(atk, dmg));
+        }
+        assisters.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+
         victimStats.Recovery.Clear();
+        return new KillFeedSnapshot(killerDamage, assisters);
     }
 
     /// <summary>
@@ -426,37 +495,6 @@ public sealed class StatsRecorder
     {
         foreach (var stats in _stats.Values)
             stats.CloseLife(atTick, LifeEndReason.MatchEnded, knockoutBy: null);
-    }
-
-    /// <summary>
-    /// Snapshot of the victim's outstanding (unrecovered) damage at <paramref name="atTick"/>,
-    /// partitioned by attacker, for use by an in-arena kill-feed line. Returns the killer's raw
-    /// damage to the victim plus any opposite-team attackers as assisters (descending damage).
-    /// Teammates of the victim and self-damage are filtered out. Caller must invoke this before
-    /// <see cref="OnKill"/> for the same kill, since OnKill clears the recovery state.
-    /// </summary>
-    public KillFeedSnapshot? BuildKillFeed(PlayerKey victim, PlayerKey killer, uint atTick)
-    {
-        if (!_stats.TryGetValue(victim, out var victimStats)) return null;
-        var attribution = DamageAttribution.AttributeRawAndWeighted(
-            victimStats.Recovery.Snapshot(atTick), atTick, _decay);
-
-        int killerDamage = 0;
-        if (attribution.TryGetValue(killer, out var k))
-            killerDamage = (int)Math.Round(k.Raw);
-
-        var assisters = new List<KillFeedAssister>();
-        foreach (var (atk, share) in attribution)
-        {
-            if (atk.Equals(killer)) continue;       // killer line, not an assist
-            if (atk.Equals(victim)) continue;       // self-damage isn't an assist
-            if (SameTeam(atk, victim)) continue;    // victim's teammates aren't assisters
-            int dmg = (int)Math.Round(share.Raw);
-            if (dmg <= 0) continue;
-            assisters.Add(new KillFeedAssister(atk, dmg));
-        }
-        assisters.Sort((a, b) => b.Damage.CompareTo(a.Damage));
-        return new KillFeedSnapshot(killerDamage, assisters);
     }
 
     private bool SameTeam(PlayerKey a, PlayerKey b)

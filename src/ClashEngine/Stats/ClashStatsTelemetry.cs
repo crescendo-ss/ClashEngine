@@ -40,6 +40,14 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
     private readonly Func<Guid, string?>? _recordingPathLookup;
     private readonly MatchAudience? _audience;
 
+    /// <summary>
+    /// Optional drain hook invoked at the start of <see cref="OnMatchEnded"/>. Wired by
+    /// <see cref="ClashModule"/> to <c>StatsListener.DrainPendingForMatch</c> so deferred
+    /// kill-attribution work that's still queued (for late-arriving C2S Damage packets) lands
+    /// in the recorder BEFORE the payload is built and uploaded.
+    /// </summary>
+    public Action<Guid>? DrainPendingKills { get; set; }
+
     // Captured at OnMatchProposed by walking ActiveMatches for the proposal's Teams reference.
     // Read at OnMatchStarted to look up ship config. Same pattern MatchOrchestratorRegistry uses.
     private readonly Dictionary<Guid, QueueDefinition> _queueByMatch = new();
@@ -169,6 +177,14 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
     public void OnMatchEnded(MatchOutcome outcome)
     {
         uint atTick = (uint)ServerTick.Now;
+
+        // Drain any deferred kill finalizations BEFORE EndMatch builds the upload payload --
+        // otherwise the 200 ms late-damage grace timer would fire after upload and the late
+        // KillDamage / Assist tallies would never reach storage. The drain runs the pending
+        // FinalizeKillAttribution calls synchronously now (no more late damage to wait for --
+        // the match is over, no further wire events expected).
+        DrainPendingKills?.Invoke(outcome.MatchId);
+
         var recorder = _registry.EndMatch(outcome.MatchId, atTick);
 
         if (_matchInfoById.TryGetValue(outcome.MatchId, out var endingInfo))

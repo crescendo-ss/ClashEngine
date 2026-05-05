@@ -285,7 +285,10 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         var empLookup = new EmpShutdownLookup(_config);
         var killFeedReporter = new KillFeedReporter(_chat, _engine, _clock, _resolver, matchAudience);
         _statsListener = new StatsListener(
-            broker, _engine, _matchStats, _playerData, _resolver, empLookup, killFeedReporter, _log);
+            broker, _engine, _matchStats, _playerData, _resolver, empLookup, killFeedReporter, _mainloopTimer, _log);
+        // Wire the drain hook so the telemetry's OnMatchEnded flushes any pending deferred
+        // kill-attribution work into the recorder before the upload payload is built.
+        _matchStatsTelemetry.DrainPendingKills = _statsListener.DrainPendingForMatch;
         _statsListener.Register();
         _unregisterActions.Add(_statsListener.Unregister);
 

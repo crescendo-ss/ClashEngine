@@ -49,15 +49,20 @@ public sealed class KillFeedReporter
     /// Broadcast a kill-feed line for a kill that just landed in <paramref name="arena"/>.
     /// No-op if the victim is not part of an active match.
     /// </summary>
+    /// <param name="pre">Pre-engine snapshot of the dynamic match values (lives, scores) so the
+    /// 200 ms-deferred broadcast still displays the same "pre-decrement lives" / "pre-add score"
+    /// values it would have shown if it had fired synchronously before <c>engine.OnKill</c>.</param>
     public void Report(
         Arena? arena,
         Guid matchId,
         PlayerKey victim,
         PlayerKey killer,
-        KillFeedSnapshot snapshot)
+        KillFeedSnapshot snapshot,
+        KillFeedPreState pre)
     {
         if (arena is null) return;
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(pre);
         if (!_engine.ActiveMatches.TryGetValue(matchId, out var match)) return;
 
         // Resolve the participant set once -- every line below targets the same recipients.
@@ -71,10 +76,14 @@ public sealed class KillFeedReporter
 
         // Line 1: "Victim kb Killer (dmg) [TEAMKILL] -- Add: A1 (d1), A2 (d2)". The "[TEAMKILL]"
         // marker matches SS.Matchmaking's TeamVersusStats convention so chat readers familiar
-        // with that format recognize friendly-fire kills at a glance.
+        // with that format recognize friendly-fire kills at a glance. The "(dmg)" parens are
+        // suppressed when KillerDamage <= 0 (mirrors TeamVersusStats.cs:1406-1409): Continuum
+        // sometimes attributes a kill to a player whose damage entries on the victim have
+        // fully recovered, and "(0)" reads as a bug to viewers.
         var line1 = new StringBuilder();
-        line1.Append(victim.Name).Append(" kb ").Append(killer.Name)
-             .Append(" (").Append(snapshot.KillerDamage).Append(')');
+        line1.Append(victim.Name).Append(" kb ").Append(killer.Name);
+        if (snapshot.KillerDamage > 0)
+            line1.Append(" (").Append(snapshot.KillerDamage).Append(')');
         if (isTeamkill) line1.Append(" [TEAMKILL]");
         if (snapshot.Assisters.Count > 0)
         {
@@ -88,21 +97,23 @@ public sealed class KillFeedReporter
         }
         Send(matchId, arena, participants, line1.ToString());
 
-        // Line 2 (optional): lives status for the victim. KillFeedReporter is a pre-engine
-        // reader, so LivesRemaining still holds the count BEFORE this death is processed:
-        //   - lives > 0  -> the victim respawns; pre-decrement count happens to equal the
-        //                   user-friendly "lives left after this death" (current life +
-        //                   remaining respawns), so display verbatim.
-        //   - lives == 0 -> the engine is about to set ExitedAt; this is the eliminating
-        //                   death. Captains/TVM convention: "X is OUT".
-        if (match.LivesPerPlayer.HasValue && match.LivesRemaining.TryGetValue(victim, out var lives))
+        // Line 2 (optional): lives status for the victim. We use the pre-engine snapshot taken
+        // at kill time (the engine has decremented LivesRemaining and possibly set ExitedAt by
+        // the time this deferred call runs):
+        //   - pre.VictimLivesPreKill > 0  -> the victim respawns; pre-decrement count happens
+        //                                    to equal the user-friendly "lives left after this
+        //                                    death" (current life + remaining respawns).
+        //   - pre.VictimLivesPreKill == 0 -> this is the eliminating death. Captains/TVM
+        //                                    convention: "X is OUT".
+        if (match.LivesPerPlayer.HasValue && pre.VictimLivesPreKill >= 0)
         {
+            int lives = pre.VictimLivesPreKill;
             if (lives > 0)
             {
                 string suffix = lives == 1 ? "life" : "lives";
                 Send(matchId, arena, participants, $"{victim.Name} has {lives} {suffix} remaining");
             }
-            else if (!match.ExitedAt.ContainsKey(victim))
+            else if (!pre.VictimAlreadyExitedPreKill)
             {
                 Send(matchId, arena, participants, $"{victim.Name} is OUT");
             }
@@ -111,21 +122,18 @@ public sealed class KillFeedReporter
         // Line 3: "Score: a-b TEAM_NAME -- [m:ss]". The labeled team is whichever just scored
         // (so the same kill never reads as 0-0). For a normal kill that's the killer's team;
         // for a 2-team teamkill it's the opposing team (which gets the anti-grief point); for
-        // 3+ team TKs no team scored, fall back to killer's team for a stable label.
-        //
-        // KillFeedReporter runs as a pre-engine reader (StatsListener.OnKill registers in
-        // MatchKillRouter._preEngineReaders), so match.KillsByTeam still holds the PRE-kill
-        // counts. We predict the post-engine score by adding +1 to whichever team is about to
-        // score. The 2-team TK gating mirrors the engine fix in ActiveMatch.OnKill.
+        // 3+ team TKs no team scored, fall back to killer's team for a stable label. We read
+        // the pre-engine score off `pre` and add +1 for the team that just scored, matching
+        // what the synchronous pre-engine version printed.
         bool scored = !isTeamkill || match.Teams.Count == 2;
         int scoringTeam = (!isTeamkill || match.Teams.Count != 2)
             ? killerTeam
             : (killerTeam == 0 ? 1 : 0);
         int otherTeam = (scoringTeam == 0) ? 1 : 0;
 
-        int scoringPre = (scoringTeam >= 0 && scoringTeam < match.KillsByTeam.Count) ? match.KillsByTeam[scoringTeam] : 0;
+        int scoringPre = (scoringTeam >= 0 && scoringTeam < pre.PreKillScores.Count) ? pre.PreKillScores[scoringTeam] : 0;
         int scoringScore = scoringPre + (scored ? 1 : 0);
-        int otherScore = (otherTeam >= 0 && otherTeam < match.KillsByTeam.Count) ? match.KillsByTeam[otherTeam] : 0;
+        int otherScore = (otherTeam >= 0 && otherTeam < pre.PreKillScores.Count) ? pre.PreKillScores[otherTeam] : 0;
         string scoringLabel = LabelOfTeam(match, scoringTeam);
 
         var elapsed = _clock.UtcNow - (match.StartedAt ?? _clock.UtcNow);
