@@ -205,14 +205,14 @@ public sealed class ActiveMatch
 
     /// <summary>
     /// True when the player is no longer eligible to return: lives-mode players whose last life
-    /// has been spent (have an <see cref="ExitedAt"/> entry), or players in <see cref="PlayerStatus.Abandoned"/>.
+    /// has been spent (have an <see cref="ExitedAt"/> entry). Abandoned players are NOT knocked
+    /// out -- they can still recover via <c>?return</c> (see <see cref="OnPlayerReturned"/>).
     /// Statbox / item-list / scoreboard surfaces share this predicate so they all draw the same
     /// "still in" line.
     /// </summary>
     public bool IsKnockedOut(PlayerKey player)
     {
-        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return true;
-        return GetStatus(player) == PlayerStatus.Abandoned;
+        return LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player);
     }
 
     public int? TeamIndexOf(PlayerKey player) =>

@@ -40,14 +40,14 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
         {
             var match = _matchData.Match;
             if (!match.Statuses.TryGetValue(_key, out var ps)) return PlayerSlotStatus.None;
-            // Knockout (lives spent or abandoned) takes precedence over the live PlayerStatus,
-            // since the engine doesn't transition Active -> some-knockout-status on the
-            // eliminating death; ExitedAt is the marker.
+            // Knockout (lives spent) takes precedence over the live PlayerStatus, since the
+            // engine doesn't transition Active -> some-knockout-status on the eliminating death;
+            // ExitedAt is the marker. Abandoned is not a knockout -- the player can still ?return.
             if (match.IsKnockedOut(_key)) return PlayerSlotStatus.KnockedOut;
             return ps switch
             {
                 PlayerStatus.Active => PlayerSlotStatus.Playing,
-                PlayerStatus.Pending or PlayerStatus.InGrace => PlayerSlotStatus.Waiting,
+                PlayerStatus.Pending or PlayerStatus.InGrace or PlayerStatus.Abandoned => PlayerSlotStatus.Waiting,
                 _ => PlayerSlotStatus.None,
             };
         }
