@@ -22,7 +22,6 @@ namespace ClashEngine.Orchestration;
 public sealed class MatchOrchestrator
 {
     private const string LogCategory = nameof(MatchOrchestrator);
-    private const int LockTimeoutSeconds = 30;
 
     private readonly Guid _matchId;
     private readonly QueueDefinition _queue;
@@ -187,7 +186,8 @@ public sealed class MatchOrchestrator
         _timer.SetTimer(OnStagingEnd, (int)_queue.StagingDuration.TotalMilliseconds, Timeout.Infinite, this);
 
         BroadcastToAll(
-            $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. Spec to abandon.");
+            $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. " +
+            "Change ships freely until the countdown starts. Spec to abandon.");
     }
 
     /// <summary>
@@ -239,7 +239,9 @@ public sealed class MatchOrchestrator
             // packet. SpawnX/Y are tile coords; position packets carry pixels (16 px/tile).
             _idleTracker.AnchorAt(key, (short)(info.SpawnX << 4), (short)(info.SpawnY << 4));
         }
-        _game.Lock(player, notify: false, spec: false, timeout: LockTimeoutSeconds);
+        // No SS-Core IGame.Lock during setup -- the MatchFreqAdvisor enforces freq lock from
+        // proposal time and opens a ship-change window for the staging duration so participants
+        // can pick their loadout. Lock is re-enforced by the advisor for Countdown / Live.
 
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
@@ -444,7 +446,6 @@ public sealed class MatchOrchestrator
             {
                 if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
                 {
-                    _game.Unlock(p, notify: false);
                     _game.SetShip(p, ShipType.Spec);
                 }
             }
@@ -550,14 +551,6 @@ public sealed class MatchOrchestrator
                 {
                     if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
                         _game.WarpTo(p, spawn.X, spawn.Y);
-                }
-            }
-            for (int t = 0; t < _proposal.Teams.Count; t++)
-            {
-                for (int j = 0; j < _proposal.Teams[t].Count; j++)
-                {
-                    if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
-                        _game.Unlock(p, notify: false);
                 }
             }
             // The "GO!" announcement reaches participants and focused spectators alike.

@@ -276,9 +276,9 @@ This shows off:
 
 A match progresses through five orchestrator phases:
 
-1. **Setup.** Players are warped into the configured `MatchArena`, set to their assigned ship + freq, ship-locked, and (if `WarpOnSpawn`) warped to the team's chosen spawn.
-2. **Staging** (`StagingDuration`, default 10 s). Idle detection: each player must demonstrate non-idleness via rotation, movement, or weapon fire. The first detected movement DMs the player `Got it -- you're ready. Standby for the countdown.` so they know the readiness check has registered. Drift enforcement runs here. Any player still idle at the end → match cancelled, idle players flagged AFK.
-3. **Countdown** (`CountdownDuration`, min/default 5 s). Broadcasts `All set!` up-front (with `Starting in N seconds!` appended when `N > 10`), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Drift enforcement still active. At `GO!` the team re-warps to the chosen spawn and is unlocked.
+1. **Setup.** Players are warped into the configured `MatchArena`, set to their assigned ship + freq, freq-locked, and (if `WarpOnSpawn`) warped to the team's chosen spawn. Ship changes are unrestricted through the end of Staging.
+2. **Staging** (`StagingDuration`, default 10 s). Idle detection: each player must demonstrate non-idleness via rotation, movement, or weapon fire. The first detected movement DMs the player `Got it -- you're ready. Standby for the countdown.` so they know the readiness check has registered. Players may change ships freely during this phase to pick their loadout. Drift enforcement runs here. Any player still idle at the end → match cancelled, idle players flagged AFK.
+3. **Countdown** (`CountdownDuration`, min/default 5 s). Broadcasts `All set!` up-front (with `Starting in N seconds!` appended when `N > 10`), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ship changes are now locked to the participant's current ship. Drift enforcement still active. At `GO!` the team re-warps to the chosen spawn.
 4. **Live.** Engine FSM runs end-policy, kill counting, lives tracking, team-collapse detection (if a team has no live members for the team-collapse grace window, they forfeit; surviving teams hear a 10 s warning).
 5. **Cleanup.** Match-end summary chat broadcast (`Match over! Team A/B wins.` plus the full scoreboard table). Players are unlocked and sent to spec.
 

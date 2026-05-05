@@ -328,7 +328,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // registers on every configured match arena; SS Core's FreqManager consults it on each
         // ship/freq change request from a player. Direct API placements via IGame.SetShipAndFreq
         // (orchestrator setup, knockout-spec) bypass the advisor and remain unaffected.
-        _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, freqAllocator);
+        _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, _chat, freqAllocator);
 
         var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { _listener, _orchestrators };
         if (_replayRecorder is not null) listeners.Add(_replayRecorder);

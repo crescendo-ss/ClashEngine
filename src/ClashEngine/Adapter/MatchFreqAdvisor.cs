@@ -29,6 +29,12 @@ namespace ClashEngine.Adapter;
 /// to swap ships before being re-locked to whatever ship they're currently in. Knockouts (last
 /// life) don't open a window -- the orchestrator's deferred spec handles that path.</para>
 ///
+/// <para><b>Staging window.</b> From <see cref="OnMatchProposed"/> until the staging duration
+/// expires, ship changes are unrestricted -- the advisor opens the same grace window it uses
+/// post-death so participants can pick their loadout while waiting on the readiness check.
+/// Free reloads aren't a concern pre-GO because no fighting has started yet. Once staging
+/// ends, the per-life lock kicks in (Countdown phase enforces lock-to-current-ship).</para>
+///
 /// <para><b>Freq lock.</b> Match participants can only change to their assigned freq
 /// (effectively a no-op). Going to spec is always permitted by SS Core's FreqManager (it short
 /// circuits before consulting the advisor) so abandonment via Esc-S still works; the engine's
@@ -48,6 +54,7 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
     private readonly PlayerKeyResolver _resolver;
     private readonly IClock _clock;
     private readonly ILogManager _log;
+    private readonly IChat _chat;
     private readonly MatchFreqAllocator? _freqAllocator;
 
     /// <summary>
@@ -76,6 +83,7 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         PlayerKeyResolver resolver,
         IClock clock,
         ILogManager log,
+        IChat chat,
         MatchFreqAllocator? freqAllocator = null)
     {
         _broker = broker ?? throw new ArgumentNullException(nameof(broker));
@@ -84,6 +92,7 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _chat = chat ?? throw new ArgumentNullException(nameof(chat));
         _freqAllocator = freqAllocator;
     }
 
@@ -124,31 +133,41 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
     public void OnMatchProposed(MatchProposal proposal)
     {
         if (!_engine.Queues.TryGet(proposal.QueueName, out var queueDef)) return;
-        foreach (var (matchId, match) in _engine.ActiveMatches)
+        Guid matchId = Guid.Empty;
+        foreach (var (id, match) in _engine.ActiveMatches)
         {
             if (ReferenceEquals(match.Teams, proposal.Teams))
             {
-                _queueByMatch[matchId] = queueDef;
-                return;
+                matchId = id;
+                _queueByMatch[id] = queueDef;
+                break;
+            }
+        }
+        if (matchId == Guid.Empty) return;
+
+        // Populate locks at proposal time (not at OnMatchStarted) so freq enforcement is in
+        // effect during Setup/Staging/Countdown, with ShipChangeAllowedUntil set to the
+        // staging deadline -- this lets participants change ships freely while waiting on the
+        // readiness check, then re-locks them for Countdown and Live. Listener order in
+        // CompositeTelemetry guarantees MatchOrchestratorRegistry has already run BeginSetup
+        // (allocating the freq base) by the time this listener fires.
+        var stagingEnd = _clock.UtcNow + queueDef.StagingDuration;
+        for (int t = 0; t < proposal.Teams.Count; t++)
+        {
+            short freq = _freqAllocator?.FreqOf(matchId, t) ?? QueueDefinition.FreqOf(t);
+            for (int j = 0; j < proposal.Teams[t].Count; j++)
+            {
+                var key = proposal.Teams[t][j];
+                _byPlayer[key] = new LockState(freq, queueDef.ShipChangeGracePeriod, stagingEnd);
             }
         }
     }
 
     public void OnMatchStarted(ActiveMatch match)
     {
-        if (!_queueByMatch.TryGetValue(match.MatchId, out var queue)) return;
-        for (int t = 0; t < match.Teams.Count; t++)
-        {
-            // Read the actual freq the orchestrator placed this team on rather than re-deriving
-            // from the static convention -- with rotating freq allocation across concurrent
-            // matches, team-0 may not be on freq 100.
-            short freq = _freqAllocator?.FreqOf(match.MatchId, t) ?? QueueDefinition.FreqOf(t);
-            for (int j = 0; j < match.Teams[t].Count; j++)
-            {
-                var key = match.Teams[t][j];
-                _byPlayer[key] = new LockState(freq, queue.ShipChangeGracePeriod, DateTimeOffset.MinValue);
-            }
-        }
+        // Locks were populated at OnMatchProposed; by GO the staging-window
+        // ShipChangeAllowedUntil has already passed so the per-life lock is in effect. Nothing
+        // to refresh here.
     }
 
     public void OnMatchEnded(MatchOutcome outcome)
@@ -262,6 +281,12 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         if (st.GracePeriod <= TimeSpan.Zero) return;
         var until = _clock.UtcNow + st.GracePeriod;
         _byPlayer[victim] = st with { ShipChangeAllowedUntil = until };
+
+        // Round up so a 9.x-second grace renders as "10s" rather than "9s" (the player's
+        // wall-clock window is up to GracePeriod long).
+        int seconds = (int)Math.Ceiling(st.GracePeriod.TotalSeconds);
+        _chat.SendMessage(killed,
+            $"You have {seconds}s to change ships before being locked back to your current ship.");
     }
 
     private bool IsKnockout(PlayerKey victim)
