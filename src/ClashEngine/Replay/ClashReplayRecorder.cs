@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using ClashEngine.Adapter;
 using ClashEngine.Core;
 using ClashEngine.Core.Adapter;
@@ -12,6 +13,7 @@ using ClashEngine.Core.Penalties;
 using ClashEngine.Core.Queue;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
+using SS.Utilities;
 using ClashEngine.Recording;
 
 namespace ClashEngine.Replay;
@@ -40,12 +42,20 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
 {
     private const string LogCategory = nameof(ClashReplayRecorder);
 
+    /// <summary>How long to keep the session capturing after <see cref="OnMatchEnded"/> fires
+    /// before calling <c>StopRecording</c>. Smooths the abrupt cut at the eliminating kill --
+    /// the playback shows a few seconds of post-kill aftermath instead of ending mid-explosion.
+    /// Stays under the uploader's 5-minute readiness timeout by a wide margin.</summary>
+    private const int PostMatchTailMs = 5000;
+
     private readonly MatchmakingEngine _engine;
     private readonly MatchRecorder _recorder;
     private readonly IArenaManager _arenaManager;
     private readonly PlayerKeyResolver _resolver;
+    private readonly IMainloopTimer _timer;
     private readonly ILogManager _log;
     private readonly string _recordingDir;
+    private readonly TimerDelegate<Guid> _onTailExpired;
 
     // Captured at OnMatchProposed (same pattern ClashStatsTelemetry uses) so OnMatchStarted has
     // the queue's MatchArenaName for the recording. Cleared at OnMatchEnded.
@@ -60,6 +70,7 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
         MatchRecorder recorder,
         IArenaManager arenaManager,
         PlayerKeyResolver resolver,
+        IMainloopTimer timer,
         ILogManager log,
         string recordingDir)
     {
@@ -67,10 +78,12 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
         _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _arenaManager = arenaManager ?? throw new ArgumentNullException(nameof(arenaManager));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        _timer = timer ?? throw new ArgumentNullException(nameof(timer));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         if (string.IsNullOrWhiteSpace(recordingDir))
             throw new ArgumentException("Must be non-empty.", nameof(recordingDir));
         _recordingDir = recordingDir;
+        _onTailExpired = OnTailExpired;
 
         // Create the recording directory once at construction time so OnMatchStarted (which
         // runs on the mainloop) doesn't pay a Directory.CreateDirectory syscall every time a
@@ -224,16 +237,48 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
         // Always release the queue mapping -- symmetric with the OnMatchProposed capture.
         _queueByMatch.Remove(outcome.MatchId);
 
-        if (!_byMatch.TryGetValue(outcome.MatchId, out var handle)) return;
+        if (!_byMatch.TryGetValue(outcome.MatchId, out _)) return;
+
+        // Defer StopRecording by PostMatchTailMs so the recording captures a few seconds of
+        // post-match action (death animations, victory laps) instead of cutting off mid-frame
+        // at the eliminating kill. The session keeps accepting events from the arena until
+        // StopRecording lands. IsRecordingComplete continues to return false during the tail
+        // because StopRequested is still false, which keeps the uploader's worker thread
+        // polling rather than uploading metadata-only.
+        _timer.SetTimer(_onTailExpired, PostMatchTailMs, Timeout.Infinite, outcome.MatchId, this);
+    }
+
+    private bool OnTailExpired(Guid matchId)
+    {
+        StopAndMark(matchId);
+        return false;
+    }
+
+    private void StopAndMark(Guid matchId)
+    {
+        if (!_byMatch.TryGetValue(matchId, out var handle)) return;
+        if (handle.StopRequested) return;
 
         bool stopped = _recorder.StopRecording(handle.Session);
-        _byMatch[outcome.MatchId] = handle with { StopRequested = true };
+        _byMatch[matchId] = handle with { StopRequested = true };
         if (!stopped)
         {
             _log.LogM(LogLevel.Warn, LogCategory,
-                $"MatchRecorder.StopRecording returned false for match {outcome.MatchId:N} " +
+                $"MatchRecorder.StopRecording returned false for match {matchId:N} " +
                 "(session may have already stopped).");
         }
+    }
+
+    /// <summary>
+    /// Cancel any pending post-match tails and stop their sessions immediately. Called from
+    /// <c>ClashModule.PreUnloadAsync</c> so we don't leak active recordings or fire timers
+    /// after the module has been torn down.
+    /// </summary>
+    public void Shutdown()
+    {
+        _timer.ClearTimer(_onTailExpired, this);
+        foreach (var kvp in _byMatch)
+            StopAndMark(kvp.Key);
     }
 
     private sealed record RecordingHandle(

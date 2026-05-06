@@ -268,7 +268,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
                 string recordingDir = _config.GetStr(_config.Global, "ClashEngine", "ReplayRecordingDir")
                     ?? System.IO.Path.Combine(AppContext.BaseDirectory, "clash-replays");
                 _replayRecorder = new ClashReplayRecorder(
-                    _engine, _matchRecorder, _arenaManager, _resolver, _log, recordingDir);
+                    _engine, _matchRecorder, _arenaManager, _resolver, _mainloopTimer, _log, recordingDir);
+                _unregisterActions.Add(_replayRecorder.Shutdown);
             }
         }
 
