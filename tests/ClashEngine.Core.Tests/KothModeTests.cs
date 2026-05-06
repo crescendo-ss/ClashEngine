@@ -150,6 +150,94 @@ public class KothModeTests
     }
 
     [Fact]
+    public void Promoted_winners_fire_OnWinnerPromoted_not_OnQueueAdded()
+    {
+        var h = new Harness(killTarget: 1, maxDefenses: 3);
+        h.ConnectAll("A", "B", "C", "D");
+
+        h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("B"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("C"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("D"), "koth2v2", T0);
+        h.Engine.Tick(T0);
+
+        var proposal = h.Telemetry.Proposed[0];
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.StartProposedMatch(proposal);
+        var match = h.Telemetry.Started[0];
+        var winners = match.Teams[0];
+        var loser = match.Teams[1][0];
+
+        // Snapshot the OnQueueAdded count from the initial enqueues; KOTH re-enqueue must not
+        // emit any further OnQueueAdded events.
+        var queueAddsBefore = h.Telemetry.QueueAdds.Count;
+
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnKill(winners[0], loser, h.Clock.UtcNow);
+
+        Assert.Equal(queueAddsBefore, h.Telemetry.QueueAdds.Count);
+        Assert.Equal(2, h.Telemetry.WinnerPromotions.Count);
+        foreach (var w in winners)
+        {
+            var promo = h.Telemetry.WinnerPromotions.Single(p => p.Player == w);
+            Assert.Equal("koth2v2", promo.Queue);
+            Assert.Equal(1, promo.DefensesUsed);
+            Assert.Equal(3, promo.MaxDefenses);
+            Assert.False(promo.SentToBack);
+        }
+    }
+
+    [Fact]
+    public void Capped_champions_fire_OnWinnerPromoted_with_SentToBack()
+    {
+        var h = new Harness(killTarget: 1, maxDefenses: 1);
+        h.ConnectAll("A", "B", "C", "D");
+
+        h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("B"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("C"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("D"), "koth2v2", T0);
+        h.Engine.Tick(T0);
+        var p1 = h.Telemetry.Proposed[0];
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.StartProposedMatch(p1);
+        var winners1 = p1.Teams[0];
+        var loser1 = p1.Teams[1][0];
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnKill(winners1[0], loser1, h.Clock.UtcNow);
+
+        // Match 1 promotion: head-of-queue, defense 1/1.
+        Assert.Equal(2, h.Telemetry.WinnerPromotions.Count);
+        Assert.All(h.Telemetry.WinnerPromotions, e => Assert.False(e.SentToBack));
+
+        h.Telemetry.WinnerPromotions.Clear();
+
+        // Match 2 needs four players to pop -- bring in fresh challengers for the cap to bite.
+        h.Engine.OnPlayerConnected(K("E"), h.Clock.UtcNow);
+        h.Engine.OnPlayerConnected(K("F"), h.Clock.UtcNow);
+        h.Engine.TryEnqueue(K("E"), "koth2v2", h.Clock.UtcNow);
+        h.Engine.TryEnqueue(K("F"), "koth2v2", h.Clock.UtcNow);
+        h.Engine.Tick(h.Clock.UtcNow);
+        var p2 = h.Telemetry.Proposed[1];
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.StartProposedMatch(p2);
+        var winners2 = p2.Teams.First(t => t.Contains(winners1[0]));
+        var loser2 = p2.Teams.First(t => !t.Contains(winners1[0]))[0];
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnKill(winners2[0], loser2, h.Clock.UtcNow);
+
+        // Match 2 promotion: cap hit -- both winners reported with SentToBack=true and DefensesUsed=0.
+        Assert.Equal(2, h.Telemetry.WinnerPromotions.Count);
+        foreach (var w in winners2)
+        {
+            var promo = h.Telemetry.WinnerPromotions.Single(e => e.Player == w);
+            Assert.True(promo.SentToBack);
+            Assert.Equal(0, promo.DefensesUsed);
+            Assert.Equal(1, promo.MaxDefenses);
+        }
+    }
+
+    [Fact]
     public void Non_KOTH_queue_does_not_re_enqueue_winners()
     {
         var h = new Harness(killTarget: 1);

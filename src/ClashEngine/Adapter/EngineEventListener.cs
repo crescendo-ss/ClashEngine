@@ -149,6 +149,23 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             _chat.SendMessage(p, $"Left {queueName} queue.");
     }
 
+    public void OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,
+        int defensesUsed, int maxDefenses, bool sentToBack)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"WinnerPromoted: {player.Name} -> {queueName} (defense {defensesUsed}/{maxDefenses}, sentToBack={sentToBack})");
+        if (_resolver.Resolve(player) is not { } p) return;
+
+        var descriptor = FormatQueueDescriptor(queueName);
+        int? waiting = _queues.TryGet(queueName, out var def) ? def.Queue.Count : null;
+        var countSuffix = waiting is { } w ? $", {w} in queue" : "";
+        var message = sentToBack
+            ? $"Win — {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. ?cancel to leave."
+            : $"Win — auto-queued for {descriptor} (defense {defensesUsed}/{maxDefenses}{countSuffix}). ?cancel to bow out.";
+        _chat.SendMessage(p, message);
+    }
+
     public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)
     {
         if (_verbose.IsDebug)

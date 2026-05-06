@@ -665,18 +665,22 @@ public sealed class MatchmakingEngine
             var rating = _ratings.Get(p, queue.GameType);
             var groupId = _groups.GroupOf(p);
 
+            int defensesUsed;
             if (atLeastOneAtCap)
             {
                 _consecutiveDefenses.Remove((p, queue.Name));
                 _matcher.Enqueue(p, rating, queue.Name, groupId);
+                defensesUsed = 0;
             }
             else
             {
                 int prior = _consecutiveDefenses.TryGetValue((p, queue.Name), out var c) ? c : 0;
                 _consecutiveDefenses[(p, queue.Name)] = prior + 1;
                 _matcher.EnqueuePriority(p, rating, queue.Name, groupId);
+                defensesUsed = prior + 1;
             }
-            _telemetry.OnQueueAdded(p, queue.Name, at);
+            _telemetry.OnWinnerPromoted(
+                p, queue.Name, at, defensesUsed, queue.MaxConsecutiveDefenses, atLeastOneAtCap);
         }
     }
 

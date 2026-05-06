@@ -20,10 +20,27 @@ public interface IMatchmakingTelemetry
     /// actually issued the enqueue command, when that's a different player from
     /// <paramref name="player"/> -- the engine sets this only for open-party group enqueues so the
     /// adapter can attribute the message ("X queued you for ..."). Null on solo enqueues, on the
-    /// initiator's own row of a group enqueue, on closed-party enqueues, and on KOTH re-enqueue.
+    /// initiator's own row of a group enqueue, and on closed-party enqueues. KOTH re-enqueues
+    /// fire <see cref="OnWinnerPromoted"/> instead of this event.
     /// </summary>
     void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) { }
     void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) { }
+
+    /// <summary>
+    /// A winning player was just auto-re-enqueued by KOTH mode
+    /// (<c>QueueDefinition.PromoteWinnersToFront</c>) after a Completed match. Fires in place of
+    /// <see cref="OnQueueAdded"/> so adapters can send a promotion-specific notice -- typically
+    /// with a <c>?cancel</c> hint for players who don't want to be drawn into another match.
+    /// </summary>
+    /// <param name="defensesUsed">Number of consecutive defenses now credited to this player in
+    /// this queue (after this win). 0 when <paramref name="sentToBack"/> is true (the engine
+    /// resets the counter at the cap).</param>
+    /// <param name="maxDefenses"><c>QueueDefinition.MaxConsecutiveDefenses</c> for the queue.</param>
+    /// <param name="sentToBack">True when the winning team hit the defenses cap and was re-queued
+    /// at the back rather than the head.</param>
+    void OnWinnerPromoted(
+        PlayerKey player, string queueName, DateTimeOffset at,
+        int defensesUsed, int maxDefenses, bool sentToBack) { }
 
     /// <summary>
     /// The queue just reached <c>TotalPlayers - 1</c> waiters (one short of forming a match) for

@@ -28,6 +28,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnQueueRemoved(p, q, at);
     }
+    public void OnWinnerPromoted(PlayerKey p, string q, DateTimeOffset at, int defensesUsed, int maxDefenses, bool sentToBack)
+    {
+        foreach (var l in _listeners) l.OnWinnerPromoted(p, q, at, defensesUsed, maxDefenses, sentToBack);
+    }
     public void OnQueueNearFull(string q, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)
     {
         foreach (var l in _listeners) l.OnQueueNearFull(q, waiting, waitingCount, needed);

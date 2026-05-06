@@ -11,6 +11,7 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
 {
     public List<(PlayerKey Player, string Queue, PlayerKey? Initiator)> QueueAdds { get; } = new();
     public List<(PlayerKey, string)> QueueRemovals { get; } = new();
+    public List<(PlayerKey Player, string Queue, int DefensesUsed, int MaxDefenses, bool SentToBack)> WinnerPromotions { get; } = new();
     public List<MatchProposal> Proposed { get; } = new();
     public List<ActiveMatch> Started { get; } = new();
     public List<MatchOutcome> Ended { get; } = new();
@@ -30,6 +31,9 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
         QueueAdds.Add((player, queueName, initiator));
     public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) =>
         QueueRemovals.Add((player, queueName));
+    public void OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,
+        int defensesUsed, int maxDefenses, bool sentToBack) =>
+        WinnerPromotions.Add((player, queueName, defensesUsed, maxDefenses, sentToBack));
     public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed) =>
         QueueNearFulls.Add((queueName, waiting, waitingCount, needed));
     public void OnQueueHoldStarted(string queueName, IReadOnlyList<PlayerKey> candidates, double currentQuality, TimeSpan holdWindow) =>
