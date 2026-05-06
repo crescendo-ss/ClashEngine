@@ -2,10 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using ClashEngine.Adapter;
-using ClashEngine.Core;
 using ClashEngine.Core.Adapter;
 using ClashEngine.Core.Identity;
-using ClashEngine.Core.Matches;
 using ClashEngine.Core.Stats;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
@@ -16,8 +14,10 @@ namespace ClashEngine.Stats;
 /// Composes the in-arena kill-feed line(s) for a match kill and broadcasts them to the
 /// match-scoped audience (participants + spectators with the match in focus). Reads attribution
 /// from <see cref="StatsRecorder"/> (must be called <em>before</em> the recorder clears its
-/// recovery state) and pulls scoreline / lives-remaining state from the engine's
-/// <see cref="ActiveMatch"/>.
+/// recovery state) and pulls scoreline / lives-remaining state from the
+/// <see cref="KillFeedPreState"/> + <see cref="KillFeedMatchContext"/> snapshots captured at
+/// kill time -- not from the live <c>ActiveMatch</c>, which has already been torn out of the
+/// engine's dictionary by the time the match-ending kill's deferred broadcast runs.
 /// </summary>
 /// <remarks>
 /// Uses <see cref="MatchAudience"/> rather than <c>SendArenaMessage</c> so concurrent matches in
@@ -26,20 +26,17 @@ namespace ClashEngine.Stats;
 public sealed class KillFeedReporter
 {
     private readonly IChat _chat;
-    private readonly MatchmakingEngine _engine;
     private readonly IClock _clock;
     private readonly PlayerKeyResolver? _resolver;
     private readonly MatchAudience? _audience;
 
     public KillFeedReporter(
         IChat chat,
-        MatchmakingEngine engine,
         IClock clock,
         PlayerKeyResolver? resolver = null,
         MatchAudience? audience = null)
     {
         _chat = chat ?? throw new ArgumentNullException(nameof(chat));
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _resolver = resolver;
         _audience = audience;
@@ -47,31 +44,36 @@ public sealed class KillFeedReporter
 
     /// <summary>
     /// Broadcast a kill-feed line for a kill that just landed in <paramref name="arena"/>.
-    /// No-op if the victim is not part of an active match.
     /// </summary>
     /// <param name="pre">Pre-engine snapshot of the dynamic match values (lives, scores) so the
     /// 200 ms-deferred broadcast still displays the same "pre-decrement lives" / "pre-add score"
     /// values it would have shown if it had fired synchronously before <c>engine.OnKill</c>.</param>
+    /// <param name="context">Per-match structural fields (teams, lives-per-player gate, start
+    /// time) captured at kill time. Required because the eliminating kill triggers
+    /// <c>FinalizeMatch</c> synchronously, which removes the match from <c>ActiveMatches</c>
+    /// before this deferred broadcast runs -- a live lookup would silently drop the final
+    /// kill.</param>
     public void Report(
         Arena? arena,
         Guid matchId,
         PlayerKey victim,
         PlayerKey killer,
         KillFeedSnapshot snapshot,
-        KillFeedPreState pre)
+        KillFeedPreState pre,
+        KillFeedMatchContext context)
     {
         if (arena is null) return;
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(pre);
-        if (!_engine.ActiveMatches.TryGetValue(matchId, out var match)) return;
+        ArgumentNullException.ThrowIfNull(context);
 
         // Resolve the participant set once -- every line below targets the same recipients.
-        var participants = ResolveParticipants(match);
+        var participants = ResolveParticipants(context.Teams);
 
         // Compute team relationship up-front so Line 1 can flag team kills and Line 3 can
         // attribute the score correctly.
-        int killerTeam = TeamOf(match, killer);
-        int victimTeam = TeamOf(match, victim);
+        int killerTeam = TeamOf(context.Teams, killer);
+        int victimTeam = TeamOf(context.Teams, victim);
         bool isTeamkill = killerTeam >= 0 && killerTeam == victimTeam;
 
         // Line 1: "Victim kb Killer (dmg) [TEAMKILL] -- Add: A1 (d1), A2 (d2)". The "[TEAMKILL]"
@@ -105,7 +107,7 @@ public sealed class KillFeedReporter
         //                                    death" (current life + remaining respawns).
         //   - pre.VictimLivesPreKill == 0 -> this is the eliminating death. Captains/TVM
         //                                    convention: "X is OUT".
-        if (match.LivesPerPlayer.HasValue && pre.VictimLivesPreKill >= 0)
+        if (context.LivesPerPlayer.HasValue && pre.VictimLivesPreKill >= 0)
         {
             int lives = pre.VictimLivesPreKill;
             if (lives > 0)
@@ -125,8 +127,8 @@ public sealed class KillFeedReporter
         // 3+ team TKs no team scored, fall back to killer's team for a stable label. We read
         // the pre-engine score off `pre` and add +1 for the team that just scored, matching
         // what the synchronous pre-engine version printed.
-        bool scored = !isTeamkill || match.Teams.Count == 2;
-        int scoringTeam = (!isTeamkill || match.Teams.Count != 2)
+        bool scored = !isTeamkill || context.Teams.Count == 2;
+        int scoringTeam = (!isTeamkill || context.Teams.Count != 2)
             ? killerTeam
             : (killerTeam == 0 ? 1 : 0);
         int otherTeam = (scoringTeam == 0) ? 1 : 0;
@@ -134,23 +136,23 @@ public sealed class KillFeedReporter
         int scoringPre = (scoringTeam >= 0 && scoringTeam < pre.PreKillScores.Count) ? pre.PreKillScores[scoringTeam] : 0;
         int scoringScore = scoringPre + (scored ? 1 : 0);
         int otherScore = (otherTeam >= 0 && otherTeam < pre.PreKillScores.Count) ? pre.PreKillScores[otherTeam] : 0;
-        string scoringLabel = LabelOfTeam(match, scoringTeam);
+        string scoringLabel = LabelOfTeam(context.Teams, scoringTeam);
 
-        var elapsed = _clock.UtcNow - (match.StartedAt ?? _clock.UtcNow);
+        var elapsed = _clock.UtcNow - (context.StartedAt ?? _clock.UtcNow);
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
         Send(matchId, arena, participants,
             $"Score: {scoringScore}-{otherScore} {scoringLabel} -- [{(int)elapsed.TotalMinutes}:{elapsed.Seconds:D2}]");
     }
 
-    private List<Player> ResolveParticipants(ActiveMatch match)
+    private List<Player> ResolveParticipants(IReadOnlyList<IReadOnlyList<PlayerKey>> teams)
     {
         var list = new List<Player>();
         if (_resolver is null) return list;
-        for (int t = 0; t < match.Teams.Count; t++)
+        for (int t = 0; t < teams.Count; t++)
         {
-            for (int j = 0; j < match.Teams[t].Count; j++)
+            for (int j = 0; j < teams[t].Count; j++)
             {
-                if (_resolver.Resolve(match.Teams[t][j]) is { } p) list.Add(p);
+                if (_resolver.Resolve(teams[t][j]) is { } p) list.Add(p);
             }
         }
         return list;
@@ -164,18 +166,18 @@ public sealed class KillFeedReporter
             _chat.SendArenaMessage(arena, message);
     }
 
-    private static int TeamOf(ActiveMatch match, PlayerKey key)
+    private static int TeamOf(IReadOnlyList<IReadOnlyList<PlayerKey>> teams, PlayerKey key)
     {
-        for (int t = 0; t < match.Teams.Count; t++)
-            for (int j = 0; j < match.Teams[t].Count; j++)
-                if (match.Teams[t][j].Equals(key)) return t;
+        for (int t = 0; t < teams.Count; t++)
+            for (int j = 0; j < teams[t].Count; j++)
+                if (teams[t][j].Equals(key)) return t;
         return -1;
     }
 
-    private static string LabelOfTeam(ActiveMatch match, int teamIdx)
+    private static string LabelOfTeam(IReadOnlyList<IReadOnlyList<PlayerKey>> teams, int teamIdx)
     {
-        if (teamIdx < 0 || teamIdx >= match.Teams.Count) return "?";
-        var team = match.Teams[teamIdx];
+        if (teamIdx < 0 || teamIdx >= teams.Count) return "?";
+        var team = teams[teamIdx];
         if (team.Count == 0) return "?";
         if (team.Count == 1) return team[0].Name;
         var sb = new StringBuilder();

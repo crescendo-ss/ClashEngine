@@ -285,7 +285,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
                 "IWatchDamage not available; damage stats (DDealt/DTaken/HitCount) will be zero.");
 
         var empLookup = new EmpShutdownLookup(_config);
-        var killFeedReporter = new KillFeedReporter(_chat, _engine, _clock, _resolver, matchAudience);
+        var killFeedReporter = new KillFeedReporter(_chat, _clock, _resolver, matchAudience);
         _statsListener = new StatsListener(
             broker, _engine, _matchStats, _playerData, _resolver, empLookup, killFeedReporter, _mainloopTimer, _log);
         // Wire the drain hook so the telemetry's OnMatchEnded flushes any pending deferred
@@ -332,9 +332,15 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         // (orchestrator setup, knockout-spec) bypass the advisor and remain unaffected.
         _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, _chat, freqAllocator);
 
-        var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { _listener, _orchestrators };
+        // _listener is registered AFTER _matchStatsTelemetry so its OnMatchEnded handler runs
+        // post-statbox: EngineEventListener buffers post-match DMs (abandonment / griefing /
+        // promotion) during FinalizeMatch and drains them in OnMatchEnded, which must come after
+        // ClashStatsTelemetry has broadcast the scoreboard. The other events EngineEventListener
+        // handles are independent of the listeners that come before it here.
+        var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { _orchestrators };
         if (_replayRecorder is not null) listeners.Add(_replayRecorder);
         listeners.Add(_matchStatsTelemetry);
+        listeners.Add(_listener);
         listeners.Add(_lvzAdapter);
         listeners.Add(_freqAdvisor);
         _engine.SetTelemetry(new CompositeTelemetry(listeners.ToArray()));

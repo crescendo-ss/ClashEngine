@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using ClashEngine.Core.Identity;
 
@@ -18,10 +19,9 @@ public readonly record struct KillFeedAssister(PlayerKey Player, int Damage);
 public sealed record KillFeedSnapshot(int KillerDamage, IReadOnlyList<KillFeedAssister> Assisters);
 
 /// <summary>
-/// Match state captured immediately before <c>engine.OnKill</c> processes a kill, then handed
-/// to the deferred kill-feed broadcast 200 ms later. Captures only the values that change
-/// between pre- and post-engine state -- everything stable in 200 ms (team rosters, match
-/// start time, lives-per-player config) is read live off <see cref="ClashEngine.Core.Matches.ActiveMatch"/>.
+/// Per-kill mutable match state captured immediately before <c>engine.OnKill</c> processes a
+/// kill, then handed to the deferred kill-feed broadcast 200 ms later. Pairs with
+/// <see cref="KillFeedMatchContext"/>, which carries the structurally stable per-match fields.
 /// </summary>
 /// <param name="VictimLivesPreKill">Victim's <c>LivesRemaining</c> entry before the engine
 /// decremented it. Negative when the match has no lives system or the victim has no entry.</param>
@@ -33,3 +33,21 @@ public sealed record KillFeedPreState(
     int VictimLivesPreKill,
     bool VictimAlreadyExitedPreKill,
     IReadOnlyList<int> PreKillScores);
+
+/// <summary>
+/// Per-match structural fields the kill-feed broadcast needs (team rosters, lives-per-player
+/// gate, match start time). Captured at kill time and held on the deferred-kill record so the
+/// 200 ms-late broadcast can render correctly even when the match-ending kill has already
+/// triggered <c>FinalizeMatch</c>, which removes the <c>ActiveMatch</c> from the engine's
+/// dictionary before the deferred timer (or the match-end drain) fires.
+/// </summary>
+/// <remarks>
+/// Without this snapshot, <c>KillFeedReporter</c> would early-out on the
+/// <c>_engine.ActiveMatches.TryGetValue</c> lookup for the eliminating kill of a match -- the
+/// player would never see the final "X kb Y" / "X is OUT" / "Score: a-b" lines. Same idea as
+/// <see cref="KillFeedPreState"/> capturing dynamic state, just for the structural fields.
+/// </remarks>
+public sealed record KillFeedMatchContext(
+    IReadOnlyList<IReadOnlyList<PlayerKey>> Teams,
+    int? LivesPerPlayer,
+    DateTimeOffset? StartedAt);

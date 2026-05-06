@@ -241,12 +241,13 @@ public sealed class StatsListener
         if (!_engine.ActiveMatches.TryGetValue(matchId, out var match)) return;
 
         var pre = CapturePreState(match, vkey);
+        var context = new KillFeedMatchContext(match.Teams, match.LivesPerPlayer, match.StartedAt);
 
         // Phase 2: schedule the damage-attribution + chat broadcast for after the late-damage
         // grace window. Pending entry held under matchId so DrainPendingForMatch can flush it
         // synchronously at match end (recorder is alive, but the upload payload is built right
         // after EndMatch, so the late attribution must land before that).
-        var pending = new DeferredKill(matchId, recorder, arena, vkey, kkey, tick, pre);
+        var pending = new DeferredKill(matchId, recorder, arena, vkey, kkey, tick, pre, context);
         if (!_pendingKills.TryGetValue(matchId, out var list))
         {
             list = new List<DeferredKill>();
@@ -316,7 +317,7 @@ public sealed class StatsListener
         var snapshot = dk.Recorder.FinalizeKillAttribution(dk.Victim, dk.Killer, dk.AtTick);
         if (snapshot is null) return;
         if (_killFeedReporter is null) return;
-        _killFeedReporter.Report(dk.Arena, dk.MatchId, dk.Victim, dk.Killer, snapshot, dk.PreState);
+        _killFeedReporter.Report(dk.Arena, dk.MatchId, dk.Victim, dk.Killer, snapshot, dk.PreState, dk.MatchContext);
     }
 
     private static KillFeedPreState CapturePreState(ActiveMatch match, PlayerKey victim)
@@ -345,7 +346,8 @@ public sealed class StatsListener
         PlayerKey Victim,
         PlayerKey Killer,
         uint AtTick,
-        KillFeedPreState PreState);
+        KillFeedPreState PreState,
+        KillFeedMatchContext MatchContext);
 
     /// <summary>
     /// Predicts whether the in-flight kill will be the eliminating one. Runs pre-engine, so

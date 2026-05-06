@@ -8,6 +8,7 @@ using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Penalties;
 using ClashEngine.Core.Queue;
+using SS.Core;
 using SS.Core.ComponentInterfaces;
 
 namespace ClashEngine.Adapter;
@@ -34,6 +35,16 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     private readonly GroupRegistry _groups;
     private readonly IClock _clock;
     private readonly Dictionary<PlayerKey, DateTimeOffset> _lastMmStatusAt = new();
+
+    // Post-match DMs are buffered during FinalizeMatch (which fires OnAbandonment ->
+    // OnGriefingFlagged -> OnWinnerPromoted, then OnMatchEnded as its terminator) and drained
+    // from OnMatchEnded so they land AFTER ClashStatsTelemetry broadcasts the statbox. Order
+    // requires ClashModule to register this listener after _matchStatsTelemetry in
+    // CompositeTelemetry. Buffers are unkeyed because FinalizeMatch is single-threaded -- the
+    // next OnMatchEnded that fires is always the terminator for whatever pushed into them.
+    private readonly List<(Player Recipient, string Message)> _pendingAbandonmentDms = new();
+    private readonly List<(Player Recipient, string Message)> _pendingGriefingDms = new();
+    private readonly List<(Player Recipient, string Message)> _pendingPromotionDms = new();
 
     public EngineEventListener(
         IChat chat,
@@ -163,7 +174,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         var message = sentToBack
             ? $"Win -- {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. ?cancel to leave."
             : $"Win -- auto-queued for {descriptor} (defense {defensesUsed}/{maxDefenses}{countSuffix}). ?cancel to bow out.";
-        _chat.SendMessage(p, message);
+        _pendingPromotionDms.Add((p, message));
     }
 
     public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)
@@ -280,6 +291,20 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     {
         _log.LogM(LogLevel.Info, LogCategory,
             $"Match {outcome.MatchId:N} ended ({outcome.FinalState}). Abandoners: {outcome.AbandonedBy.Count}.");
+
+        // Drain post-match DMs queued during FinalizeMatch. ClashStatsTelemetry broadcast the
+        // statbox earlier in this same OnMatchEnded fan-out (it's registered ahead of us in
+        // CompositeTelemetry), so the player sees: kill feed -> statbox -> these DMs.
+        DrainBuffered(_pendingAbandonmentDms);
+        DrainBuffered(_pendingGriefingDms);
+        DrainBuffered(_pendingPromotionDms);
+    }
+
+    private void DrainBuffered(List<(Player Recipient, string Message)> buffer)
+    {
+        for (int i = 0; i < buffer.Count; i++)
+            _chat.SendMessage(buffer[i].Recipient, buffer[i].Message);
+        buffer.Clear();
     }
 
     public void OnAbandonment(PlayerKey player, int offenseCount, DateTimeOffset timeoutUntil)
@@ -289,8 +314,8 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         _verbose.Info(LogCategory,
             $"Abandonment: {player.Name} offense#{offenseCount} timeoutUntil={timeoutUntil:HH:mm:ss} (~{Format(remaining)})");
         if (p is null) return;
-        _chat.SendMessage(p,
-            $"You abandoned a match (offense #{offenseCount}). Queue-locked for {HumanDuration.Humanize(remaining)}.");
+        _pendingAbandonmentDms.Add((p,
+            $"You abandoned a match (offense #{offenseCount}). Queue-locked for {HumanDuration.Humanize(remaining)}."));
     }
 
     public void OnTeamCollapsing(ActiveMatch match, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
@@ -319,19 +344,19 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
                     $"GriefingFlagged voter dispatch: {voter.Name} resolved={(resolved is null ? "null" : "ok")}");
             if (resolved is { } p)
             {
-                _chat.SendMessage(p,
+                _pendingGriefingDms.Add((p,
                     $"{targetName} has been assessed with a {penaltyMinutes} minute griefing penalty. " +
                     $"Use ?forgive {targetName} to vote to have that penalty removed " +
-                    $"({pending.VetoesRequired} votes needed).");
+                    $"({pending.VetoesRequired} votes needed)."));
             }
         }
 
         if (target is not null)
         {
             var window = pending.VetoWindowEndsAt - pending.PenaltyAppliedAt;
-            _chat.SendMessage(target,
+            _pendingGriefingDms.Add((target,
                 $"You were flagged for griefing: {pending.Reason}. " +
-                $"Other players can ?forgive within {Format(window)}.");
+                $"Other players can ?forgive within {Format(window)}."));
         }
     }
 
