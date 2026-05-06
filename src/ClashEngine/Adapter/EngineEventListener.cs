@@ -172,8 +172,8 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         int? waiting = _queues.TryGet(queueName, out var def) ? def.Queue.Count : null;
         var countSuffix = waiting is { } w ? $", {w} in queue" : "";
         var message = sentToBack
-            ? $"Win -- {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. ?cancel to leave."
-            : $"Win -- auto-queued for {descriptor} (defense {defensesUsed}/{maxDefenses}{countSuffix}). ?cancel to bow out.";
+            ? $"Win -- {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. Use ?cancel to leave matchmaking."
+            : $"Congrats! Autoqueued and promoted to be at the front of the line for {descriptor} (win-streak: {defensesUsed}). Use ?cancel to leave matchmaking.";
         _pendingPromotionDms.Add((p, message));
     }
 
