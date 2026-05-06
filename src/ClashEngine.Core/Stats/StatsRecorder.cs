@@ -406,7 +406,6 @@ public sealed class StatsRecorder
         _pendingDeathTick[victim] = atTick;
 
         victimStats.RecordDeath();
-        if (isKnockout) victimStats.RecordKnockout();
 
         // Every life-close accumulates leftover inventory into the wasted bucket. On a
         // non-knockout death the next OnSpawn refills inventory to the ship's initial loadout
@@ -414,9 +413,9 @@ public sealed class StatsRecorder
         // final knockout there is no next spawn and the snapshot is the player's last contribution.
         victimStats.SnapshotInventoryAsWasted();
 
-        // Self-kill (own splash, etc.): no kill credit. Close life with KilledByEnemy and no
-        // knockoutBy -- the game's kill packet says it but the credit's empty. Recovery is
-        // cleared in FinalizeKillAttribution along with the non-self path.
+        // Self-kill (own splash, etc.): no kill or knockout credit. Close life with
+        // KilledByEnemy and no knockoutBy -- the game's kill packet says it but the credit's
+        // empty. Recovery is cleared in FinalizeKillAttribution along with the non-self path.
         if (killer == victim)
         {
             victimStats.CloseLife(atTick, LifeEndReason.KilledByEnemy, knockoutBy: null);
@@ -426,8 +425,18 @@ public sealed class StatsRecorder
         bool sameTeam = SameTeam(killer, victim);
         if (_stats.TryGetValue(killer, out var killerStats))
         {
-            if (sameTeam) killerStats.RecordTeamkill();
-            else killerStats.RecordKill();
+            if (sameTeam)
+            {
+                killerStats.RecordTeamkill();
+            }
+            else
+            {
+                killerStats.RecordKill();
+                // Knockout credit goes to the killer, not the victim -- "knockouts" is the
+                // count of opponents this player eliminated (final death), mirroring kills.
+                // Suppressed for teamkills for the same reason RecordKill is.
+                if (isKnockout) killerStats.RecordKnockout();
+            }
         }
 
         victimStats.CloseLife(

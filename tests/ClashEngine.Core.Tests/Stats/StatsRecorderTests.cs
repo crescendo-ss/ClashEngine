@@ -228,13 +228,36 @@ public class StatsRecorderTests
     }
 
     [Fact]
-    public void Knockout_flag_increments_knockout_counter()
+    public void Knockout_flag_credits_killer_not_victim()
     {
         var r = Make4Player();
         r.OnSpawn(K("C"), atTick: 0);
         r.OnDamage(K("C"), K("A"), 800, WeaponKind.Bullet, 0, atTick: 100);
         r.OnKill(K("C"), K("A"), atTick: 100, isKnockout: true);
-        Assert.Equal(1, r.Stats[K("C")].Knockouts);
+        Assert.Equal(1, r.Stats[K("A")].Knockouts);
+        Assert.Equal(0, r.Stats[K("C")].Knockouts);
+    }
+
+    [Fact]
+    public void Knockout_flag_does_not_credit_teamkill()
+    {
+        // A and B share team 0 (Make4Player puts AB on team 0, CD on team 1).
+        var r = Make4Player();
+        r.OnSpawn(K("B"), atTick: 0);
+        r.OnDamage(K("B"), K("A"), 800, WeaponKind.Bomb, 0, atTick: 100);
+        r.OnKill(K("B"), K("A"), atTick: 100, isKnockout: true);
+        Assert.Equal(0, r.Stats[K("A")].Knockouts);
+        Assert.Equal(0, r.Stats[K("B")].Knockouts);
+    }
+
+    [Fact]
+    public void Knockout_flag_does_not_credit_self_kill()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("A"), atTick: 0);
+        r.OnDamage(K("A"), K("A"), 800, WeaponKind.Bomb, 0, atTick: 100); // self-splash
+        r.OnKill(K("A"), K("A"), atTick: 100, isKnockout: true);
+        Assert.Equal(0, r.Stats[K("A")].Knockouts);
     }
 
     [Fact]

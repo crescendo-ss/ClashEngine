@@ -39,7 +39,9 @@ public sealed class PlayerStats
     public int Kills { get; private set; }
     public int Deaths { get; private set; }
 
-    /// <summary>Final deaths (no lives remaining). Bounded by lives-per-player from match config.</summary>
+    /// <summary>Number of opponents this player eliminated -- kills that closed the victim's
+    /// last life. Credited to the killer (not the victim), mirroring <see cref="Kills"/>.
+    /// Teamkills do not count.</summary>
     public int Knockouts { get; private set; }
 
     public int Assists { get; private set; }
