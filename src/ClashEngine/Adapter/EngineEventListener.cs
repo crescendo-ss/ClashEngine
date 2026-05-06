@@ -161,8 +161,8 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         int? waiting = _queues.TryGet(queueName, out var def) ? def.Queue.Count : null;
         var countSuffix = waiting is { } w ? $", {w} in queue" : "";
         var message = sentToBack
-            ? $"Win — {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. ?cancel to leave."
-            : $"Win — auto-queued for {descriptor} (defense {defensesUsed}/{maxDefenses}{countSuffix}). ?cancel to bow out.";
+            ? $"Win -- {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. ?cancel to leave."
+            : $"Win -- auto-queued for {descriptor} (defense {defensesUsed}/{maxDefenses}{countSuffix}). ?cancel to bow out.";
         _chat.SendMessage(p, message);
     }
 
@@ -172,7 +172,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             _verbose.Debug(LogCategory, $"QueueNearFull: {queueName} ({waitingCount}/{needed})");
 
         var descriptor = FormatQueueDescriptor(queueName);
-        var message = $"{waitingCount}/{needed} in {descriptor} — one more to go.";
+        var message = $"{waitingCount}/{needed} in {descriptor} -- one more to go.";
 
         for (int i = 0; i < waiting.Count; i++)
         {
@@ -196,7 +196,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
 
         var descriptor = FormatQueueDescriptor(queueName);
         var seconds = (int)Math.Ceiling(holdWindow.TotalSeconds);
-        var message = $"Match candidates found in {descriptor} — looking for a fairer split (up to {seconds}s).";
+        var message = $"Match candidates found in {descriptor} -- looking for a fairer split (up to {seconds}s).";
         BroadcastToCandidates(candidates, message);
     }
 
@@ -207,7 +207,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
                 $"QueueHoldImproved: {queueName} {oldQuality:F2} -> {newQuality:F2}");
 
         var descriptor = FormatQueueDescriptor(queueName);
-        var message = $"Better match-up found in {descriptor} — locking in shortly.";
+        var message = $"Better match-up found in {descriptor} -- locking in shortly.";
         BroadcastToCandidates(candidates, message);
     }
 
@@ -313,7 +313,11 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
 
         foreach (var voter in pending.EligibleVoters)
         {
-            if (_resolver.Resolve(voter) is { } p)
+            var resolved = _resolver.Resolve(voter);
+            if (_verbose.IsDebug)
+                _verbose.Debug(LogCategory,
+                    $"GriefingFlagged voter dispatch: {voter.Name} resolved={(resolved is null ? "null" : "ok")}");
+            if (resolved is { } p)
             {
                 _chat.SendMessage(p,
                     $"{targetName} has been assessed with a {penaltyMinutes} minute griefing penalty. " +
