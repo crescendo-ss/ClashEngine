@@ -151,7 +151,8 @@ public sealed class MatchmakingEngine
         return true;
     }
 
-    /// <summary>Player has left the arena or specced.</summary>
+    /// <summary>Player has left the arena outright (e.g. <c>?go pub</c>). Drops them from any
+    /// queues they're sitting in and starts the abandonment grace clock if they were in a match.</summary>
     public void OnPlayerLeftArena(PlayerKey player, DateTimeOffset at)
     {
         if (_matchOf.TryGetValue(player, out var matchId))
@@ -162,6 +163,23 @@ public sealed class MatchmakingEngine
             DiffCollapsedAndEmit(m, prev);
         }
         _matcher.DequeueEverywhere(player);
+    }
+
+    /// <summary>
+    /// Player ship-changed to spec without leaving the arena. Mirrors
+    /// <see cref="OnPlayerLeftArena"/>'s in-match bookkeeping (so abandonment grace still runs)
+    /// but deliberately does not dequeue: the orchestrator sends KOTH winners to spec on match
+    /// cleanup, which would otherwise yank them right back out of the queue we just promoted
+    /// them into. Players parked in spec while waiting for a match also stay queued -- only the
+    /// explicit <c>?cancel</c> path or a real arena exit drops a queue entry.
+    /// </summary>
+    public void OnPlayerSpecced(PlayerKey player, DateTimeOffset at)
+    {
+        if (!_matchOf.TryGetValue(player, out var matchId)) return;
+        var m = _matches[matchId];
+        var prev = SnapshotCollapsed(m);
+        m.OnPlayerLeft(player, at);
+        DiffCollapsedAndEmit(m, prev);
     }
 
     /// <summary>Player has returned to their assigned ship/freq within the grace window.</summary>

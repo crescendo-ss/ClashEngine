@@ -131,7 +131,11 @@ public sealed class PlayerStateObserver
         }
         else if (!wasSpec && isSpec)
         {
-            _engine.OnPlayerLeftArena(key, now);
+            // Ship -> spec: the player is still in the arena, just on the spec freq, so route
+            // to OnPlayerSpecced (preserves the in-match abandonment-grace bookkeeping but
+            // doesn't drop queues). OnPlayerLeftArena is reserved for an actual arena exit
+            // (the LeaveArena action above), where dropping queues is correct.
+            _engine.OnPlayerSpecced(key, now);
         }
         // Ship-to-ship or freq-only changes are not currently meaningful to the engine.
     }

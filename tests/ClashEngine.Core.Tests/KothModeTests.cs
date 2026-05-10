@@ -238,6 +238,105 @@ public class KothModeTests
     }
 
     [Fact]
+    public void OnPlayerSpecced_after_KOTH_promotion_keeps_winners_in_the_queue()
+    {
+        // Repro: the orchestrator specs each match participant during its OnMatchEnded cleanup
+        // (SetShipAndFreq -> arena spec freq), which in production fires through
+        // PlayerStateObserver.OnShipFreqChange. Before the fix that path called
+        // OnPlayerLeftArena, whose DequeueEverywhere yanked the freshly-promoted winners back
+        // out of the queue right after ApplyKothReenqueue put them in -- and AFTER the
+        // OnWinnerPromoted DM had already been buffered. Players got a "Congrats! Autoqueued
+        // and promoted to be at the front..." DM but were nowhere to be found in the queue.
+        var h = new Harness(killTarget: 1);
+        h.ConnectAll("A", "B", "C", "D");
+
+        h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("B"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("C"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("D"), "koth2v2", T0);
+        h.Engine.Tick(T0);
+
+        var proposal = h.Telemetry.Proposed[0];
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.StartProposedMatch(proposal);
+        var match = h.Telemetry.Started[0];
+        var winners = match.Teams[0];
+        var loser = match.Teams[1][0];
+
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnKill(winners[0], loser, h.Clock.UtcNow);
+
+        // ApplyKothReenqueue ran during FinalizeMatch -- both winners are at the head.
+        h.Engine.Queues.TryGet("koth2v2", out var def);
+        Assert.Equal(2, def!.Queue.Snapshot().Count);
+
+        // Now simulate the orchestrator's post-match spec for every match participant. In
+        // production this comes through PlayerStateObserver.OnShipFreqChange -> the engine.
+        // Both winners and losers get specced; only the winners are still in the queue.
+        for (int t = 0; t < match.Teams.Count; t++)
+            for (int j = 0; j < match.Teams[t].Count; j++)
+                h.Engine.OnPlayerSpecced(match.Teams[t][j], h.Clock.UtcNow);
+
+        // Winners must still be in the queue after the cleanup-spec wave -- otherwise the
+        // OnWinnerPromoted DM that just went out is lying to them.
+        var snap = def.Queue.Snapshot();
+        Assert.Equal(2, snap.Count);
+        foreach (var w in winners)
+            Assert.Contains(snap, e => e.Player == w);
+    }
+
+    [Fact]
+    public void OnPlayerLeftArena_after_KOTH_promotion_would_drop_winners_documents_why_split_exists()
+    {
+        // Documents the pre-split behavior so the OnPlayerSpecced vs OnPlayerLeftArena
+        // distinction has a regression anchor. Routing the post-finalize spec wave through
+        // OnPlayerLeftArena (the old path) ate the freshly promoted winners. The production
+        // observer now uses OnPlayerSpecced -- this test verifies the difference is real.
+        var h = new Harness(killTarget: 1);
+        h.ConnectAll("A", "B", "C", "D");
+        h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("B"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("C"), "koth2v2", T0);
+        h.Engine.TryEnqueue(K("D"), "koth2v2", T0);
+        h.Engine.Tick(T0);
+
+        var proposal = h.Telemetry.Proposed[0];
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.StartProposedMatch(proposal);
+        var match = h.Telemetry.Started[0];
+        var winners = match.Teams[0];
+        var loser = match.Teams[1][0];
+
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnKill(winners[0], loser, h.Clock.UtcNow);
+
+        for (int t = 0; t < match.Teams.Count; t++)
+            for (int j = 0; j < match.Teams[t].Count; j++)
+                h.Engine.OnPlayerLeftArena(match.Teams[t][j], h.Clock.UtcNow);
+
+        h.Engine.Queues.TryGet("koth2v2", out var def);
+        Assert.Empty(def!.Queue.Snapshot());   // confirms the bug shape the new method avoids
+    }
+
+    [Fact]
+    public void OnPlayerLeftArena_still_drops_a_queued_player_who_actually_leaves_the_arena()
+    {
+        // The OnPlayerSpecced/OnPlayerLeftArena split: real arena exits (e.g. ?go pub) keep
+        // the old dequeue-on-leave semantic, so a player who hops arenas while queued is not
+        // left waiting in a queue tied to an arena they're no longer in.
+        var h = new Harness(killTarget: 1);
+        h.ConnectAll("A");
+        h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
+
+        h.Engine.Queues.TryGet("koth2v2", out var def);
+        Assert.Single(def!.Queue.Snapshot());
+
+        h.Engine.OnPlayerLeftArena(K("A"), T0);
+
+        Assert.Empty(def.Queue.Snapshot());
+    }
+
+    [Fact]
     public void Non_KOTH_queue_does_not_re_enqueue_winners()
     {
         var h = new Harness(killTarget: 1);
