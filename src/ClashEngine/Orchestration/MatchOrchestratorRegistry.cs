@@ -74,7 +74,12 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         if (_registeredCallback) return;
         PlayerPositionPacketCallback.Register(_broker, OnPositionPacket);
         PlayerActionCallback.Register(_broker, OnPlayerAction);
-        ShipFreqChangeCallback.Register(_broker, OnShipFreqChange);
+        // PreShipFreqChange (not ShipFreqChange) so the orchestrator's leave-snapshot capture is
+        // synchronous with the ship change. The async ShipFreqChange runs on a later mainloop
+        // iteration -- if a player presses Esc-S and immediately types ?return, the chat command
+        // would otherwise be processed before the snapshot was taken, and the returner would get
+        // the slot's default ship instead of whichever ship they were last on.
+        PreShipFreqChangeCallback.Register(_broker, OnShipFreqChange);
         _registeredCallback = true;
     }
 
@@ -83,7 +88,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         if (!_registeredCallback) return;
         PlayerPositionPacketCallback.Unregister(_broker, OnPositionPacket);
         PlayerActionCallback.Unregister(_broker, OnPlayerAction);
-        ShipFreqChangeCallback.Unregister(_broker, OnShipFreqChange);
+        PreShipFreqChangeCallback.Unregister(_broker, OnShipFreqChange);
         _registeredCallback = false;
     }
 
@@ -96,7 +101,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
 
         var orchestrator = new MatchOrchestrator(
             matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log,
-            _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats);
+            _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats, broker: _broker);
         _orchestrators[matchId] = orchestrator;
 
         // Track players for position-packet routing during staging.

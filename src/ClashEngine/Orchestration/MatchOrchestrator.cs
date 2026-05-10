@@ -11,6 +11,10 @@ using ClashEngine.Core.Queue;
 using ClashEngine.Core.Stats;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
+using SS.Matchmaking;
+using SS.Matchmaking.Advisors;
+using SS.Matchmaking.Callbacks;
+using SS.Matchmaking.TeamVersus;
 using SS.Packets.Game;
 
 namespace ClashEngine.Orchestration;
@@ -39,6 +43,7 @@ public sealed class MatchOrchestrator
     private readonly MatchAudience? _audience;
     private readonly MatchFreqAllocator? _freqAllocator;
     private readonly MatchStatsRegistry? _matchStats;
+    private readonly IComponentBroker? _broker;
 
     /// <summary>Per-player ship the participant was on at the moment they last specced themselves
     /// out. Populated by <see cref="OnPlayerSpecced"/>; consumed by <see cref="TryReturn"/> so the
@@ -90,7 +95,8 @@ public sealed class MatchOrchestrator
         MatchAudience? audience = null,
         MatchFreqAllocator? freqAllocator = null,
         IRandomSource? rng = null,
-        MatchStatsRegistry? matchStats = null)
+        MatchStatsRegistry? matchStats = null,
+        IComponentBroker? broker = null)
     {
         _matchId = matchId;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -108,6 +114,7 @@ public sealed class MatchOrchestrator
         _freqAllocator = freqAllocator;
         _rng = rng ?? DefaultRandomSource.Instance;
         _matchStats = matchStats;
+        _broker = broker;
         _drift = new SpawnDriftEnforcer(_queue, _proposal);
 
         for (int t = 0; t < _proposal.Teams.Count; t++)
@@ -326,11 +333,41 @@ public sealed class MatchOrchestrator
         // Snapshot consumed; clear so the next leave-cycle isn't tainted by a stale value.
         _shipAtLeave.Remove(key);
 
+        // Re-fire MatchAddPlayingCallback so SS.Matchmaking.MatchFocus rebuilds the returner's
+        // PlayingInMatch state and re-attaches their current spectators to this match. The
+        // initial firing happens at OnMatchStarted; subsequent ship<->spec transitions don't
+        // re-fire it, so without this the IPlayerPositionAdvisor would drop other participants'
+        // position packets to a returner whose PlayingInMatch was somehow cleared, and any
+        // newly-attached spectators wouldn't be associated with this match.
+        RefreshMatchFocus(key, player);
+
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
                 $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq} " +
                 $"(items={_queue.ReturnItemsAction}).");
         return ReturnResult.Placed;
+    }
+
+    /// <summary>
+    /// Walk the broker's <see cref="IMatchFocusAdvisor"/> set to find the <see cref="IMatch"/>
+    /// for this match (the LVZ adapter is the canonical advisor) and fire
+    /// <see cref="MatchAddPlayingCallback"/> for <paramref name="player"/>. MatchFocus's
+    /// <c>SetPlaying</c> is idempotent, so re-firing it on a player whose PlayingInMatch was
+    /// already correct is a no-op; the value of the call is in the cases where the state had
+    /// drifted (e.g. the player rotated through a different match's spectator focus while specced).
+    /// No-op if the broker wasn't injected (test paths) or no advisor is registered.
+    /// </summary>
+    private void RefreshMatchFocus(PlayerKey key, Player player)
+    {
+        if (_broker is null) return;
+        var advisors = _broker.GetAdvisors<IMatchFocusAdvisor>();
+        foreach (var advisor in advisors)
+        {
+            var match = advisor.GetMatch(player);
+            if (match is null) continue;
+            MatchAddPlayingCallback.Fire(_broker, match, key.Name, player);
+            return;
+        }
     }
 
     /// <summary>
@@ -361,10 +398,18 @@ public sealed class MatchOrchestrator
     /// <summary>
     /// Applies the game type's <see cref="QueueDefinition.ReturnItemsAction"/> to the just-placed
     /// <paramref name="player"/> right after <see cref="IGame.SetShipAndFreq"/>. The fresh ship
-    /// spawns with Continuum's full initial loadout; this method may deduct prizes back down to
-    /// the saved counts (Restore) or zero them entirely (Burn). <see cref="ItemsAction.Full"/> is
-    /// a no-op.
+    /// spawns with Continuum's full initial loadout; this method may zero them out (Burn) or
+    /// reconcile them to the player's last in-match counts (Restore). <see cref="ItemsAction.Full"/>
+    /// is a no-op.
     /// </summary>
+    /// <remarks>
+    /// Iterates the UNION of the ship's initial-inventory keys (what Continuum just handed the
+    /// player) and the saved-leave keys (what they had at the moment of self-spec, possibly
+    /// including items they picked up mid-match via greens that aren't in the slot's initial
+    /// loadout). Each item is emitted as a single positive- or negative-prize call so Restore
+    /// can ADD items the player accumulated past the initial (e.g. green-pickup thors on a ship
+    /// whose initial Thor count is 0) and Burn zeroes everything they were carrying.
+    /// </remarks>
     private void ApplyReturnItemsAction(Player player, PlayerKey key)
     {
         if (_queue.ReturnItemsAction == ItemsAction.Full) return;
@@ -380,19 +425,22 @@ public sealed class MatchOrchestrator
         if (_queue.ReturnItemsAction == ItemsAction.Restore)
             recorder.TryGetLastLeaveInventory(key, out saved);
 
-        // For each stockpilable item kind, deduct (initial - target) prizes. target = 0 for Burn,
-        // saved-or-zero for Restore. A negative prize tells SS Core to remove that many of the
-        // matching prize from the player's stockpile.
-        foreach (var (item, initialCount) in initial)
+        var items = new HashSet<ItemKind>(initial.Keys);
+        if (saved is not null)
+            foreach (var item in saved.Keys) items.Add(item);
+
+        foreach (var item in items)
         {
-            if (initialCount <= 0) continue;
-            int target = 0;
-            if (saved is not null && saved.TryGetValue(item, out var s)) target = s;
-            if (target >= initialCount) continue;
-            int deduct = initialCount - target;
+            int current = initial.TryGetValue(item, out var c) ? c : 0;
+            int target = (saved is not null && saved.TryGetValue(item, out var s)) ? s : 0;
+            if (current == target) continue;
             var prize = PrizeForItem(item);
             if (prize is null) continue;
-            _game.GivePrize(player, (Prize)(-(short)prize.Value), (short)deduct);
+            int delta = target - current;
+            // Positive prize value adds; negative removes. SS Core's GivePrize takes a count
+            // separately from the prize id, but Continuum keys off the sign of the prize id.
+            short prizeId = delta > 0 ? (short)prize.Value : (short)(-(short)prize.Value);
+            _game.GivePrize(player, (Prize)prizeId, (short)Math.Abs(delta));
         }
     }
 
