@@ -56,63 +56,82 @@ public sealed class MatchmakingCommands
         _orchestrators = orchestrators ?? throw new ArgumentNullException(nameof(orchestrators));
     }
 
-    public void Register()
+    /// <summary>
+    /// Registers commands that should be reachable from any arena -- specifically the
+    /// queue-entry commands so a player in a generic/lobby arena can opt in without first
+    /// travelling to a match arena. Pair with <see cref="UnregisterGlobal"/>.
+    /// </summary>
+    public void RegisterGlobal()
     {
         // Naming notes:
         //   ?play  -- entry-point queue command; renamed from ?next to avoid the global
         //             collision with MatchmakingQueues.next.
-        //   ?party -- group invite command; renamed from ?group to avoid the global
-        //             collision with PlayerGroups.group.
-        //   ?accept and ?cancel -- short bare names retained. CaptainsMatch also registers
-        //             these per-arena, but ClashEngine matches run in their own configured
-        //             [ClashEngine] MatchArena, so the collision is harmless in practice.
         _commands.AddCommand("play", Next, helpText:
             "?play [comp|casual] <queue> -- Queue for the next ClashEngine match. \"comp\" is the default tier.");
         _commands.AddCommand("queue", Queue, helpText:
             "?queue [name] -- List all queues, or inspect a single queue's waiting players. " +
             "If <name> has no exact match, both <name>_competitive and <name>_casual are tried.");
-        _commands.AddCommand("rating", Rating, helpText:
-            "?rating -- Show your skill rating per game type.");
-        _commands.AddCommand("cancel", Cancel, helpText:
-            "?cancel -- Leave every ClashEngine matchmaking queue.");
-        _commands.AddCommand("return", Return, helpText:
-            "?return -- Rejoin the match you were specced from. Bypasses the per-match freq lock " +
-            "by placing you directly on your assigned ship and team freq.");
-        _commands.AddCommand("party", Group, helpText:
-            "?party -- List the members of your current party. " +
-            "?party player1[,player2,...] -- Invite one or more players to your ClashEngine group.");
-        _commands.AddCommand("accept", Accept, helpText:
-            "?accept [inviter] -- Accept a pending ClashEngine group invitation. Inviter is optional when only one is pending.");
-        _commands.AddCommand("decline", Decline, helpText:
-            "?decline [inviter] -- Decline a pending ClashEngine invitation.");
-        _commands.AddCommand("leaveparty", LeaveParty, helpText:
-            "?leaveparty -- Leave your current party. If you're the leader of a closed party, the party disbands.");
-        _commands.AddCommand("partymode", PartyMode, helpText:
-            "?partymode [open|closed] -- View or change your party's mode. Closed parties have a leader who controls invites.");
-        _commands.AddCommand("forgive", Veto, helpText:
-            "?forgive <player> -- Vote to overturn a pending griefing penalty for a match participant.");
-        _commands.AddCommand("clashlog", ClashLogCmd, helpText:
-            "?clashlog [off|normal|verbose|trace] -- Show or set ClashEngine debug verbosity. " +
-            "Affects only ClashEngine's verbose/trace logging; the host's global level still gates Info/Warn/Error.");
-        _commands.AddCommand("helpclash", HelpClash, helpText:
-            "?helpclash -- List ClashEngine player commands and what they do.");
     }
 
-    public void Unregister()
+    public void UnregisterGlobal()
     {
         _commands.RemoveCommand("play", Next);
         _commands.RemoveCommand("queue", Queue);
-        _commands.RemoveCommand("rating", Rating);
-        _commands.RemoveCommand("cancel", Cancel);
-        _commands.RemoveCommand("return", Return);
-        _commands.RemoveCommand("party", Group);
-        _commands.RemoveCommand("accept", Accept);
-        _commands.RemoveCommand("decline", Decline);
-        _commands.RemoveCommand("leaveparty", LeaveParty);
-        _commands.RemoveCommand("partymode", PartyMode);
-        _commands.RemoveCommand("forgive", Veto);
-        _commands.RemoveCommand("clashlog", ClashLogCmd);
-        _commands.RemoveCommand("helpclash", HelpClash);
+    }
+
+    /// <summary>
+    /// Registers commands that only make sense inside a ClashEngine match arena -- ?cancel,
+    /// ?return, party/group commands, ?forgive, etc. Called from
+    /// <see cref="ClashModule"/>'s <c>AttachModuleAsync</c>; the arena scope keeps these out
+    /// of the global ?man listing in arenas that haven't attached the module.
+    /// </summary>
+    public void RegisterArena(Arena arena)
+    {
+        // ?accept and ?cancel are short bare names that other modules (e.g. CaptainsMatch)
+        // may also register per-arena. Arena-scoping makes any collision arena-local rather
+        // than zone-wide.
+        // ?party -- group invite command; renamed from ?group to avoid the collision with
+        //          PlayerGroups.group when both modules end up in the same arena.
+        _commands.AddCommand("rating", Rating, arena, helpText:
+            "?rating -- Show your skill rating per game type.");
+        _commands.AddCommand("cancel", Cancel, arena, helpText:
+            "?cancel -- Leave every ClashEngine matchmaking queue.");
+        _commands.AddCommand("return", Return, arena, helpText:
+            "?return -- Rejoin the match you were specced from. Bypasses the per-match freq lock " +
+            "by placing you directly on your assigned ship and team freq.");
+        _commands.AddCommand("party", Group, arena, helpText:
+            "?party -- List the members of your current party. " +
+            "?party player1[,player2,...] -- Invite one or more players to your ClashEngine group.");
+        _commands.AddCommand("accept", Accept, arena, helpText:
+            "?accept [inviter] -- Accept a pending ClashEngine group invitation. Inviter is optional when only one is pending.");
+        _commands.AddCommand("decline", Decline, arena, helpText:
+            "?decline [inviter] -- Decline a pending ClashEngine invitation.");
+        _commands.AddCommand("leaveparty", LeaveParty, arena, helpText:
+            "?leaveparty -- Leave your current party. If you're the leader of a closed party, the party disbands.");
+        _commands.AddCommand("partymode", PartyMode, arena, helpText:
+            "?partymode [open|closed] -- View or change your party's mode. Closed parties have a leader who controls invites.");
+        _commands.AddCommand("forgive", Veto, arena, helpText:
+            "?forgive <player> -- Vote to overturn a pending griefing penalty for a match participant.");
+        _commands.AddCommand("clashlog", ClashLogCmd, arena, helpText:
+            "?clashlog [off|normal|verbose|trace] -- Show or set ClashEngine debug verbosity. " +
+            "Affects only ClashEngine's verbose/trace logging; the host's global level still gates Info/Warn/Error.");
+        _commands.AddCommand("helpclash", HelpClash, arena, helpText:
+            "?helpclash -- List ClashEngine player commands and what they do.");
+    }
+
+    public void UnregisterArena(Arena arena)
+    {
+        _commands.RemoveCommand("rating", Rating, arena);
+        _commands.RemoveCommand("cancel", Cancel, arena);
+        _commands.RemoveCommand("return", Return, arena);
+        _commands.RemoveCommand("party", Group, arena);
+        _commands.RemoveCommand("accept", Accept, arena);
+        _commands.RemoveCommand("decline", Decline, arena);
+        _commands.RemoveCommand("leaveparty", LeaveParty, arena);
+        _commands.RemoveCommand("partymode", PartyMode, arena);
+        _commands.RemoveCommand("forgive", Veto, arena);
+        _commands.RemoveCommand("clashlog", ClashLogCmd, arena);
+        _commands.RemoveCommand("helpclash", HelpClash, arena);
     }
 
     /// <summary>Records who issued what command, with the player's current eligibility state

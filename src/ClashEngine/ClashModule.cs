@@ -31,7 +31,7 @@ namespace ClashEngine;
     Skill-based matchmaking engine.
     Configuration: [ClashEngine] in global.conf and per-arena overrides.
     """)]
-public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
+public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncArenaAttachableModule
 {
     private const string LogCategory = nameof(ClashModule);
 
@@ -90,6 +90,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
     // construction order without a parallel pile of `_foo?.Unregister()` lines that have
     // to stay in sync with whatever was registered above.
     private readonly List<Action> _unregisterActions = new();
+
+    // Per-arena teardown actions, populated by AttachModuleAsync and drained by
+    // DetachModuleAsync. SS guarantees DetachModule fires for every attached arena before
+    // PreUnload, but PreUnloadAsync drains any leftovers as belt-and-braces.
+    private readonly Dictionary<Arena, List<Action>> _arenaUnregisterActions = new();
 
     public ClashModule(
         IComponentBroker broker,
@@ -297,13 +302,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
 
         var matchLookup = new ActiveMatchLookup(broker, _engine, _matchStats, _resolver);
 
+        // ChartCommand and ItemsCommand are arena-scoped (see AttachModuleAsync); they're
+        // constructed here so DI/state is available, but the per-arena AddCommand calls
+        // happen at attach time.
         _chartCommand = new ChartCommand(_engine, matchLookup, _commands, _chat);
-        _chartCommand.Register();
-        _unregisterActions.Add(_chartCommand.Unregister);
-
         _itemsCommand = new ItemsCommand(matchLookup, _commands, _chat);
-        _itemsCommand.Register();
-        _unregisterActions.Add(_itemsCommand.Unregister);
 
         // Periodic distance-to-nearest-enemy sampling. Default 5 Hz; 0 disables.
         int distanceHz = _config.GetInt(_config.Global, "ClashEngine", "DistanceSampleHz", 5);
@@ -389,9 +392,12 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
             await _persist.RegisterPersistentDataAsync(_penaltiesRegistration);
         }
 
+        // Only ?play and ?queue are zone-wide so a player can opt into matchmaking from any
+        // arena (lobby, public, etc.). The remaining 11 matchmaking commands register
+        // per-arena in AttachModuleAsync.
         _commandHandlers = new MatchmakingCommands(_engine, _commands, _chat, _clock, _resolver, _config, _clashLog, _orchestrators);
-        _commandHandlers.Register();
-        _unregisterActions.Add(_commandHandlers.Unregister);
+        _commandHandlers.RegisterGlobal();
+        _unregisterActions.Add(_commandHandlers.UnregisterGlobal);
 
         MatchmakingConfig.ApplyTo(_engine, _config, _clashLog);
 
@@ -404,6 +410,19 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
     async Task IAsyncModuleLoaderAware.PreUnloadAsync(IComponentBroker broker, CancellationToken cancellationToken)
     {
         _mainloopTimer.ClearTimer(OnTick, key: this);
+
+        // Belt-and-braces: SS guarantees DetachModule fires for every attached arena before
+        // PreUnload, so this dictionary should be empty here. Drain anything that slipped
+        // through so we don't leak per-arena command bindings on reload.
+        foreach (var (arena, actions) in _arenaUnregisterActions)
+        {
+            for (int i = actions.Count - 1; i >= 0; i--)
+            {
+                try { actions[i](); }
+                catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"Arena {arena.Name} detach-on-unload failed: {ex}"); }
+            }
+        }
+        _arenaUnregisterActions.Clear();
 
         // Tear down in reverse-construction order. Each action is wrapped so a single
         // misbehaving Unregister can't strand the rest -- the broker would still hold the
@@ -424,6 +443,54 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         }
         _ratingsRegistration = null;
         _penaltiesRegistration = null;
+    }
+
+    Task<bool> IAsyncArenaAttachableModule.AttachModuleAsync(Arena arena, CancellationToken cancellationToken)
+    {
+        // Per-arena command registration. Construction of the command handlers happened in
+        // PostLoadAsync; here we just bind their AddCommand calls to this specific arena so
+        // they appear in ?man's Arena: section and only resolve for players in `arena`.
+        var actions = new List<Action>();
+        try
+        {
+            _chartCommand!.RegisterArena(arena);
+            actions.Add(() => _chartCommand!.UnregisterArena(arena));
+
+            _itemsCommand!.RegisterArena(arena);
+            actions.Add(() => _itemsCommand!.UnregisterArena(arena));
+
+            _commandHandlers!.RegisterArena(arena);
+            actions.Add(() => _commandHandlers!.UnregisterArena(arena));
+        }
+        catch (Exception ex)
+        {
+            _log.LogM(LogLevel.Error, LogCategory, $"AttachModule({arena.Name}) failed: {ex}");
+            // Roll back any partial registrations so a failed attach doesn't leak a half-
+            // wired arena into the command manager.
+            for (int i = actions.Count - 1; i >= 0; i--)
+            {
+                try { actions[i](); } catch { /* swallow -- already in failure path */ }
+            }
+            return Task.FromResult(false);
+        }
+
+        _arenaUnregisterActions[arena] = actions;
+        return Task.FromResult(true);
+    }
+
+    Task<bool> IAsyncArenaAttachableModule.DetachModuleAsync(Arena arena, CancellationToken cancellationToken)
+    {
+        if (!_arenaUnregisterActions.Remove(arena, out var actions))
+            return Task.FromResult(true);
+
+        // LIFO drain matching PreUnloadAsync's pattern: a single failing Unregister can't
+        // strand the rest, since the broker still holds the unraveled bindings.
+        for (int i = actions.Count - 1; i >= 0; i--)
+        {
+            try { actions[i](); }
+            catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"DetachModule({arena.Name}) action failed: {ex}"); }
+        }
+        return Task.FromResult(true);
     }
 
     Task<bool> IAsyncModule.UnloadAsync(IComponentBroker broker, CancellationToken cancellationToken)

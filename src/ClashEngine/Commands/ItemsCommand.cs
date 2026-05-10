@@ -22,15 +22,15 @@ public sealed class ItemsCommand
         _chat = chat ?? throw new ArgumentNullException(nameof(chat));
     }
 
-    public void Register()
+    public void RegisterArena(Arena arena)
     {
-        _commands.AddCommand("items", Run, helpText:
+        _commands.AddCommand("items", Run, arena, helpText:
             "?items -- Show each still-alive player's Repels/Rockets, grouped by team. Your own counts are omitted.");
     }
 
-    public void Unregister()
+    public void UnregisterArena(Arena arena)
     {
-        _commands.RemoveCommand("items", Run);
+        _commands.RemoveCommand("items", Run, arena);
     }
 
     private void Run(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)

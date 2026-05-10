@@ -35,15 +35,15 @@ public sealed class ChartCommand
         _chat = chat ?? throw new ArgumentNullException(nameof(chat));
     }
 
-    public void Register()
+    public void RegisterArena(Arena arena)
     {
-        _commands.AddCommand("chart", Run, helpText:
+        _commands.AddCommand("chart", Run, arena, helpText:
             "?chart -- Show the live scoreboard for your match (or the match you're spectating in this arena).");
     }
 
-    public void Unregister()
+    public void UnregisterArena(Arena arena)
     {
-        _commands.RemoveCommand("chart", Run);
+        _commands.RemoveCommand("chart", Run, arena);
     }
 
     private void Run(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
