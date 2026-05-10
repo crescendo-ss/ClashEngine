@@ -29,11 +29,12 @@ namespace ClashEngine.Adapter;
 /// to swap ships before being re-locked to whatever ship they're currently in. Knockouts (last
 /// life) don't open a window -- the orchestrator's deferred spec handles that path.</para>
 ///
-/// <para><b>Staging window.</b> From <see cref="OnMatchProposed"/> until the staging duration
-/// expires, ship changes are unrestricted -- the advisor opens the same grace window it uses
-/// post-death so participants can pick their loadout while waiting on the readiness check.
-/// Free reloads aren't a concern pre-GO because no fighting has started yet. Once staging
-/// ends, the per-life lock kicks in (Countdown phase enforces lock-to-current-ship).</para>
+/// <para><b>Pre-match window.</b> From <see cref="OnMatchProposed"/> through staging and most of
+/// the countdown, ship changes are unrestricted -- the advisor opens the same grace window it
+/// uses post-death so participants can pick their loadout. The lock kicks in
+/// <see cref="ShipLockBeforeStart"/> before GO so the final seconds are committed; the
+/// orchestrator broadcasts a "Locked you to your current ship" notice at that moment. Free
+/// reloads aren't a concern pre-GO because no fighting has started yet.</para>
 ///
 /// <para><b>Freq lock.</b> Match participants can only change to their assigned freq
 /// (effectively a no-op). Going to spec is always permitted by SS Core's FreqManager (it short
@@ -47,6 +48,13 @@ namespace ClashEngine.Adapter;
 public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmakingTelemetry
 {
     private const string LogCategory = nameof(MatchFreqAdvisor);
+
+    /// <summary>How long before GO the per-life ship lock takes effect. Players can change
+    /// ships during staging and the early portion of the countdown; once countdown drops to
+    /// this many seconds the advisor re-locks them. Shared with
+    /// <see cref="ClashEngine.Orchestration.MatchOrchestrator"/> so the orchestrator's
+    /// per-second tick can fire the matching player notice at the same instant.</summary>
+    public static readonly TimeSpan ShipLockBeforeStart = TimeSpan.FromSeconds(5);
 
     private readonly IComponentBroker _broker;
     private readonly MatchmakingEngine _engine;
@@ -146,28 +154,31 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         if (matchId == Guid.Empty) return;
 
         // Populate locks at proposal time (not at OnMatchStarted) so freq enforcement is in
-        // effect during Setup/Staging/Countdown, with ShipChangeAllowedUntil set to the
-        // staging deadline -- this lets participants change ships freely while waiting on the
-        // readiness check, then re-locks them for Countdown and Live. Listener order in
-        // CompositeTelemetry guarantees MatchOrchestratorRegistry has already run BeginSetup
-        // (allocating the freq base) by the time this listener fires.
-        var stagingEnd = _clock.UtcNow + queueDef.StagingDuration;
+        // effect during Setup/Staging/Countdown, with ShipChangeAllowedUntil extended through
+        // staging and most of the countdown -- the lock only kicks in ShipLockBeforeStart before
+        // GO. Listener order in CompositeTelemetry guarantees MatchOrchestratorRegistry has
+        // already run BeginSetup (allocating the freq base) by the time this listener fires.
+        var lockOffset = queueDef.StagingDuration + queueDef.CountdownDuration - ShipLockBeforeStart;
+        // QueueDefinition validates CountdownDuration >= 5s so this is non-negative in practice;
+        // clamp defensively for any future relaxation of that bound.
+        if (lockOffset < queueDef.StagingDuration) lockOffset = queueDef.StagingDuration;
+        var shipChangeUntil = _clock.UtcNow + lockOffset;
         for (int t = 0; t < proposal.Teams.Count; t++)
         {
             short freq = _freqAllocator?.FreqOf(matchId, t) ?? QueueDefinition.FreqOf(t);
             for (int j = 0; j < proposal.Teams[t].Count; j++)
             {
                 var key = proposal.Teams[t][j];
-                _byPlayer[key] = new LockState(freq, queueDef.ShipChangeGracePeriod, stagingEnd);
+                _byPlayer[key] = new LockState(freq, queueDef.ShipChangeGracePeriod, shipChangeUntil);
             }
         }
     }
 
     public void OnMatchStarted(ActiveMatch match)
     {
-        // Locks were populated at OnMatchProposed; by GO the staging-window
-        // ShipChangeAllowedUntil has already passed so the per-life lock is in effect. Nothing
-        // to refresh here.
+        // Locks were populated at OnMatchProposed; by GO the pre-match
+        // ShipChangeAllowedUntil has already passed (it expires ShipLockBeforeStart before GO),
+        // so the per-life lock is in effect. Nothing to refresh here.
     }
 
     public void OnMatchEnded(MatchOutcome outcome)

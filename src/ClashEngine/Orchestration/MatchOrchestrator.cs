@@ -208,7 +208,7 @@ public sealed class MatchOrchestrator
         // Spectators get a plain arena broadcast since they don't need the call-to-action.
         var notice =
             $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. " +
-            "Change ships freely until the countdown starts. Spec to abandon.";
+            "Change ships freely until just before the match starts. Spec to abandon.";
         SendDmToParticipants(notice);
         BroadcastToSpectators(notice);
     }
@@ -565,6 +565,13 @@ public sealed class MatchOrchestrator
             BroadcastToAll(_countdownSecondsRemaining > 10
                 ? $"All set! Starting in {_countdownSecondsRemaining} seconds!"
                 : "All set!");
+
+            // If CountdownDuration is short enough that the advisor's ShipChangeAllowedUntil
+            // already expired at staging-end, the lock is in effect right now. Fire the notice
+            // immediately so players see the lock cue alongside "All set!". For longer countdowns
+            // the matching tick in OnCountdownTick fires it.
+            if (_queue.CountdownDuration <= MatchFreqAdvisor.ShipLockBeforeStart)
+                SendDmToParticipants("Locked you to your current ship.");
         }
         catch (Exception ex)
         {
@@ -697,6 +704,11 @@ public sealed class MatchOrchestrator
             _countdownSecondsRemaining--;
             if (_countdownSecondsRemaining > 0)
             {
+                // Lock cue fires the instant the advisor's ShipChangeAllowedUntil expires --
+                // ShipLockBeforeStart seconds before GO. Stays in sync with MatchFreqAdvisor's
+                // OnMatchProposed lockOffset arithmetic.
+                if (_countdownSecondsRemaining == (int)MatchFreqAdvisor.ShipLockBeforeStart.TotalSeconds)
+                    SendDmToParticipants("Locked you to your current ship.");
                 // Only the last 3 ticks are announced -- earlier ticks would clutter chat for
                 // longer countdowns where the up-front "Starting in N seconds!" already covered it.
                 if (_countdownSecondsRemaining <= 3)
@@ -709,19 +721,6 @@ public sealed class MatchOrchestrator
             // "Live" as gameplay-live, so no Live-only state (kill processing, team-collapse, etc.)
             // can fire pre-GO even if a ship-lock expires early.
             _engine.MarkMatchLive(_matchId, _clock.UtcNow);
-            // Final re-warp to the chosen spawn at GO. This (a) snaps any drift-clamped player
-            // back to the exact spawn coord, and (b) ensures the whole team starts the match
-            // co-located even if the drift check missed a sub-threshold wander.
-            for (int t = 0; t < _proposal.Teams.Count; t++)
-            {
-                var spawn = _drift.ChosenSpawn(t);
-                if (spawn.X == 0 && spawn.Y == 0) continue;   // no spawn configured
-                for (int j = 0; j < _proposal.Teams[t].Count; j++)
-                {
-                    if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
-                        _game.WarpTo(p, spawn.X, spawn.Y);
-                }
-            }
             // The "GO!" announcement reaches participants and focused spectators alike.
             // Mirror upstream TeamVersusMatch's start cue: the message carries a Ding so players
             // get an audible "match has started" beat in addition to the chat line.
