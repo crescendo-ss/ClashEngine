@@ -202,9 +202,15 @@ public sealed class MatchOrchestrator
         // One-shot timer: SS mainloop rejects interval=0 (must be > 0 or Timeout.Infinite).
         _timer.SetTimer(OnStagingEnd, (int)_queue.StagingDuration.TotalMilliseconds, Timeout.Infinite, this);
 
-        BroadcastToAll(
+        // Mirror SS.Matchmaking.TeamVersusMatch: DM the "you've been placed" notice to each
+        // participant as a private message FROM THEMSELVES so it lands in their personal chat
+        // window (Continuum renders it as "(theirname)>...") and is visually impossible to miss.
+        // Spectators get a plain arena broadcast since they don't need the call-to-action.
+        var notice =
             $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. " +
-            "Change ships freely until the countdown starts. Spec to abandon.");
+            "Change ships freely until the countdown starts. Spec to abandon.";
+        SendDmToParticipants(notice);
+        BroadcastToSpectators(notice);
     }
 
     /// <summary>
@@ -740,6 +746,34 @@ public sealed class MatchOrchestrator
             return;
         }
         _audience.Broadcast(_matchId, _queue.MatchArenaName, participants, message, sound);
+    }
+
+    /// <summary>
+    /// DM <paramref name="message"/> to each resolvable participant as a Private chat type with
+    /// the player as both recipient and sender, mirroring SS.Matchmaking.TeamVersusMatch's
+    /// "match found" pattern. Continuum renders this as "(theirname)>message" in the player's
+    /// own chat window, which is impossible to miss compared to a green arena message.
+    /// </summary>
+    private void SendDmToParticipants(string message)
+    {
+        var set = new HashSet<Player>();
+        foreach (var p in ResolveParticipants())
+        {
+            set.Clear();
+            set.Add(p);
+            _chat.SendAnyMessage(set, ChatMessageType.Private, ChatSound.None, p, message);
+        }
+    }
+
+    /// <summary>
+    /// Send <paramref name="message"/> to focused spectators only, suppressing delivery to
+    /// participants. Used when participants get a different (DM-style) version of the same
+    /// information so they don't see it twice. No-op if the audience helper isn't wired.
+    /// </summary>
+    private void BroadcastToSpectators(string message)
+    {
+        if (_audience is null) return;
+        _audience.Broadcast(_matchId, _queue.MatchArenaName, Array.Empty<Player>(), message);
     }
 
     private List<Player> ResolveParticipants()
