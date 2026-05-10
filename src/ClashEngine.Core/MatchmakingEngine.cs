@@ -396,9 +396,46 @@ public sealed class MatchmakingEngine
         if (!_matches.TryGetValue(matchId, out var match)) return false;
         if (match.State != MatchState.Forming) return false;
 
+        // Snapshot the queue and the readied (= rostered minus AFK) set before FinalizeMatch
+        // tears down _matchQueue and clears _matchOf. We re-enqueue these players AFTER
+        // finalization so the eligibility check sees them as no-longer-in-match.
+        var queueDef = _matchQueue.TryGetValue(matchId, out var qd) ? qd : null;
+        var afkSet = new HashSet<PlayerKey>(afkPlayers);
+        var readied = new List<PlayerKey>();
+        for (int t = 0; t < match.Teams.Count; t++)
+            for (int j = 0; j < match.Teams[t].Count; j++)
+            {
+                var p = match.Teams[t][j];
+                if (!afkSet.Contains(p)) readied.Add(p);
+            }
+
         match.CancelAsAfk(afkPlayers, at);
         FinalizeMatch(match, at);
+
+        if (queueDef is not null)
+            ReQueueReadiedAtFront(queueDef, readied, at);
+
         return true;
+    }
+
+    /// <summary>
+    /// Auto-re-enqueue players who readied during a match that was cancelled because of AFK
+    /// participants. Mirrors <see cref="ApplyKothReenqueue"/>'s pattern: priority insertion
+    /// at the head of the queue, group affiliation preserved via <see cref="GroupRegistry.GroupOf"/>,
+    /// and a standard <see cref="IMatchmakingTelemetry.OnQueueAdded"/> per re-add. Skips
+    /// players who became ineligible (rare -- e.g. a stale penalty that outlived the match).
+    /// </summary>
+    private void ReQueueReadiedAtFront(QueueDefinition queue, IReadOnlyList<PlayerKey> readied, DateTimeOffset at)
+    {
+        for (int i = 0; i < readied.Count; i++)
+        {
+            var p = readied[i];
+            if (CheckEligibility(p).Status != EligibilityStatus.Available) continue;
+            var rating = _ratings.Get(p, queue.GameType);
+            var groupId = _groups.GroupOf(p);
+            if (_matcher.EnqueuePriority(p, rating, queue.Name, groupId))
+                _telemetry.OnQueueAdded(p, queue.Name, at);
+        }
     }
 
     /// <summary>Removes a player from <paramref name="queueName"/> if they were enqueued.</summary>

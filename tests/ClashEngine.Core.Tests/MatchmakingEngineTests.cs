@@ -1,5 +1,6 @@
 using ClashEngine.Core;
 using ClashEngine.Core.Eligibility;
+using ClashEngine.Core.Groups;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
@@ -355,6 +356,89 @@ public class MatchmakingEngineTests
         foreach (var n in new[] { "A", "B", "C" })
             Assert.Equal(EligibilityStatus.Available, h.Engine.CheckEligibility(K(n)).Status);
         Assert.Equal(EligibilityStatus.InTimeout, h.Engine.CheckEligibility(K("D")).Status);
+
+        // Readied players auto-re-enqueue at the front; AFK player is NOT re-added.
+        h.Engine.Queues.TryGet("2v2", out var def);
+        var snapshot = def!.Queue.Snapshot();
+        Assert.Equal(3, snapshot.Count);
+        Assert.Contains(K("A"), new[] { snapshot[0].Player, snapshot[1].Player, snapshot[2].Player });
+        Assert.Contains(K("B"), new[] { snapshot[0].Player, snapshot[1].Player, snapshot[2].Player });
+        Assert.Contains(K("C"), new[] { snapshot[0].Player, snapshot[1].Player, snapshot[2].Player });
+        Assert.False(def.Queue.Contains(K("D")));
+
+        // Each readied player gets an OnQueueAdded telemetry on top of the original three.
+        Assert.Equal(7, h.Telemetry.QueueAdds.Count);
+        Assert.All(h.Telemetry.QueueAdds.TakeLast(3), e => Assert.Equal("2v2", e.Queue));
+    }
+
+    [Fact]
+    public void CancelMatchAsAfk_re_enqueues_readied_party_at_front_with_group_preserved()
+    {
+        // A registered party (A, B) + solo C and D form a 2v2. D goes AFK; the cancel should
+        // put A, B, C back in the queue with A and B still sharing the original GroupId so
+        // the matcher keeps trying to seat them on the same team. (Mirrors KOTH winner re-
+        // enqueue: GroupId is read from GroupRegistry.GroupOf, which is populated by the
+        // Invite/Accept flow that real `?party` -> `?play` uses.)
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        Assert.Equal(InviteResult.Sent, h.Engine.InviteToGroup(K("A"), K("B"), T0));
+        Assert.Equal(AcceptResult.Joined, h.Engine.AcceptInvite(K("B"), K("A"), T0, out var partyId));
+        Assert.Equal(EnqueueResult.Ok,
+            h.Engine.TryEnqueueGroup(new[] { K("A"), K("B") }, "2v2", T0, out _, existingGroup: partyId));
+        h.Enqueue("C");
+        h.Enqueue("D");
+        h.Engine.Tick(T0);
+
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.True(h.Engine.CancelMatchAsAfk(matchId, new[] { K("D") }, h.Clock.UtcNow));
+
+        h.Engine.Queues.TryGet("2v2", out var def);
+        var snapshot = def!.Queue.Snapshot();
+        Assert.Equal(3, snapshot.Count);
+        var aEntry = snapshot.Single(e => e.Player == K("A"));
+        var bEntry = snapshot.Single(e => e.Player == K("B"));
+        var cEntry = snapshot.Single(e => e.Player == K("C"));
+        Assert.Equal(partyId, aEntry.Group);
+        Assert.Equal(partyId, bEntry.Group);
+        Assert.Null(cEntry.Group);
+    }
+
+    [Fact]
+    public void CancelMatchAsAfk_skips_readied_player_who_is_in_a_pending_timeout()
+    {
+        // Defensive: if a readied player picks up a penalty between match-form and AFK-cancel
+        // (an extreme edge but cheap to guard), they're skipped on the auto-re-enqueue and no
+        // OnQueueAdded fires for them.
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+
+        // Apply a penalty to one of the readied players so CheckEligibility flips to InTimeout.
+        h.Engine.Penalties.RecordPenalty(K("A"), PenaltyKind.Abandonment, h.Clock.UtcNow);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        int queueAddsBefore = h.Telemetry.QueueAdds.Count;
+        Assert.True(h.Engine.CancelMatchAsAfk(matchId, new[] { K("D") }, h.Clock.UtcNow));
+
+        h.Engine.Queues.TryGet("2v2", out var def);
+        Assert.False(def!.Queue.Contains(K("A")));   // skipped due to timeout
+        Assert.True(def.Queue.Contains(K("B")));
+        Assert.True(def.Queue.Contains(K("C")));
+        Assert.False(def.Queue.Contains(K("D")));
+
+        // Two re-enqueue events fired (B and C); the ineligible A was silently skipped.
+        Assert.Equal(2, h.Telemetry.QueueAdds.Count - queueAddsBefore);
     }
 
     [Fact]

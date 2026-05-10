@@ -524,7 +524,9 @@ public sealed class MatchOrchestrator
                         if (afk.Contains(k)) continue;
                         if (_resolver.Resolve(k) is { } p) notAfkParticipants.Add(p);
                     }
-                string cancelMessage = $"Match cancelled. {afkNames} did not ready.";
+                string cancelMessage =
+                    $"Match cancelled. {afkNames} did not ready. " +
+                    "You've been moved to the front of the queue.";
                 if (_audience is not null)
                     _audience.Broadcast(_matchId, _queue.MatchArenaName, notAfkParticipants, cancelMessage);
                 else
