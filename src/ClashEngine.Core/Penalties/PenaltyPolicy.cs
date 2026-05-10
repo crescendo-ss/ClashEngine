@@ -51,10 +51,25 @@ public sealed class PenaltyPolicy
     public static PenaltyPolicy DefaultStagingAfk { get; } =
         new(PenaltyKind.StagingAfk, TimeSpan.FromMinutes(1), 2.0, TimeSpan.FromHours(24));
 
+    /// <summary>
+    /// Hard ceiling on a single computed timeout. Anything beyond this is effectively a
+    /// permanent ban for the session, but the bounded value keeps downstream
+    /// <c>DateTimeOffset</c> arithmetic from overflowing in <see cref="PenaltyTracker"/>.
+    /// Picked at ~10 years so it's "forever" for any actual queue use but well clear of
+    /// <see cref="DateTimeOffset.MaxValue"/>.
+    /// </summary>
+    private static readonly TimeSpan MaxComputableTimeout = TimeSpan.FromDays(365 * 10);
+
     public TimeSpan TimeoutForOffense(int offenseCount)
     {
         if (offenseCount < 1) throw new ArgumentOutOfRangeException(nameof(offenseCount));
         double seconds = BaseTimeout.TotalSeconds * Math.Pow(EscalationFactor, offenseCount - 1);
+        // BaseTimeout * EscalationFactor^N grows unbounded; with the default 10-minute / 2x
+        // ladder, the 42nd offense already exceeds TimeSpan.FromSeconds's range. Clamp instead
+        // of throwing so a player with a long penalty history can still have ?play / status
+        // queries answered. Also covers NaN (bad config) by treating it as "max".
+        if (double.IsNaN(seconds) || seconds >= MaxComputableTimeout.TotalSeconds)
+            return MaxComputableTimeout;
         return TimeSpan.FromSeconds(seconds);
     }
 }
