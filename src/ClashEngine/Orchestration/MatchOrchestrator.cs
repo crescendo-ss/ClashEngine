@@ -585,31 +585,27 @@ public sealed class MatchOrchestrator
         // returning the participants to spec so watchers learn the outcome too.
         BroadcastToAll(summary);
 
-        // Mirror CaptainsMatch.EndMatch: send participants to the arena spec freq, not just
-        // ShipType.Spec. SetShip(Spec) alone leaves them stranded on the (private) team freq,
-        // which the FreqManager then refuses to let them ship up off of -- they'd have to ?go
-        // to escape. Includes the "already in spec but on team freq" case (e.g. knocked-out
-        // players the orchestrator already specced) so they migrate too.
+        // Mirror CaptainsMatch.EndMatch: send participants still in the match arena to the
+        // arena spec freq, not just ShipType.Spec. SetShip(Spec) alone leaves them stranded on
+        // the (private) team freq, which the FreqManager then refuses to let them ship up off
+        // of -- they'd have to ?go to escape. Includes the "already in spec but on team freq"
+        // case (e.g. knocked-out players the orchestrator already specced) so they migrate too.
+        // Participants who have wandered to a different arena are left alone -- whatever they're
+        // doing there is no longer this match's business.
         var arena = string.IsNullOrEmpty(_queue.MatchArenaName)
             ? null
             : _arenaManager.FindArena(_queue.MatchArenaName);
+        if (arena is null) return;
+
+        short specFreq = arena.SpecFreq;
         for (int t = 0; t < _proposal.Teams.Count; t++)
         {
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
                 if (_resolver.Resolve(_proposal.Teams[t][j]) is not { } p) continue;
-                if (arena is not null && p.Arena == arena)
-                {
-                    short specFreq = arena.SpecFreq;
-                    if (p.Ship != ShipType.Spec || p.Freq != specFreq)
-                        _game.SetShipAndFreq(p, ShipType.Spec, specFreq);
-                }
-                else if (p.Ship != ShipType.Spec)
-                {
-                    // No match arena (or player is somewhere else) -- best we can do is spec
-                    // them in place; their current arena's spec freq isn't ours to assume.
-                    _game.SetShip(p, ShipType.Spec);
-                }
+                if (p.Arena != arena) continue;
+                if (p.Ship != ShipType.Spec || p.Freq != specFreq)
+                    _game.SetShipAndFreq(p, ShipType.Spec, specFreq);
             }
         }
     }
