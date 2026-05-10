@@ -57,6 +57,15 @@ public sealed class StatsListener
     private readonly Dictionary<Guid, List<DeferredKill>> _pendingKills = new();
     private TimerDelegate<DeferredKill>? _onDeferredKillFinalize;
 
+    /// <summary>
+    /// Drops duplicate position-packet weapon events. Continuum / the SS network layer can
+    /// redeliver the same position packet, and without a wire-boundary dedup every redelivery
+    /// would double-count the weapon event it carried -- inflating per-weapon FireCount, item
+    /// press counters, and forced-repel credit. Mirrors the TrimWeaponUseLog / AddWeaponUse
+    /// pattern in <c>SS.Matchmaking.TeamVersusStats</c>.
+    /// </summary>
+    private readonly WeaponUseDedup _weaponUseDedup = new();
+
     private PlayerDamageCallback.PlayerDamageDelegate? _onDamage;
     private PlayerPositionPacketCallback.PlayerPositionPacketDelegate? _onPosition;
     private SpawnCallback.SpawnDelegate? _onSpawn;
@@ -123,6 +132,7 @@ public sealed class StatsListener
         _onSpawn = null;
         _onGreen = null;
         _onDeferredKillFinalize = null;
+        _weaponUseDedup.Clear();
         _registered = false;
     }
 
@@ -182,6 +192,10 @@ public sealed class StatsListener
         }
 
         if (packet.Weapon.Type == WeaponCodes.Null) return;
+
+        // Drop redelivered position packets at the wire boundary so a single weapon press
+        // can't double-count downstream (FR credit, weapon FireCount, item press counters).
+        if (!_weaponUseDedup.Observe(pkey, (byte)packet.Weapon.Type, tick)) return;
 
         var ev = WeaponMapping.FromPositionPacket(packet.Weapon);
         if (ev.IsNone) return;
