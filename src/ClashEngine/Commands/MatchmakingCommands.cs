@@ -839,6 +839,7 @@ public sealed class MatchmakingCommands
             ("?return",                      "Rejoin the match you were specced from."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
+            ("?chart",                       "Show the live scoreboard for your match (or one you're spectating)."),
             ("?party",                       "List your current party's members (leader marked if closed)."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),
             ("?accept [inviter]",            "Accept a pending party invitation."),

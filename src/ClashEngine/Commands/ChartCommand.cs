@@ -12,18 +12,18 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Commands;
 
 /// <summary>
-/// Implements the <c>?stats</c> command: prints the same scoreboard that's broadcast at match
+/// Implements the <c>?chart</c> command: prints the same scoreboard that's broadcast at match
 /// end, but for the in-progress match the requester is associated with. See
 /// <see cref="ActiveMatchLookup"/> for the participant-vs-spectator resolution rules.
 /// </summary>
-public sealed class StatsCommand
+public sealed class ChartCommand
 {
     private readonly MatchmakingEngine _engine;
     private readonly ActiveMatchLookup _lookup;
     private readonly ICommandManager _commands;
     private readonly IChat _chat;
 
-    public StatsCommand(
+    public ChartCommand(
         MatchmakingEngine engine,
         ActiveMatchLookup lookup,
         ICommandManager commands,
@@ -37,13 +37,13 @@ public sealed class StatsCommand
 
     public void Register()
     {
-        _commands.AddCommand("stats", Run, helpText:
-            "?stats -- Show the live scoreboard for your match (or the match you're spectating in this arena).");
+        _commands.AddCommand("chart", Run, helpText:
+            "?chart -- Show the live scoreboard for your match (or the match you're spectating in this arena).");
     }
 
     public void Unregister()
     {
-        _commands.RemoveCommand("stats", Run);
+        _commands.RemoveCommand("chart", Run);
     }
 
     private void Run(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)

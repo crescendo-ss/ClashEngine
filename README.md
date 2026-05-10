@@ -107,9 +107,10 @@ cmd_accept
 cmd_decline
 cmd_forgive
 cmd_helpclash
+cmd_chart
 ```
 
-`?stats` and `?clashlog` are reserved for higher-privileged groups by default; grant them where appropriate.
+`?clashlog` is reserved for higher-privileged groups by default; grant it where appropriate.
 
 ---
 
@@ -295,7 +296,7 @@ When a match ends, ClashEngine builds a `MatchPayload` (schema in `schema/match.
 
 If `UploadUrl` + `UploadApiKey` are configured, the payload + replay file are POSTed as `multipart/form-data`. Otherwise the payload is written to disk under `<AppContext.BaseDirectory>/matches/{matchId}.json` for batch upload by another process.
 
-The same payload structure is used to render the in-game scoreboard at match end and the on-demand `?stats` table for spectators (resolved through `IMatchFocus`).
+The same payload structure is used to render the in-game scoreboard at match end and the on-demand `?chart` table for spectators (resolved through `IMatchFocus`).
 
 ---
 
@@ -313,7 +314,7 @@ The same payload structure is used to render the in-game scoreboard at match end
 | `?leaveparty` | player | Leave your current party. If you're the leader of a closed party, the party disbands. |
 | `?partymode [open\|closed]` | player | View or change your party's mode. Closed parties have a leader who controls invites. |
 | `?rating` | player | Show your skill rating per game type. |
-| `?stats` | player | Show the live scoreboard for the match you're in or spectating. |
+| `?chart` | player | Show the live scoreboard for the match you're in or spectating. |
 | `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
 | `?helpclash` | player | List the player commands. |
 | `?clashlog [off\|normal\|verbose\|trace]` | mod | Read or set ClashEngine debug verbosity at runtime. |

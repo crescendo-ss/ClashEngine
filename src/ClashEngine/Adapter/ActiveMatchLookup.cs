@@ -13,7 +13,7 @@ namespace ClashEngine.Adapter;
 
 /// <summary>
 /// Resolves "the ClashEngine match this requester is associated with" for player-initiated
-/// commands like <c>?stats</c> and <c>?items</c>. Resolution order:
+/// commands like <c>?chart</c> and <c>?items</c>. Resolution order:
 /// (1) requester is participating -> their match;
 /// (2) requester is in spec -> the match they're focused on (via <see cref="IMatchFocus"/>);
 /// (3) requester is in spec -> any active match with at least one participant in their arena.

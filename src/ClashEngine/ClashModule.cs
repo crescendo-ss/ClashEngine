@@ -71,7 +71,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
     private MatchStatsRegistry? _matchStats;
     private ClashStatsTelemetry? _matchStatsTelemetry;
     private StatsListener? _statsListener;
-    private StatsCommand? _statsCommand;
+    private ChartCommand? _chartCommand;
     private ItemsCommand? _itemsCommand;
     private DistanceSampler? _distanceSampler;
     private MatchLvzAdapter? _lvzAdapter;
@@ -297,9 +297,9 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
 
         var matchLookup = new ActiveMatchLookup(broker, _engine, _matchStats, _resolver);
 
-        _statsCommand = new StatsCommand(_engine, matchLookup, _commands, _chat);
-        _statsCommand.Register();
-        _unregisterActions.Add(_statsCommand.Unregister);
+        _chartCommand = new ChartCommand(_engine, matchLookup, _commands, _chat);
+        _chartCommand.Register();
+        _unregisterActions.Add(_chartCommand.Unregister);
 
         _itemsCommand = new ItemsCommand(matchLookup, _commands, _chat);
         _itemsCommand.Register();
@@ -457,7 +457,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware
         _matchStats = null;
         _matchStatsTelemetry = null;
         _statsListener = null;
-        _statsCommand = null;
+        _chartCommand = null;
         _itemsCommand = null;
         _distanceSampler = null;
         _lvzAdapter = null;

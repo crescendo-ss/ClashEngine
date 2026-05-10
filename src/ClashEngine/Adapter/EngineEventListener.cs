@@ -157,7 +157,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     {
         if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"QueueRemoved: {player.Name} <- {queueName}");
         if (_resolver.Resolve(player) is { } p)
-            _chat.SendMessage(p, $"Left {queueName} queue.");
+            _chat.SendMessage(p, $"Left {FormatQueueDescriptor(queueName)} queue.");
     }
 
     public void OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,

@@ -575,7 +575,9 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>Match has ended -- unlock and return players to spec.</summary>
-    public void Cleanup(string summary)
+    /// <param name="summary">Match-end announcement. Pass null when the caller has already
+    /// broadcast a tailored line (e.g. AFK cancellation) so we don't double-message.</param>
+    public void Cleanup(string? summary)
     {
         SetPhase(MatchPhase.Cleanup);
         _timer.ClearTimer(OnStagingEnd, this);
@@ -591,7 +593,8 @@ public sealed class MatchOrchestrator
 
         // Broadcast the summary to everyone (participants + focused spectators) before
         // returning the participants to spec so watchers learn the outcome too.
-        BroadcastToAll(summary);
+        if (!string.IsNullOrEmpty(summary))
+            BroadcastToAll(summary);
 
         // Mirror CaptainsMatch.EndMatch: send participants still in the match arena to the
         // arena spec freq, not just ShipType.Spec. SetShip(Spec) alone leaves them stranded on
