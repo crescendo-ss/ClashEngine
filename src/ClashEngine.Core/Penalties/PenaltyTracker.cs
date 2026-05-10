@@ -159,6 +159,52 @@ public sealed class PenaltyTracker
         }
     }
 
+    /// <summary>
+    /// Atomically replaces every event for <paramref name="player"/> across all kinds with the
+    /// supplied <paramref name="records"/>. Records belonging to other players or to unregistered
+    /// kinds are ignored. This is the per-player counterpart to <see cref="Rehydrate"/> and
+    /// exists so the persistence layer can re-load a player's penalty history on login without
+    /// double-counting events that the tracker still holds in memory from a previous session
+    /// (the bug that produced the ~8898h penalty seen in production).
+    /// </summary>
+    public void ReplacePlayerHistory(PlayerKey player, IEnumerable<PenaltyRecord> records)
+    {
+        if (player.IsDefault) throw new ArgumentException("Player must not be default.", nameof(player));
+        ArgumentNullException.ThrowIfNull(records);
+
+        lock (_gate)
+        {
+            List<(PlayerKey, PenaltyKind)>? toRemove = null;
+            foreach (var k in _events.Keys)
+            {
+                if (k.Player.Equals(player))
+                    (toRemove ??= new List<(PlayerKey, PenaltyKind)>()).Add(k);
+            }
+            if (toRemove is not null)
+                foreach (var k in toRemove) _events.Remove(k);
+
+            foreach (var r in records)
+            {
+                if (!r.Player.Equals(player)) continue;
+                if (!_policies.ContainsKey(r.Kind)) continue;
+                if (r.Severity < 1.0) continue;
+                var key = (r.Player, r.Kind);
+                if (!_events.TryGetValue(key, out var list))
+                {
+                    list = new List<Event>();
+                    _events[key] = list;
+                }
+                list.Add(new Event(r.At, r.Severity));
+            }
+
+            foreach (var kvp in _events)
+            {
+                if (kvp.Key.Player.Equals(player))
+                    kvp.Value.Sort(static (a, b) => a.At.CompareTo(b.At));
+            }
+        }
+    }
+
     public int Prune(DateTimeOffset at)
     {
         lock (_gate)
@@ -170,9 +216,7 @@ public sealed class PenaltyTracker
                 var policy = GetPolicy(kvp.Key.Kind);
                 int count = ComputeOffenseCountLocked(kvp.Value, kvp.Key.Kind);
                 var latest = kvp.Value[^1];
-                var baseTimeout = policy.TimeoutForOffense(count);
-                var scaled = TimeSpan.FromSeconds(baseTimeout.TotalSeconds * latest.Severity);
-                var timeoutEnd = latest.At + scaled;
+                var timeoutEnd = latest.At + policy.EffectiveTimeoutFor(count, latest.Severity);
                 var memoryEnd = latest.At + policy.MemoryWindow;
                 if (timeoutEnd <= at && memoryEnd <= at)
                 {
@@ -192,9 +236,7 @@ public sealed class PenaltyTracker
         if (count == 0) return null;
         var policy = GetPolicy(kind);
         var latest = list[^1];
-        var baseTimeout = policy.TimeoutForOffense(count);
-        var scaled = TimeSpan.FromSeconds(baseTimeout.TotalSeconds * latest.Severity);
-        return latest.At + scaled;
+        return latest.At + policy.EffectiveTimeoutFor(count, latest.Severity);
     }
 
     private int ComputeOffenseCountLocked(List<Event> sortedEvents, PenaltyKind kind)

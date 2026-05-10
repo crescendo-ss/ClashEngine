@@ -252,4 +252,91 @@ public class PenaltyTrackerTests
         Assert.Equal(t.TimeoutEndForKind(K("Alice"), PenaltyKind.Griefing),
                      t2.TimeoutEndForKind(K("Alice"), PenaltyKind.Griefing));
     }
+
+    [Fact]
+    public void ReplacePlayerHistory_replaces_existing_events_instead_of_appending()
+    {
+        // Regression for the persistence-doubling bug: re-loading a player's history must not
+        // double-count events that the tracker is still holding from a previous load.
+        var t = Tracker();
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0);
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0 + TimeSpan.FromMinutes(5));
+
+        var snap = t.Snapshot();
+        Assert.Equal(2, snap.Count);
+
+        // Simulate a re-login: hand the same snapshot back to the same tracker. Pre-fix this
+        // would have left the tracker with 4 events; post-fix it stays at 2.
+        t.ReplacePlayerHistory(K("Alice"), snap);
+
+        Assert.Equal(2, t.Snapshot().Count);
+        Assert.Equal(1, t.GetOffenseCount(K("Alice"), PenaltyKind.Abandonment));
+        Assert.Equal(1, t.GetOffenseCount(K("Alice"), PenaltyKind.Griefing));
+    }
+
+    [Fact]
+    public void ReplacePlayerHistory_only_affects_the_named_player()
+    {
+        var t = Tracker();
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0);
+        t.RecordPenalty(K("Bob"), PenaltyKind.Abandonment, T0 + TimeSpan.FromMinutes(1));
+
+        // Replace Alice with a fresh single event; Bob's record must remain untouched.
+        t.ReplacePlayerHistory(
+            K("Alice"),
+            new[] { new PenaltyRecord(K("Alice"), PenaltyKind.Griefing, T0 + TimeSpan.FromMinutes(2)) });
+
+        Assert.Equal(0, t.GetOffenseCount(K("Alice"), PenaltyKind.Abandonment));
+        Assert.Equal(1, t.GetOffenseCount(K("Alice"), PenaltyKind.Griefing));
+        Assert.Equal(1, t.GetOffenseCount(K("Bob"), PenaltyKind.Abandonment));
+    }
+
+    [Fact]
+    public void ReplacePlayerHistory_drops_records_for_other_players()
+    {
+        // Defensive: callers must not be able to inject Bob's record into Alice's history.
+        var t = Tracker();
+        t.ReplacePlayerHistory(
+            K("Alice"),
+            new[]
+            {
+                new PenaltyRecord(K("Alice"), PenaltyKind.Abandonment, T0),
+                new PenaltyRecord(K("Bob"), PenaltyKind.Abandonment, T0),
+            });
+
+        Assert.Equal(1, t.GetOffenseCount(K("Alice"), PenaltyKind.Abandonment));
+        Assert.Equal(0, t.GetOffenseCount(K("Bob"), PenaltyKind.Abandonment));
+    }
+
+    [Fact]
+    public void ReplacePlayerHistory_with_empty_records_clears_the_player()
+    {
+        var t = Tracker();
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0);
+        t.ReplacePlayerHistory(K("Alice"), Array.Empty<PenaltyRecord>());
+
+        Assert.Equal(0, t.GetOffenseCount(K("Alice"), PenaltyKind.Abandonment));
+        Assert.Null(t.TimeoutUntil(K("Alice")));
+    }
+
+    [Fact]
+    public void Computed_timeout_is_clamped_to_policy_max()
+    {
+        // Build a fast-escalating ladder so a small offense count still pushes past MaxTimeout.
+        var policy = new PenaltyPolicy(
+            PenaltyKind.Abandonment,
+            baseTimeout: TimeSpan.FromMinutes(10),
+            escalationFactor: 2.0,
+            memoryWindow: TimeSpan.FromHours(24),
+            maxTimeout: TimeSpan.FromHours(6));
+        var t = new PenaltyTracker(policy);
+
+        // 20 offenses inside the memory window -> raw ladder is ~5m years; cap holds it at 6h.
+        for (int i = 0; i < 20; i++)
+            t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0 + TimeSpan.FromMinutes(i));
+
+        var until = t.TimeoutUntil(K("Alice"))!.Value;
+        var latest = T0 + TimeSpan.FromMinutes(19);
+        Assert.Equal(latest + TimeSpan.FromHours(6), until);
+    }
 }

@@ -203,6 +203,14 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _ratingsCache = new InMemoryRatingStore();   // legacy fallback if IPersist unavailable
         IRatingStore ratingStore = _persist is not null ? _persistRatings : _ratingsCache;
 
+        // Per-policy hard ceiling on the assessed timeout. Defaults to 6h; configurable to give
+        // operators an escape hatch if a future bug ever puts a player on a runaway escalation
+        // ladder again. Values <= 0 fall back to the default rather than disabling the cap.
+        int maxPenaltyHours = _config.GetInt(_config.Global, "ClashEngine", "MaxPenaltyHours", 6);
+        var maxPenalty = maxPenaltyHours > 0
+            ? TimeSpan.FromHours(maxPenaltyHours)
+            : PenaltyPolicy.DefaultMaxTimeout;
+
         // Engine is constructed with a no-op telemetry sink so that listeners (which need the
         // engine reference) can be wired up below; once they exist we swap in the real
         // composite via SetTelemetry. Events fired before that swap (none, in practice -- the
@@ -212,9 +220,9 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             clock: _clock,
             penaltyPolicies: new[]
             {
-                PenaltyPolicy.DefaultAbandonment,
-                PenaltyPolicy.DefaultGriefing,
-                PenaltyPolicy.DefaultStagingAfk,
+                PenaltyPolicy.DefaultAbandonment.WithMaxTimeout(maxPenalty),
+                PenaltyPolicy.DefaultGriefing.WithMaxTimeout(maxPenalty),
+                PenaltyPolicy.DefaultStagingAfk.WithMaxTimeout(maxPenalty),
             },
             invitationTtl: TimeSpan.FromSeconds(15));
 

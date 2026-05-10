@@ -49,22 +49,40 @@ public sealed class PersistPenaltyStore
 
     /// <summary>Persistence callback: read this player's penalty events.</summary>
     /// <remarks>
+    /// <para>
     /// Runs on the persist worker thread. Wrapped in a top-level catch so a corrupt or
     /// truncated blob can't escape into <c>IPersist</c>'s machinery and take down the persist
     /// pipeline. On any read failure the player loads with no penalties recorded.
+    /// </para>
+    /// <para>
+    /// Uses <see cref="PenaltyTracker.ReplacePlayerHistory"/> rather than per-row
+    /// <c>RecordPenalty</c> so a re-login during a long-lived process doesn't double the
+    /// player's event list (the in-memory tracker keeps offline players' events around, so
+    /// appending the disk copy on top of them was effectively rewriting the same history twice
+    /// each cycle -- the cause of the runaway penalties seen in production).
+    /// </para>
     /// </remarks>
     public void SetData(Player? player, Stream inStream)
     {
         if (player?.Name is not { Length: > 0 } name) return;
         var key = new PlayerKey(name);
 
+        var rows = new List<PenaltyRecord>();
         try
         {
             using var reader = new BinaryReader(inStream, System.Text.Encoding.UTF8, leaveOpen: true);
             ushort version;
             try { version = reader.ReadUInt16(); }
-            catch (EndOfStreamException) { return; }
-            if (version != BlobVersion) return;
+            catch (EndOfStreamException)
+            {
+                _tracker.ReplacePlayerHistory(key, rows);
+                return;
+            }
+            if (version != BlobVersion)
+            {
+                _tracker.ReplacePlayerHistory(key, rows);
+                return;
+            }
 
             ushort count = reader.ReadUInt16();
             for (int i = 0; i < count; i++)
@@ -74,14 +92,18 @@ public sealed class PersistPenaltyStore
                 double severity = reader.ReadDouble();
                 if (severity < 1.0) severity = 1.0;
                 if (!_tracker.HasPolicy(kind)) continue;
-                _tracker.RecordPenalty(key, kind, new DateTimeOffset(ticks, TimeSpan.Zero), severity);
+                rows.Add(new PenaltyRecord(key, kind, new DateTimeOffset(ticks, TimeSpan.Zero), severity));
             }
         }
         catch (Exception)
         {
-            // Corrupt or truncated blob. Swallow -- this player simply loads with no
-            // recorded penalties.
+            // Corrupt or truncated blob. Drop whatever partial rows we already buffered and
+            // let ReplacePlayerHistory clear the player out -- a fresh start beats a half-read
+            // history that might be missing escalation entries.
+            rows.Clear();
         }
+
+        _tracker.ReplacePlayerHistory(key, rows);
     }
 
     /// <summary>Persistence callback: nothing to clear at database-reset granularity. The
