@@ -628,6 +628,20 @@ public sealed class ActiveMatch
     }
 
     /// <summary>
+    /// Drops <paramref name="player"/> from the abandonment-candidate set so they are NOT
+    /// included in <see cref="MatchOutcome.AbandonedBy"/> when this match finalizes. The
+    /// player's team membership, kill/death counters, and FSM status are left intact; only
+    /// the post-match penalty accounting changes. Used by the engine's admin <c>ResetPlayer</c>
+    /// path so a reset target who happens to be mid-match does not get an abandonment penalty
+    /// applied on top of the wipe we just performed.
+    /// </summary>
+    public void ExcludeFromAbandonment(PlayerKey player)
+    {
+        _candidateAbandoners.Remove(player);
+        _everAbandoned.Remove(player);
+    }
+
+    /// <summary>
     /// Cancels a Forming match because the orchestrator detected one or more idle players in
     /// the staging window. Every player named in <paramref name="afkPlayers"/> is marked as an
     /// abandoner regardless of their current status (Active players who got placed but didn't

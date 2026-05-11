@@ -493,6 +493,128 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
+    /// Operator-driven full wipe of <paramref name="player"/>'s matchmaking state. Used by the
+    /// <c>?clashreset</c> command. Clears every persistent and in-flight artifact tied to the
+    /// player: queue entries, party membership, any in-progress match (without re-applying an
+    /// abandonment penalty to the target), penalty history, KOTH consecutive-defense counters,
+    /// pending griefing penalties targeting them, and -- unless <paramref name="keepRating"/>
+    /// is set -- their rating rows for every game type. Returns a <see cref="ResetSummary"/>
+    /// describing what was actually changed so the caller can render a concise reply.
+    /// </summary>
+    /// <remarks>
+    /// For an in-flight match, the player is treated as if they left the arena (the match's
+    /// usual grace / team-collapse path runs normally for the remaining participants) but is
+    /// then excluded from the post-match abandonment-candidate set so <c>FinalizeMatch</c>
+    /// does not reapply a penalty that we just wiped. The match is not cancelled for the other
+    /// participants -- they continue, and the absent reset target counts as missing from their
+    /// team. The reset target's <c>_matchOf</c> entry is dropped so they can immediately queue
+    /// elsewhere if reconnected.
+    /// </remarks>
+    public ResetSummary ResetPlayer(PlayerKey player, DateTimeOffset at, bool keepRating)
+    {
+        if (player.IsDefault) throw new ArgumentException("Player must not be default.", nameof(player));
+
+        // Snapshot counts that we'll surface in the reply BEFORE we mutate state.
+        int penaltyEventsCleared = 0;
+        foreach (var r in _penalties.Snapshot())
+            if (r.Player.Equals(player)) penaltyEventsCleared++;
+
+        int ratingsCleared = 0;
+        if (!keepRating)
+        {
+            foreach (var e in _ratings.Snapshot())
+                if (e.Player.Equals(player)) ratingsCleared++;
+        }
+
+        // Active match: route the departure through the normal OnPlayerLeft path so team-collapse
+        // bookkeeping fires for the other participants, then exclude the target from the
+        // abandonment-candidate set so the eventual FinalizeMatch does not re-penalize them.
+        bool removedFromMatch = false;
+        if (_matchOf.TryGetValue(player, out var matchId) && _matches.TryGetValue(matchId, out var match))
+        {
+            var prev = SnapshotCollapsed(match);
+            match.OnPlayerLeft(player, at);
+            DiffCollapsedAndEmit(match, prev);
+            match.ExcludeFromAbandonment(player);
+            _matchOf.Remove(player);
+            removedFromMatch = true;
+        }
+
+        // Dequeue from every queue (no-op if they weren't queued -- counts what was actually
+        // removed for the caller's reply). LeaveGroup below also sweeps queues for surviving
+        // party members, but the target themselves is already gone after this call.
+        var queueNames = _matcher.DequeueEverywhere(player);
+        for (int i = 0; i < queueNames.Count; i++)
+            _telemetry.OnQueueRemoved(player, queueNames[i], at);
+        int removedFromQueues = queueNames.Count;
+
+        bool leftGroup = LeaveGroup(player, at);
+
+        // KOTH consecutive-defense counters: drop every (player, queueName) entry.
+        List<(PlayerKey, string)>? cdToRemove = null;
+        foreach (var k in _consecutiveDefenses.Keys)
+            if (k.Player.Equals(player)) (cdToRemove ??= new List<(PlayerKey, string)>()).Add(k);
+        if (cdToRemove is not null)
+            foreach (var k in cdToRemove) _consecutiveDefenses.Remove(k);
+
+        // Pending griefing penalties: drop every entry where the reset target is the *target*
+        // of the penalty. For remaining entries, strip the reset target out of EligibleVoters /
+        // VotesReceived (a wiped player should not contribute to the N-of-M veto threshold).
+        // Collect keys first; we mutate _pendingGriefs after the iteration completes.
+        List<(Guid, PlayerKey)>? pgTargetRemove = null;
+        List<(Guid, PlayerKey)>? pgVoterTrim = null;
+        foreach (var kvp in _pendingGriefs)
+        {
+            if (kvp.Key.Target.Equals(player))
+                (pgTargetRemove ??= new List<(Guid, PlayerKey)>()).Add(kvp.Key);
+            else if (kvp.Value.EligibleVoters.Contains(player) || kvp.Value.VotesReceived.Contains(player))
+                (pgVoterTrim ??= new List<(Guid, PlayerKey)>()).Add(kvp.Key);
+        }
+        int pendingGriefsCleared = 0;
+        if (pgTargetRemove is not null)
+        {
+            foreach (var k in pgTargetRemove)
+            {
+                _pendingGriefs.Remove(k);
+                pendingGriefsCleared++;
+            }
+        }
+        if (pgVoterTrim is not null)
+        {
+            foreach (var k in pgVoterTrim)
+            {
+                var pending = _pendingGriefs[k];
+                var newEligible = new HashSet<PlayerKey>(pending.EligibleVoters);
+                newEligible.Remove(player);
+                var newVotes = new HashSet<PlayerKey>(pending.VotesReceived);
+                newVotes.Remove(player);
+                _pendingGriefs[k] = pending with { EligibleVoters = newEligible, VotesReceived = newVotes };
+            }
+        }
+
+        // Penalty history: full wipe across every kind for this player.
+        _penalties.ReplacePlayerHistory(player, Array.Empty<PenaltyRecord>());
+
+        // Ratings: optional wipe. Iterate the snapshot rather than holding the store's gate.
+        if (!keepRating && ratingsCleared > 0)
+        {
+            foreach (var entry in _ratings.Snapshot())
+            {
+                if (entry.Player.Equals(player))
+                    _ratings.Remove(entry.Player, entry.GameType);
+            }
+        }
+
+        return new ResetSummary(
+            RemovedFromQueues: removedFromQueues,
+            LeftGroup: leftGroup,
+            RemovedFromMatch: removedFromMatch,
+            PenaltyEventsCleared: penaltyEventsCleared,
+            RatingsCleared: ratingsCleared,
+            PendingGriefsCleared: pendingGriefsCleared);
+    }
+
+    /// <summary>
     /// Drives time-based transitions: ticks every active match (which may finalize), then tries
     /// to propose new matches from the queues.
     /// </summary>
@@ -848,6 +970,17 @@ public sealed class MatchmakingEngine
         }
     }
 }
+
+/// <summary>What <see cref="MatchmakingEngine.ResetPlayer"/> actually changed. Each field is
+/// zero / false when there was nothing to clear, so callers can render a "no persistent data
+/// found" reply by checking whether the whole record is empty.</summary>
+public readonly record struct ResetSummary(
+    int RemovedFromQueues,
+    bool LeftGroup,
+    bool RemovedFromMatch,
+    int PenaltyEventsCleared,
+    int RatingsCleared,
+    int PendingGriefsCleared);
 
 /// <summary>Outcome of a <see cref="MatchmakingEngine.TryEnqueue"/> call.</summary>
 public enum EnqueueResult

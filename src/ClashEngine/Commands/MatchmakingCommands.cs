@@ -115,6 +115,10 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("clashlog", ClashLogCmd, arena, helpText:
             "?clashlog [off|normal|verbose|trace] -- Show or set ClashEngine debug verbosity. " +
             "Affects only ClashEngine's verbose/trace logging; the host's global level still gates Info/Warn/Error.");
+        _commands.AddCommand("clashreset", ClashReset, arena, helpText:
+            "?clashreset <player> [--keep-rating] -- Operator: wipe a player's matchmaking state " +
+            "(penalties, queues, party, active match, pending griefing votes, and rating). " +
+            "Pass --keep-rating to preserve their rating rows.");
         _commands.AddCommand("helpclash", HelpClash, arena, helpText:
             "?helpclash -- List ClashEngine player commands and what they do.");
     }
@@ -131,6 +135,7 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("partymode", PartyMode, arena);
         _commands.RemoveCommand("forgive", Veto, arena);
         _commands.RemoveCommand("clashlog", ClashLogCmd, arena);
+        _commands.RemoveCommand("clashreset", ClashReset, arena);
         _commands.RemoveCommand("helpclash", HelpClash, arena);
     }
 
@@ -803,6 +808,83 @@ public sealed class MatchmakingCommands
             _ => null,
         };
         if (msg is not null) _chat.SendMessage(player, msg);
+    }
+
+    // ---- ?clashreset <player> [--keep-rating]
+
+    /// <summary>
+    /// Operator-only reset. Parses a required player name and an optional --keep-rating flag,
+    /// hands them to <see cref="MatchmakingEngine.ResetPlayer"/>, then renders a single-line
+    /// summary of what was actually cleared. Always Info-logs the action with the operator's
+    /// name -- this is moderation, useful to audit even outside debug verbosity.
+    /// </summary>
+    private void ClashReset(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("clashreset", player, parameters);
+
+        var args = parameters.Trim();
+        if (args.IsEmpty)
+        {
+            _chat.SendMessage(player, "Usage: ?clashreset <player> [--keep-rating]");
+            return;
+        }
+
+        // Tokenize on whitespace. The flag may come before or after the player name; everything
+        // else is the player name (only one positional token allowed).
+        bool keepRating = false;
+        string? targetName = null;
+        foreach (var raw in args.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(raw, "--keep-rating", StringComparison.OrdinalIgnoreCase))
+            {
+                keepRating = true;
+            }
+            else if (raw.StartsWith("--", StringComparison.Ordinal))
+            {
+                _chat.SendMessage(player, $"Unknown flag '{raw}'. Supported: --keep-rating.");
+                return;
+            }
+            else if (targetName is null)
+            {
+                targetName = raw;
+            }
+            else
+            {
+                _chat.SendMessage(player, "Usage: ?clashreset <player> [--keep-rating]");
+                return;
+            }
+        }
+
+        if (targetName is null)
+        {
+            _chat.SendMessage(player, "Usage: ?clashreset <player> [--keep-rating]");
+            return;
+        }
+
+        var targetKey = new PlayerKey(targetName);
+        var summary = _engine.ResetPlayer(targetKey, _clock.UtcNow, keepRating);
+
+        // Audit log -- always emitted (not gated on _log.IsDebug) so operators have a paper
+        // trail even with verbosity at Normal. Mirrors ?clashlog's "always log this" pattern.
+        _log.Info(LogCategory,
+            $"?clashreset by {player.Name ?? "(no-name)"}: target={targetKey.Name} keepRating={keepRating} " +
+            $"queues={summary.RemovedFromQueues} group={summary.LeftGroup} match={summary.RemovedFromMatch} " +
+            $"penalties={summary.PenaltyEventsCleared} ratings={summary.RatingsCleared} " +
+            $"pendingGriefs={summary.PendingGriefsCleared}");
+
+        var parts = new List<string>();
+        if (summary.PenaltyEventsCleared > 0) parts.Add($"cleared {summary.PenaltyEventsCleared} penalty event(s)");
+        if (summary.RatingsCleared > 0) parts.Add($"cleared {summary.RatingsCleared} rating row(s)");
+        if (summary.RemovedFromQueues > 0) parts.Add($"removed from {summary.RemovedFromQueues} queue(s)");
+        if (summary.LeftGroup) parts.Add("left party");
+        if (summary.RemovedFromMatch) parts.Add("evicted from active match");
+        if (summary.PendingGriefsCleared > 0) parts.Add($"dropped {summary.PendingGriefsCleared} pending griefing penalty(ies)");
+
+        string suffix = keepRating ? " (rating preserved)" : "";
+        if (parts.Count == 0)
+            _chat.SendMessage(player, $"?clashreset {targetKey.Name}: no persistent data found{suffix}.");
+        else
+            _chat.SendMessage(player, $"?clashreset {targetKey.Name}: {string.Join(", ", parts)}{suffix}.");
     }
 
     // ---- ?clashlog [off|normal|verbose|trace]
