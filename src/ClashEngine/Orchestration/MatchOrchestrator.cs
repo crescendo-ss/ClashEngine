@@ -571,7 +571,7 @@ public sealed class MatchOrchestrator
             // immediately so players see the lock cue alongside "All set!". For longer countdowns
             // the matching tick in OnCountdownTick fires it.
             if (_queue.CountdownDuration <= MatchFreqAdvisor.ShipLockBeforeStart)
-                SendDmToParticipants("Locked you to your current ship.");
+                SendPersonalToParticipants("Locked you to your current ship.");
         }
         catch (Exception ex)
         {
@@ -708,7 +708,7 @@ public sealed class MatchOrchestrator
                 // ShipLockBeforeStart seconds before GO. Stays in sync with MatchFreqAdvisor's
                 // OnMatchProposed lockOffset arithmetic.
                 if (_countdownSecondsRemaining == (int)MatchFreqAdvisor.ShipLockBeforeStart.TotalSeconds)
-                    SendDmToParticipants("Locked you to your current ship.");
+                    SendPersonalToParticipants("Locked you to your current ship.");
                 // Only the last 3 ticks are announced -- earlier ticks would clutter chat for
                 // longer countdowns where the up-front "Starting in N seconds!" already covered it.
                 if (_countdownSecondsRemaining <= 3)
@@ -753,10 +753,12 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// DM <paramref name="message"/> to each resolvable participant as a Private chat type with
-    /// the player as both recipient and sender, mirroring SS.Matchmaking.TeamVersusMatch's
-    /// "match found" pattern. Continuum renders this as "(theirname)>message" in the player's
-    /// own chat window, which is impossible to miss compared to a green arena message.
+    /// Deliver <paramref name="message"/> to each resolvable participant as a true RemotePrivate
+    /// chat line, mirroring SS.Matchmaking.TeamVersusMatch's ready-up notice
+    /// (<c>TeamVersusMatch.cs:5723</c>): biller-routed, sender = the player's own name. Continuum
+    /// renders this as an inbound ":theirname:message" line at the top of chat -- visually
+    /// distinct from arena chatter and from the prior "(theirname)>message" self-echo, which
+    /// players were missing.
     /// </summary>
     private void SendDmToParticipants(string message)
     {
@@ -765,8 +767,19 @@ public sealed class MatchOrchestrator
         {
             set.Clear();
             set.Add(p);
-            _chat.SendAnyMessage(set, ChatMessageType.Private, ChatSound.None, p, message);
+            _chat.SendRemotePrivMessage(set, ChatSound.None, [], p.Name, message);
         }
+    }
+
+    /// <summary>
+    /// Send <paramref name="message"/> to each resolvable participant as a yellow personal
+    /// arena message -- visible only to that player, but without DM framing. Used for in-match
+    /// status notices that don't need to grab attention the way the move prompt does.
+    /// </summary>
+    private void SendPersonalToParticipants(string message)
+    {
+        foreach (var p in ResolveParticipants())
+            _chat.SendMessage(p, message);
     }
 
     /// <summary>
