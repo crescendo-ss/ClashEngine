@@ -128,4 +128,137 @@ public class EliminationCooldownTests
         clock.Advance(TimeSpan.FromMinutes(2));
         Assert.Equal(EligibilityStatus.Available, elig.Check(K("A"), true, false).Status);
     }
+
+    [Fact]
+    public void Kill_from_just_eliminated_killer_still_eliminates_the_victim()
+    {
+        // Regression: in a simultaneous last-life trade, both players' final shots land in the
+        // same tick. The first kill the server processes eliminates one fighter and removes
+        // them from _matchOf; pre-fix, the second kill (from that just-removed killer) was
+        // dropped on the floor because engine.OnKill required the killer to still be in
+        // _matchOf. The "dead" killer's residual shot then never decremented the second
+        // victim's life, so the freq advisor opened a ship-change grace window for them and
+        // they could ship back up after their own "final" death.
+        var clock = new FakeClock(T0);
+        var ratings = new InMemoryRatingStore();
+        var telemetry = new RecordingTelemetry();
+        var engine = new MatchmakingEngine(
+            ratings, clock,
+            new[]
+            {
+                PenaltyPolicy.DefaultAbandonment,
+                PenaltyPolicy.DefaultGriefing,
+                PenaltyPolicy.DefaultEliminationCooldown,
+            },
+            quality: new OrdinalSpreadQuality(),
+            telemetry: telemetry,
+            joinTimeout: TimeSpan.FromMinutes(1),
+            graceWindow: TimeSpan.FromSeconds(30));
+
+        // 2v2 (not 1v1) so that the first elimination doesn't auto-forfeit the losing team
+        // and end the match before the second kill can be processed -- each team needs another
+        // live member to keep the match Live through both kills.
+        engine.Queues.Register(
+            "2v2-lives",
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            new GameTypeId(7),
+            // Set the kill threshold high so the first elimination doesn't end the match on
+            // the score side -- we want both kills to flow through engine.OnKill while the
+            // match is still Live.
+            () => new KillCountEndPolicy(1000),
+            vetoesRequired: 1,
+            holdWindow: TimeSpan.Zero,
+            livesPerPlayer: 1);
+
+        foreach (var n in new[] { "A", "B", "X", "Y" }) engine.OnPlayerConnected(K(n), T0);
+        foreach (var n in new[] { "A", "B", "X", "Y" }) engine.TryEnqueue(K(n), "2v2-lives", T0);
+        engine.Tick(T0);
+        var match = engine.ActiveMatches.First().Value;
+
+        // Sanity: the queue produced a lives-mode match.
+        Assert.Equal(1, match.LivesPerPlayer);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        foreach (var n in new[] { "A", "B", "X", "Y" }) engine.OnPlayerJoinedArena(K(n), clock.UtcNow);
+        engine.MarkMatchLive(match.MatchId, clock.UtcNow);
+        Assert.Equal(MatchState.Live, match.State);
+
+        // Pick A's enemy from the opposing team -- balancing may shuffle the roster, so we don't
+        // assume B ended up on the other side. Each team has 2 members; either of A's enemies
+        // works, the first one is fine.
+        var enemyTeam = match.TeamIndexOf(K("A"))!.Value == 0 ? 1 : 0;
+        var aEnemy = match.Teams[enemyTeam][0];
+
+        // Simultaneous kill: A -> aEnemy is processed first (aEnemy eliminated, removed from
+        // _matchOf), then aEnemy -> A in the very next tick. With the bug, the second kill is
+        // dropped because aEnemy is no longer in _matchOf and A's _exitedAt never gets set.
+        // The match continues Live because each team still has a live teammate.
+        clock.Advance(TimeSpan.FromSeconds(1));
+        engine.OnKill(K("A"), aEnemy, clock.UtcNow);
+        engine.OnKill(aEnemy, K("A"), clock.UtcNow);
+
+        Assert.Equal(MatchState.Live, match.State);   // teammates still alive on both sides
+        // Both fighters must show as eliminated. Pre-fix the second assertion was the failure:
+        // A had _exitedAt unset and could ship back up via the freq advisor's grace window.
+        Assert.True(match.IsKnockedOut(aEnemy));
+        Assert.True(match.IsKnockedOut(K("A")));
+    }
+
+    [Fact]
+    public void Cross_match_kill_is_still_rejected()
+    {
+        // Sanity: the killer-residual fall-through must not let a kill from one match's
+        // (just-eliminated) participant land on the other match's player.
+        var clock = new FakeClock(T0);
+        var ratings = new InMemoryRatingStore();
+        var telemetry = new RecordingTelemetry();
+        var engine = new MatchmakingEngine(
+            ratings, clock,
+            new[]
+            {
+                PenaltyPolicy.DefaultAbandonment,
+                PenaltyPolicy.DefaultGriefing,
+                PenaltyPolicy.DefaultEliminationCooldown,
+            },
+            quality: new OrdinalSpreadQuality(),
+            telemetry: telemetry,
+            joinTimeout: TimeSpan.FromMinutes(1),
+            graceWindow: TimeSpan.FromSeconds(30));
+
+        engine.Queues.Register(
+            "1v1-lives",
+            new MatchShape(2, 1),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            new GameTypeId(7),
+            () => new KillCountEndPolicy(1000),
+            vetoesRequired: 1,
+            livesPerPlayer: 1);
+
+        // Two separate 1v1 matches: (A vs B) and (C vs D).
+        foreach (var n in new[] { "A", "B", "C", "D" }) engine.OnPlayerConnected(K(n), T0);
+        engine.TryEnqueue(K("A"), "1v1-lives", T0);
+        engine.TryEnqueue(K("B"), "1v1-lives", T0);
+        engine.Tick(T0);
+        engine.TryEnqueue(K("C"), "1v1-lives", T0);
+        engine.TryEnqueue(K("D"), "1v1-lives", T0);
+        engine.Tick(T0);
+
+        var matches = engine.ActiveMatches.Values.ToList();
+        Assert.Equal(2, matches.Count);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        foreach (var n in new[] { "A", "B", "C", "D" }) engine.OnPlayerJoinedArena(K(n), clock.UtcNow);
+        foreach (var m in matches) engine.MarkMatchLive(m.MatchId, clock.UtcNow);
+
+        // Eliminate A (in its match) so A is no longer in _matchOf.
+        clock.Advance(TimeSpan.FromSeconds(1));
+        engine.OnKill(K("B"), K("A"), clock.UtcNow);
+
+        // Now fire a (nonsense) kill where the just-eliminated A "kills" C from the OTHER
+        // match. The cross-match guard must reject it -- C's life must not decrement.
+        var cMatch = matches.First(m => m.TeamIndexOf(K("C")) is not null);
+        engine.OnKill(K("A"), K("C"), clock.UtcNow);
+        Assert.False(cMatch.IsKnockedOut(K("C")));
+    }
 }

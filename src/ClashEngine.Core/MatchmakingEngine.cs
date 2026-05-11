@@ -195,13 +195,32 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>Records a kill. The kill is credited only if both players are in the same active match.</summary>
+    /// <remarks>
+    /// Anchors on the victim's <see cref="_matchOf"/> entry. The killer may either be in the
+    /// same <c>_matchOf</c> entry (the happy path) or be absent from <c>_matchOf</c> while still
+    /// rostered in the match -- that handles a residual-weapon kill from a player who was just
+    /// eliminated and is still on a ship inside the orchestrator's <c>KnockoutSpecDelay</c>
+    /// window. Without that fall-through, simultaneous last-life eliminations dropped the
+    /// second kill on the floor: the second victim's life never decremented, <c>_exitedAt</c>
+    /// never set, and the freq advisor opened a ship-change grace window for them, letting
+    /// them ship back up after their "final" death.
+    /// </remarks>
     public void OnKill(PlayerKey killer, PlayerKey victim, DateTimeOffset at)
     {
-        if (!_matchOf.TryGetValue(killer, out var killerMatch)) return;
-        if (!_matchOf.TryGetValue(victim, out var victimMatch)) return;
-        if (killerMatch != victimMatch) return;
+        if (!_matchOf.TryGetValue(victim, out var matchId)) return;
+        var m = _matches[matchId];
 
-        var m = _matches[killerMatch];
+        if (_matchOf.TryGetValue(killer, out var killerMatch))
+        {
+            if (killerMatch != matchId) return;
+        }
+        else if (m.TeamIndexOf(killer) is null)
+        {
+            // Killer is not in any match and was never rostered in the victim's match -- reject
+            // as a cross-match / unrelated kill.
+            return;
+        }
+
         var prevCollapsed = SnapshotCollapsed(m);
         m.OnKill(killer, victim, at);
         DiffCollapsedAndEmit(m, prevCollapsed);
@@ -212,10 +231,10 @@ public sealed class MatchmakingEngine
         if (m.LivesPerPlayer.HasValue
             && m.ExitedAt.ContainsKey(victim)
             && _matchOf.TryGetValue(victim, out var stillMappedMatch)
-            && stillMappedMatch == killerMatch)
+            && stillMappedMatch == matchId)
         {
             _matchOf.Remove(victim);
-            _telemetry.OnPlayerReleasedFromMatch(victim, killerMatch, at);
+            _telemetry.OnPlayerReleasedFromMatch(victim, matchId, at);
             if (_penalties.HasPolicy(PenaltyKind.EliminationCooldown))
                 _penalties.RecordPenalty(victim, PenaltyKind.EliminationCooldown, at);
         }
