@@ -22,9 +22,10 @@ namespace ClashEngine.Lvz;
 ///
 /// <para><see cref="TimeLimit"/> mirrors the queue's configured <c>GameType&lt;i&gt;TimeLimit</c>
 /// (parsed by <c>GameTypeParser</c>, threaded through <c>QueueDefinition.TimeLimit</c>). When
-/// unset, MatchLvz's scoreboard timer short-circuits and won't render -- the match is purely
-/// kill-count / lives-limited and there's nothing to count down. When set, the engine ALSO ends
-/// the match on time expiry via <c>TimeLimitEndPolicy</c>.</para>
+/// the queue value is unset we surface <see cref="TimeSpan.Zero"/>, which MatchLvz interprets as
+/// "no time limit" and hides the scoreboard timer digits -- the match is purely kill-count /
+/// lives-limited and there's nothing to count down. When set, the engine ALSO ends the match on
+/// time expiry via <c>TimeLimitEndPolicy</c>.</para>
 /// </remarks>
 internal sealed class ClashMatchConfiguration : IMatchConfiguration
 {
@@ -43,7 +44,7 @@ internal sealed class ClashMatchConfiguration : IMatchConfiguration
     public int NumTeams => _queue.Shape.TeamCount;
     public int PlayersPerTeam => _queue.Shape.PlayersPerTeam;
     public int LivesPerPlayer => _match.LivesPerPlayer ?? 0;
-    public TimeSpan? TimeLimit => _queue.TimeLimit;
+    public TimeSpan TimeLimit => _queue.TimeLimit ?? TimeSpan.Zero;
     public TimeSpan? OverTimeLimit => null;
     public ReadOnlySpan<IMatchBoxConfiguration> Boxes => _boxes.AsSpan();
 
