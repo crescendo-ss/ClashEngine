@@ -10,11 +10,12 @@ namespace ClashEngine.Core.Stats;
 /// </summary>
 public static class MatchExporter
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public static MatchPayload Build(
         Guid matchId,
         string? queueName,
+        string? queueLabel,
         int gameType,
         string? arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> teams,
@@ -151,6 +152,7 @@ public static class MatchExporter
             SchemaVersion: CurrentSchemaVersion,
             MatchId: matchId,
             QueueName: queueName,
+            QueueLabel: queueLabel,
             GameType: gameType,
             Arena: arena,
             StartedAt: startedAt,

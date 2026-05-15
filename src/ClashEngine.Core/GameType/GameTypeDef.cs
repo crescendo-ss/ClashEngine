@@ -2,15 +2,16 @@ using System;
 using System.Collections.Generic;
 using ClashEngine.Core.Queue;
 
-namespace ClashEngine.Config;
+namespace ClashEngine.Core.GameType;
 
 /// <summary>
-/// Pure-data view of one configured game type, produced by <see cref="GameTypeParser"/> and
-/// consumed by <see cref="QueueParser"/> when a queue references this game type by name. Once
-/// a queue is registered the engine's queue catalog indexes it by (name, GameTypeId); this
-/// record is a transient parse intermediate, not stored long-term.
+/// Pure-data view of one configured game type. Produced by the host's [ClashEngine] parser and
+/// stored in <see cref="GameTypeRegistry"/>; queues resolve their <c>GameType</c> reference
+/// through the registry by name. Two contributions sharing a name (and the same byte
+/// <see cref="Id"/>) are treated as the same logical game type for collision purposes; mismatched
+/// IDs are rejected.
 /// </summary>
-internal sealed record GameTypeDef(
+public sealed record GameTypeDef(
     string Name,
     byte Id,
     int TeamCount,

@@ -75,9 +75,11 @@ public sealed class ChartCommand
             }
         }
 
+        var (qUniqueId, qLabel) = QueueIdentForMatch(match);
         var payload = LiveScoreboardBuilder.Build(
             matchId: match.MatchId,
-            queueName: QueueNameFor(match),
+            queueName: qUniqueId,
+            queueLabel: qLabel,
             gameType: match.GameType.Value,
             arena: player.Arena?.Name,
             teams: match.Teams,
@@ -93,15 +95,15 @@ public sealed class ChartCommand
     }
 
     /// <summary>
-    /// Best-effort queue name lookup. ActiveMatch doesn't carry the queue name directly; we
-    /// match by GameType, which is unique per queue in current configurations. If multiple
-    /// queues share a GameType the first registered queue wins -- still fine for the title
-    /// label, which is informational.
+    /// Best-effort queue identity lookup for a live match. ActiveMatch doesn't carry the queue
+    /// name directly; we match by GameType. Under the per-arena model multiple queues can
+    /// share a GameType (many-to-one), so the first registered queue with this GameType wins
+    /// -- still fine for the title label, which is informational.
     /// </summary>
-    private string QueueNameFor(ActiveMatch match)
+    private (string UniqueId, string Label) QueueIdentForMatch(ActiveMatch match)
     {
         foreach (var def in _engine.Queues.Definitions)
-            if (def.GameType == match.GameType) return def.Name;
-        return string.Empty;
+            if (def.GameType == match.GameType) return (def.UniqueId, def.Label);
+        return (string.Empty, string.Empty);
     }
 }

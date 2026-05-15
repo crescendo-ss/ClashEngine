@@ -60,19 +60,25 @@ ClashEngine matches run in a dedicated arena (one per queue). Add the arena's ba
 PermanentArenas = 1v1comp 2v2pub ...
 ```
 
-### 3. Configure ClashEngine in `global.conf`
+### 3. Configure ClashEngine
 
-All engine-wide settings live under one `[ClashEngine]` section in `global.conf`. The section has three concerns:
+ClashEngine reads a `[ClashEngine]` section from two scopes:
 
-1. **Plug-in tuning** — log verbosity, upload endpoint, replay recording.
-2. **Game types** — the rules of a match (team shape, win condition, lives, spawn locations).
-3. **Queues** — the matchmaking policies that draw players into a game type (matchmaking strictness, the arena to play in, look-ahead).
+- **Zone scope (`global.conf`):** plug-in tuning and any game types you want available across every arena.
+- **Per-arena scope (`arena.conf`):** that arena's queues and any arena-specific game types.
+
+The section can live directly in `global.conf` / `arena.conf`, or in any file `#include`'d from them — the host resolves keys across the full document and watches every constituent file for changes, so a save to an included file triggers the same hot reload as editing the main conf. The four concerns in a `[ClashEngine]` section are:
+
+1. **Plug-in tuning** — log verbosity, upload endpoint, replay recording. *(Zone scope only.)*
+2. **Game types** — the rules of a match (team shape, win condition, lives, spawn locations). Zone-scope game types are shared; arena-scope game types are only visible to that arena's queues.
+3. **Queues** — the matchmaking policies that draw players into a game type. *(Arena scope only — every queue is owned by an arena.)*
+4. **DefaultQueue** — the queue `?play` resolves to in this arena when the player gives no name. *(Arena scope only.)*
 
 A complete worked example is at the end of this section. Each subsection below documents the keys.
 
 ### 4. Configure the match arena (`arena.conf`)
 
-Each match arena needs `MatchFocus` + `MatchLvz` attached, and optionally a default queue for `?play` with no argument. Example:
+Each match arena needs `MatchFocus` + `MatchLvz` attached, and its `[ClashEngine]` section declares the queues it owns plus the optional `DefaultQueue` for `?play` with no argument. Minimal skeleton (the worked example below shows full queue keys):
 
 ```ini
 [ Modules ]
@@ -88,7 +94,13 @@ FilterKillPackets = 1
 
 [ClashEngine]
 DefaultQueue = 1v1
+QueueCount   = 1
+Queue1Name      = 1v1
+Queue1GameType  = elimination_1v1
+Queue1MatchArena = 1v1comp
 ```
+
+The `[ClashEngine]` block can live directly in `arena.conf` (as above) or in any file `#include`'d from it; the host watches the whole document for changes either way.
 
 ### 5. Grant the chat commands
 
@@ -181,12 +193,13 @@ These keys move the match's pre-GO physical setup off the arena's default spawn 
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `Queue<i>Name` | string | required | Chat-facing queue name (e.g. `?play 1v1`). Case-insensitive. |
-| `Queue<i>GameType` | string | required | Must match a `GameType<j>Name`. Inherits the game type's spawn config. |
-| `Queue<i>Matchmaking` | `competitive` / `casual` | `competitive` | Sets quality-policy bands and ship-balancer strictness. Casual relaxes faster and tolerates wider rating spreads. |
+| `Queue<i>Name` | string | required | Lookup identifier for the queue. Players type it with `?play <name>`; multiple space-separated tokens get joined with `_` before lookup, so `?play casual 4v4` looks up `casual_4v4`. Case-insensitive. |
+| `Queue<i>Label` | string | (defaults to `Name`) | Pretty operator-chosen string used in chat output and the JSON match-stats payload (e.g. `4v4 (Casual)`). Decouples display from the lookup name. |
+| `Queue<i>GameType` | string | required | Must match a `GameType<j>Name`. Inherits the game type's spawn config. Many queues can reference the same game type. |
+| `Queue<i>Preset` | `casual` | (none) | Opt-in shortcut for the lenient bundle of defaults: q-start/q-floor 0.4/0.10 (vs 0.6/0.30), no `MaxLiabilityGap` cap, `RelaxTime` 45 s, `RatingWeight` 0.5, and a slightly higher griefing threshold. Each individual knob can still be overridden by an explicit `Queue<i><Key>` below. Omit for the standard (stricter) defaults. |
 | `Queue<i>MatchArena` | string | (none) | Arena to send players to for the match. Recommended: dedicated, in `PermanentArenas`. |
 | `Queue<i>LookAhead` | int ≥ 0 | 0 (strict FIFO) | Extra candidates above the minimum required (`TotalPlayers`) the matcher considers when looking for the best partition. `LookAhead = 4` on a 4v4 means a pool of 12 candidates. |
-| `Queue<i>RelaxTime` | `HH:MM:SS` | `0:01:30` (comp), `0:00:45` (casual) | Quality-relaxation duration: how fast the quality threshold falls from `qStart` to `qFloor`. Longer = stricter early but eventually accepts weaker matches; shorter = takes whatever it can sooner. |
+| `Queue<i>RelaxTime` | `HH:MM:SS` | `0:02:00` (standard), `0:00:45` (with `Preset = casual`) | Quality-relaxation duration: how fast the quality threshold falls from `qStart` to `qFloor`. Longer = stricter early but eventually accepts weaker matches; shorter = takes whatever it can sooner. |
 | `Queue<i>HoldWindow` | `HH:MM:SS` | `0:00:10` | Once a viable partition is found, the matcher waits up to this duration to see if a better one arrives. Set to `0` to pop immediately. |
 | `Queue<i>QualityCeiling` | float [0,1] | `0.9` | If a held candidate's quality reaches this, pop without waiting out the hold window. |
 | `Queue<i>VetoesRequired` | int ≥ 1 | `2` | Number of distinct match participants who must `?forgive` a pending griefing penalty within `VetoWindow` to rescind it. |
@@ -194,20 +207,20 @@ These keys move the match's pre-GO physical setup off the arena's default spawn 
 | `Queue<i>PromoteWinners` | 0/1 | `0` | KOTH ("king of the hill") mode: the winning team's players are auto-re-enqueued at the head of this queue after a Completed match. Off by default. |
 | `Queue<i>MaxConsecutiveDefenses` | int ≥ 1 | `3` | Max consecutive wins a champion can defend before being sent to the back of the queue to give challengers a clean shot. Only meaningful with `PromoteWinners = 1`. |
 
-### Per-arena `DefaultQueue` (in `arena.conf`)
+### Per-arena `DefaultQueue`
 
 ```ini
 [ClashEngine]
 DefaultQueue = 1v1
 ```
 
-Sets the queue `?play` resolves to when the player issues the command without an explicit queue name *from this arena*. Optional; without it, `?play` requires the player to name a queue.
+Sets the queue `?play` resolves to when the player issues the command without an explicit queue name *from this arena*. Optional; without it, `?play` requires the player to name a queue. Read from arena scope only.
 
 ### Worked example: 1v1 elimination
 
 The 1v1 elimination setup bundled with the SubspaceServer test zone (under `SubspaceServer/Zone/conf/global.conf` and `SubspaceServer/Zone/arenas/1v1comp/`) is the canonical reference for what these keys look like in production. Reproduced here so README and zone stay in sync.
 
-`global.conf`:
+`global.conf` — plug-in tuning plus a shared game type:
 
 ```ini
 [ClashEngine]
@@ -220,7 +233,7 @@ RecordReplays       = 1
 ReplayRecordingDir  = clash-replays
 DistanceSampleHz    = 5
 
-; --- 2. Game types ---
+; --- 2. Game type (zone-wide; any arena's queues can reference it) ---
 GameTypeCount = 1
 
 GameType1Name           = elimination_1v1
@@ -236,41 +249,59 @@ GameType1Team2Spawns       = 8704,4096; 8704,4112; 8704,4128
 GameType1MaxSpawnDrift     = 6             ; tiles
 GameType1StagingDuration   = 8             ; seconds (default 10)
 GameType1CountdownDuration = 5             ; seconds (min/default 5)
+```
 
-; --- 3. Queues (two queues, same ruleset, different strictness) ---
-QueueCount = 2
+`Zone/arenas/1v1comp/arena.conf` — the standard arena conf plus the two queues owned by this arena:
 
-; Ranked competitive: small look-ahead, hold-window for late better arrivals.
-; Names follow the {type}_{tier} convention so ?play comp 1v1 -> 1v1_competitive
-; and ?play casual 1v1 -> 1v1_casual via the resolver's tier-suffix lookup.
-Queue1Name           = 1v1_competitive
+```ini
+[ Modules ]
+AttachModules = \
+    SS.Matchmaking.Modules.MatchFocus \
+    SS.Matchmaking.Modules.MatchLvz
+
+[ Team ]
+InitialSpec = 1
+
+[SS.Matchmaking.MatchFocus]
+FilterKillPackets = 1
+
+[ClashEngine]
+DefaultQueue = 1v1
+QueueCount   = 2
+
+; Standard (stricter) queue: small look-ahead, hold-window for late better arrivals.
+; The Label drives chat output and the JSON payload; the Name is what players type.
+Queue1Name           = 1v1
+Queue1Label          = 1v1 (Competitive)
 Queue1GameType       = elimination_1v1
-Queue1Matchmaking    = competitive
 Queue1MatchArena     = 1v1comp
 Queue1LookAhead      = 4
 Queue1RelaxTime      = 0:01:30
 Queue1HoldWindow     = 0:00:10
 Queue1QualityCeiling = 0.90
 
-; Casual: same arena & rules; pops fast, half rating weight.
-Queue2Name           = 1v1_casual
+; Casual: same game type & arena; pops fast, half rating weight via the preset.
+; ?play casual 1v1 resolves to "casual_1v1" via the multi-word join.
+Queue2Name           = casual_1v1
+Queue2Label          = 1v1 (Casual)
 Queue2GameType       = elimination_1v1
-Queue2Matchmaking    = casual
+Queue2Preset         = casual
 Queue2MatchArena     = 1v1comp
 Queue2LookAhead      = 0
-Queue2RelaxTime      = 0:00:30
 Queue2HoldWindow     = 0:00:00
 Queue2QualityCeiling = 0.70
 ```
 
 This shows off:
 
-- **Multiple queues sharing a game type.** Both `1v1_competitive` and `1v1_casual` run under `elimination_1v1`, so they share the same rules (and rating bucket via `Id = 1`). They differ only in matchmaking strictness. The `_{tier}` suffix lets `?play comp 1v1` and `?play casual 1v1` resolve to the right queue automatically.
+- **Multiple queues sharing a game type.** Both `1v1` and `casual_1v1` run under `elimination_1v1`, so they share the same rules (and rating bucket via `Id = 1`). They differ only in matchmaking strictness, which `Preset = casual` packages as a one-line opt-in for the lenient bundle.
+- **Zone vs arena scope.** The game type sits in `global.conf` so a hypothetical second 1v1 arena could reuse it without redefining the rules; the queues sit in `arena.conf` because every queue is owned by an arena. If you'd rather keep everything together, the game type can move into `arena.conf` (or you can `#include` a shared file from either end) — the parser doesn't care which file the keys come from.
+- **Lookup name vs display label.** `Queue<i>Name` is what `?play` resolves against; `Queue<i>Label` is the pretty string shown in chat and the JSON payload. Decoupling them means you can rename one without disturbing the other.
 - **Per-team spawn pools.** Three candidate spawn points per team — the orchestrator picks one at random for each match, so consecutive games don't always start in identical positions.
 - **Drift enforcement.** `MaxSpawnDrift = 6` warps anyone who wanders more than 6 tiles from the chosen spawn back during Staging and Countdown.
-- **Explicit matchmaker tuning.** `LookAhead`, `RelaxTime`, `HoldWindow`, and `QualityCeiling` are spelled out for both queues — competitive holds out for balance, casual takes whatever it can get fast.
+- **Explicit matchmaker tuning.** `LookAhead`, `HoldWindow`, and `QualityCeiling` are spelled out for both queues; the standard queue holds out for balance, casual takes whatever it can get fast.
 
-`Zone/arenas/1v1comp/arena.conf` is the standard arena conf with `MatchFocus` + `MatchLvz` attached, `InitialSpec = 1`, `[SS.Matchmaking.MatchFocus] FilterKillPackets = 1`, and `[ClashEngine] DefaultQueue = 1v1`. Add `1v1comp` to `PermanentArenas` and grant the chat commands in `groupdef.dir/default`. That's the full setup.
+Add `1v1comp` to `PermanentArenas` and grant the chat commands in `groupdef.dir/default`. That's the full setup.
 
 ---
 
@@ -304,8 +335,8 @@ The same payload structure is used to render the in-game scoreboard at match end
 
 | Command | Group | Notes |
 |---|---|---|
-| `?play [comp\|casual] <queue>` | player | Queue for the next match. Tier defaults to `comp`. Without a queue name, falls back to the arena's `DefaultQueue`. |
-| `?queue [name]` | player | List all queues, or show who's queued and how long they've been waiting in `<name>`. |
+| `?play <queue name>` | player | Queue for the next match. Multiple space-separated tokens are joined with `_` before lookup (so `?play casual 4v4` looks up `casual_4v4`). Without a name, falls back to the arena's `DefaultQueue`. |
+| `?queue [name]` | player | List queues defined for the current arena, or show who's queued and how long they've been waiting in `<name>`. Same multi-word lookup as `?play`. |
 | `?cancel` | player | Leave every queue you're in. |
 | `?return` | player | Rejoin the match you were specced from. Bypasses the per-match freq lock by placing you directly on your assigned ship and team freq. |
 | `?party` / `?party <p1>[,<p2>,...]` | player | List your current party's members, or invite one or more players to your party. |

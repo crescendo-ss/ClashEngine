@@ -28,6 +28,7 @@ public static class LiveScoreboardBuilder
     public static MatchPayload Build(
         Guid matchId,
         string? queueName,
+        string? queueLabel,
         int gameType,
         string? arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> teams,
@@ -70,6 +71,7 @@ public static class LiveScoreboardBuilder
         var payload = MatchExporter.Build(
             matchId: matchId,
             queueName: queueName,
+            queueLabel: queueLabel,
             gameType: gameType,
             arena: arena,
             teams: teams,

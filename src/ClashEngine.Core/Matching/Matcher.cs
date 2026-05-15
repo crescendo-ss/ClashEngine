@@ -72,7 +72,7 @@ public sealed class Matcher
         var entry = new QueueEntry(player, rating, _clock.UtcNow, group);
         if (!def.Queue.Add(entry)) return false;
 
-        _multiQueue.Add(player, def.Name);
+        _multiQueue.Add(player, def.UniqueId);
         return true;
     }
 
@@ -83,7 +83,7 @@ public sealed class Matcher
         var entry = new QueueEntry(player, rating, _clock.UtcNow, group);
         if (!def.Queue.AddPriority(entry)) return false;
 
-        _multiQueue.Add(player, def.Name);
+        _multiQueue.Add(player, def.UniqueId);
         return true;
     }
 
@@ -93,9 +93,9 @@ public sealed class Matcher
         bool removed = def.Queue.Remove(player);
         if (removed)
         {
-            _multiQueue.Remove(player, def.Name);
+            _multiQueue.Remove(player, def.UniqueId);
             // The held candidate may include this player; invalidate it so we recompute next tick.
-            InvalidateHeldIfContains(def.Name, player);
+            InvalidateHeldIfContains(def.UniqueId, player);
         }
         return removed;
     }
@@ -121,7 +121,7 @@ public sealed class Matcher
             var fullSnapshot = def.Queue.Snapshot();
             if (fullSnapshot.Count < def.Shape.TotalPlayers)
             {
-                _held.Remove(def.Name);
+                _held.Remove(def.UniqueId);
                 continue;
             }
 
@@ -136,30 +136,30 @@ public sealed class Matcher
             var current = FindBestRespectingGroups(snapshot, def, minQuality);
             if (current is null)
             {
-                _held.Remove(def.Name);
+                _held.Remove(def.UniqueId);
                 continue;
             }
 
             // Update the held candidate if quality improved (or none was held yet). Hold-start
             // and (notable) hold-improvement are surfaced via telemetry so the adapter can keep
             // candidates informed during the lookahead window.
-            if (_held.TryGetValue(def.Name, out var prior))
+            if (_held.TryGetValue(def.UniqueId, out var prior))
             {
                 if (current.Quality > prior.Result.Quality)
                 {
                     double oldQ = prior.Result.Quality;
-                    _held[def.Name] = prior with { Result = current };
+                    _held[def.UniqueId] = prior with { Result = current };
                     if (current.Quality - oldQ >= HoldImprovementMinDelta)
-                        _telemetry().OnQueueHoldImproved(def.Name, FlattenPlayers(current), oldQ, current.Quality);
+                        _telemetry().OnQueueHoldImproved(def.UniqueId, FlattenPlayers(current), oldQ, current.Quality);
                 }
             }
             else
             {
-                _held[def.Name] = new HeldCandidate(current, now);
-                _telemetry().OnQueueHoldStarted(def.Name, FlattenPlayers(current), current.Quality, def.HoldWindow);
+                _held[def.UniqueId] = new HeldCandidate(current, now);
+                _telemetry().OnQueueHoldStarted(def.UniqueId, FlattenPlayers(current), current.Quality, def.HoldWindow);
             }
 
-            var held = _held[def.Name];
+            var held = _held[def.UniqueId];
             bool ceilingHit = held.Result.Quality >= def.QualityCeiling;
             bool windowElapsed = now - held.HeldSince >= def.HoldWindow;
             bool noLookaheadHeadroom = poolSize == def.LookAheadWindow;
@@ -169,13 +169,13 @@ public sealed class Matcher
             if (!ceilingHit && !windowElapsed && !noLookaheadHeadroom) continue;
 
             var chosen = held.Result;
-            _held.Remove(def.Name);
+            _held.Remove(def.UniqueId);
 
             for (int t = 0; t < chosen.Teams.Count; t++)
                 for (int j = 0; j < chosen.Teams[t].Count; j++)
                     DequeueEverywhere(chosen.Teams[t][j]);
 
-            return new MatchProposal(def.Name, def.Shape, chosen.Teams, chosen.Quality, now);
+            return new MatchProposal(def.UniqueId, def.Shape, chosen.Teams, chosen.Quality, now);
         }
 
         return null;

@@ -17,6 +17,7 @@ public sealed record MatchPayload(
     int SchemaVersion,
     Guid MatchId,
     string? QueueName,
+    string? QueueLabel,
     int GameType,
     string? Arena,
     DateTimeOffset? StartedAt,

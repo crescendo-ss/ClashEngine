@@ -185,7 +185,7 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
         if (string.IsNullOrWhiteSpace(arenaName))
         {
             _log.LogM(LogLevel.Info, LogCategory,
-                $"Queue '{queue.Name}' has no MatchArena configured; skipping recording for {match.MatchId:N}.");
+                $"Queue '{queue.UniqueId}' has no MatchArena configured; skipping recording for {match.MatchId:N}.");
             return;
         }
 
@@ -202,7 +202,7 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
         // creation off the mainloop and log on failure -- no syscall here.
 
         string filePath = Path.Combine(_recordingDir, $"{match.MatchId:N}.replay");
-        string comments = $"ClashEngine match {match.MatchId:N}; queue={queue.Name}; gameType={match.GameType.Value}; arena={arenaName}";
+        string comments = $"ClashEngine match {match.MatchId:N}; queue={queue.UniqueId}; gameType={match.GameType.Value}; arena={arenaName}";
 
         var session = _recorder.StartRecording(arena, filePath, comments, recorder: null);
         if (session is null)

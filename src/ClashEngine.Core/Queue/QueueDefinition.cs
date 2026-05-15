@@ -7,14 +7,6 @@ using ClashEngine.Core.Penalties;
 
 namespace ClashEngine.Core.Queue;
 
-/// <summary>Matchmaking strictness tier. Drives quality-policy bands and ship-balancer
-/// strictness; also surfaced to chat / log lines so the player sees which queue they're in.</summary>
-public enum MatchmakingTier
-{
-    Competitive,
-    Casual,
-}
-
 /// <summary>
 /// A named matchmaking queue together with its match shape, quality policy, the rating
 /// game-type it stores ratings under, end-of-match adjudication, griefing-detection knobs,
@@ -23,7 +15,7 @@ public enum MatchmakingTier
 public sealed class QueueDefinition
 {
     public QueueDefinition(
-        string name,
+        string uniqueId,
         MatchShape shape,
         PartitionQualityPolicy qualityPolicy,
         GameTypeId gameType = default,
@@ -47,12 +39,13 @@ public sealed class QueueDefinition
         TimeSpan? knockoutSpecDelay = null,
         int? livesPerPlayer = null,
         TimeSpan? teamCollapseGrace = null,
-        MatchmakingTier tier = MatchmakingTier.Competitive,
         TimeSpan? shipChangeGracePeriod = null,
         TimeSpan? timeLimit = null,
-        ItemsAction returnItemsAction = ItemsAction.Full)
+        ItemsAction returnItemsAction = ItemsAction.Full,
+        string? ownerArenaName = null,
+        string? label = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
         ArgumentNullException.ThrowIfNull(qualityPolicy);
         if (vetoesRequired < 1)
@@ -117,7 +110,7 @@ public sealed class QueueDefinition
             throw new ArgumentOutOfRangeException(nameof(lookAheadWindow),
                 $"Must be >= TotalPlayers ({shape.TotalPlayers}).");
 
-        Name = name;
+        UniqueId = uniqueId;
         Shape = shape;
         QualityPolicy = qualityPolicy;
         GameType = gameType;
@@ -141,17 +134,63 @@ public sealed class QueueDefinition
         KnockoutSpecDelay = knockoutSpecDelay ?? TimeSpan.Zero;
         LivesPerPlayer = livesPerPlayer;
         TeamCollapseGrace = teamCollapseGrace;
-        Tier = tier;
         ShipChangeGracePeriod = shipChangeGracePeriod ?? TimeSpan.FromSeconds(10);
         TimeLimit = timeLimit;
         ReturnItemsAction = returnItemsAction;
-        Queue = new PlayerQueue(name);
+        OwnerArenaName = ownerArenaName;
+
+        // BaseName is the structural part of UniqueId without the arena prefix. Used as the
+        // Label fallback when the operator didn't supply one.
+        if (string.IsNullOrEmpty(ownerArenaName))
+        {
+            BaseName = uniqueId;
+        }
+        else
+        {
+            string prefix = ownerArenaName + "/";
+            BaseName = uniqueId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? uniqueId[prefix.Length..]
+                : uniqueId;
+        }
+        Label = string.IsNullOrWhiteSpace(label) ? BaseName : label!;
+
+        Queue = new PlayerQueue(uniqueId);
     }
 
-    /// <summary>Matchmaking strictness this queue runs at (competitive vs casual).</summary>
-    public MatchmakingTier Tier { get; }
+    /// <summary>
+    /// Arena that owns this queue (the arena whose <c>[ClashEngine]</c> section contributed
+    /// it), or <see langword="null"/> for queues registered at construction without an owning
+    /// arena (legacy / test path). The owning arena drives lifecycle: when the arena is
+    /// detached from <see cref="ClashModule"/>, every queue it contributed is removed from the
+    /// registry.
+    /// </summary>
+    public string? OwnerArenaName { get; }
 
-    public string Name { get; }
+    /// <summary>
+    /// Structural short identifier: <see cref="UniqueId"/> with the leading "<c>{ownerArena}/</c>"
+    /// prefix stripped. This is the operator-facing identifier they write under
+    /// <c>[ClashEngine]</c> as <c>Queue&lt;i&gt;Name</c> and that players type after
+    /// <c>?play</c> (e.g. "<c>casual_4v4</c>"). For human-friendly display use
+    /// <see cref="Label"/> instead.
+    /// </summary>
+    public string BaseName { get; }
+
+    /// <summary>
+    /// Operator-chosen pretty string for chat output and the match-stats JSON payload (e.g.
+    /// "<c>4v4 (Casual)</c>"). Falls back to <see cref="BaseName"/> when the operator did not
+    /// supply a <c>Queue&lt;i&gt;Label</c> under <c>[ClashEngine]</c>.
+    /// </summary>
+    public string Label { get; }
+
+    /// <summary>
+    /// Globally-unique key for this queue in the <see cref="QueueRegistry"/>. Composed as
+    /// "<c>{OwnerArenaName}/{BaseName}</c>" for arena-owned queues, or just <c>BaseName</c> for
+    /// queues constructed without an owner (legacy / test path). Used as the dictionary key,
+    /// for matcher proposals, in-flight match indexing, and the JSON payload's
+    /// <c>queueName</c> field. Operators never type this directly; for chat / display use
+    /// <see cref="Label"/>.
+    /// </summary>
+    public string UniqueId { get; }
     public MatchShape Shape { get; }
     public PartitionQualityPolicy QualityPolicy { get; }
     public GameTypeId GameType { get; }

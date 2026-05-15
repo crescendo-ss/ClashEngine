@@ -160,8 +160,11 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
             }
         }
 
+        // Snapshot the queue's qualified UniqueId ("{arena}/{baseName}") and Label at
+        // match-start. Mid-match config edits don't retroactively change the payload.
         _matchInfoById[match.MatchId] = new MatchInfo(
-            QueueName: queue.Name,
+            QueueName: queue.UniqueId,
+            QueueLabel: queue.Label,
             GameType: match.GameType.Value,
             Arena: queue.MatchArenaName,
             Teams: match.Teams,
@@ -218,6 +221,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
                 payload = MatchExporter.Build(
                     matchId: outcome.MatchId,
                     queueName: info.QueueName,
+                    queueLabel: info.QueueLabel,
                     gameType: info.GameType,
                     arena: info.Arena,
                     teams: info.Teams,
@@ -346,6 +350,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
 
     private readonly record struct MatchInfo(
         string QueueName,
+        string QueueLabel,
         int GameType,
         string? Arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> Teams,

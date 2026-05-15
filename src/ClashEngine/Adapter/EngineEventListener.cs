@@ -90,20 +90,12 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     }
 
     /// <summary>
-    /// Renders a queue's display name with its tier prefix, matching <see cref="FormatQueuedMessage"/>'s
-    /// style ("competitive 4v4" / "casual 4v4"). Falls back to the bare queue name when the queue
-    /// isn't registered (which shouldn't happen for any name we receive from the engine).
+    /// Renders the operator-chosen <see cref="QueueDefinition.Label"/> for chat output. Falls
+    /// back to the bare queue name when the queue isn't registered (which shouldn't happen for
+    /// any name we receive from the engine).
     /// </summary>
-    private string FormatQueueDescriptor(string queueName)
-    {
-        if (!_queues.TryGet(queueName, out var def)) return queueName;
-        var tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
-        var suffix = "_" + tierLabel;
-        var display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-            ? queueName[..^suffix.Length]
-            : queueName;
-        return $"{tierLabel} {display}";
-    }
+    private string FormatQueueDescriptor(string queueName) =>
+        _queues.TryGet(queueName, out var def) ? def.Label : queueName;
 
     public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null)
     {
@@ -113,40 +105,30 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     }
 
     /// <summary>
-    /// Renders the "queued for X" reply with a (competitive) / (casual) tier prefix sourced from
-    /// the queue's registered <see cref="QueueDefinition.Tier"/>. The tier suffix on the
-    /// registered queue name (<c>_competitive</c>/<c>_casual</c>) is stripped from the display
-    /// so the prefix isn't redundantly echoed (e.g. "Queued for competitive 4v4", not
-    /// "Queued for competitive 4v4_competitive"). Falls back to the bare queue name if the
-    /// queue isn't registered.
+    /// Renders the "queued for X" reply using the queue's operator-chosen
+    /// <see cref="QueueDefinition.Label"/>. Falls back to the bare queue name if the queue
+    /// isn't registered.
     /// <para>When <paramref name="initiator"/> is set and differs from <paramref name="player"/>
     /// (open-party group enqueue, recipient row), attributes the queue to the initiating party
     /// member ("X queued you for ..."). Otherwise renders the standard "Queued for ..." reply.</para>
     /// </summary>
     private string FormatQueuedMessage(string queueName, PlayerKey player, PlayerKey? initiator)
     {
-        string display;
-        string? tierLabel;
+        string descriptor;
         int? waiting = null;
         if (_queues.TryGet(queueName, out var def))
         {
-            tierLabel = def.Tier == MatchmakingTier.Casual ? "casual" : "competitive";
-            string suffix = "_" + tierLabel;
-            display = queueName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-                ? queueName[..^suffix.Length]
-                : queueName;
+            descriptor = def.Label;
             // OnQueueAdded fires after the matcher has appended the player, so Count already
             // includes the freshly-enqueued addition.
             waiting = def.Queue.Count;
         }
         else
         {
-            tierLabel = null;
-            display = queueName;
+            descriptor = queueName;
         }
 
         bool attributed = initiator is PlayerKey ini && !ini.Equals(player);
-        string descriptor = tierLabel is null ? display : $"{tierLabel} {display}";
         string countSuffix = waiting is { } w ? $" ({w} in queue)" : "";
         return attributed
             ? $"{initiator!.Value.Name} queued you for {descriptor}{countSuffix}."

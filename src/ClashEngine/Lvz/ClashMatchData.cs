@@ -62,7 +62,7 @@ internal sealed class ClashMatchData : IMatchData
         // queue/arena get different MatchIdentifiers so Continuum doesn't reuse cached LVZ
         // ImageIds across matches (mirrors SS.Matchmaking.Modules.CaptainsMatch decfb74:
         // "Use unique MatchIdentifier per captains match").
-        MatchIdentifier = new MatchIdentifier(MatchType: $"{queue.Name}#{generation}", ArenaNumber: arenaNumber, BoxIdx: 0);
+        MatchIdentifier = new MatchIdentifier(MatchType: $"{queue.UniqueId}#{generation}", ArenaNumber: arenaNumber, BoxIdx: 0);
 
         _configuration = new ClashMatchConfiguration(match, queue);
 

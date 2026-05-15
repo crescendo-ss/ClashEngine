@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using ClashEngine.Core.Adapter;
 using ClashEngine.Core.Eligibility;
+using ClashEngine.Core.GameType;
 using ClashEngine.Core.Groups;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
@@ -20,6 +21,7 @@ namespace ClashEngine.Core;
 public sealed class MatchmakingEngine
 {
     private readonly QueueRegistry _queues;
+    private readonly GameTypeRegistry _gameTypes = new();
     private readonly MultiQueueIndex _multiQueue = new();
     private readonly TeamBalancer _balancer = new();
     private readonly IMatchQualityFunction _quality;
@@ -83,6 +85,7 @@ public sealed class MatchmakingEngine
     }
 
     public QueueRegistry Queues => _queues;
+    public GameTypeRegistry GameTypes => _gameTypes;
     public PenaltyTracker Penalties => _penalties;
     public GroupRegistry Groups => _groups;
     public IReadOnlyDictionary<(Guid MatchId, PlayerKey Target), PendingGriefingPenalty> PendingGriefingPenalties => _pendingGriefs;
@@ -470,8 +473,8 @@ public sealed class MatchmakingEngine
             if (CheckEligibility(p).Status != EligibilityStatus.Available) continue;
             var rating = _ratings.Get(p, queue.GameType);
             var groupId = _groups.GroupOf(p);
-            if (_matcher.EnqueuePriority(p, rating, queue.Name, groupId))
-                _telemetry.OnQueueAdded(p, queue.Name, at);
+            if (_matcher.EnqueuePriority(p, rating, queue.UniqueId, groupId))
+                _telemetry.OnQueueAdded(p, queue.UniqueId, at);
         }
     }
 
@@ -670,17 +673,17 @@ public sealed class MatchmakingEngine
 
             if (count >= threshold)
             {
-                if (_nearFullFired.Add(def.Name))
+                if (_nearFullFired.Add(def.UniqueId))
                 {
                     var snapshot = def.Queue.Snapshot();
                     var waiting = new PlayerKey[snapshot.Count];
                     for (int i = 0; i < snapshot.Count; i++) waiting[i] = snapshot[i].Player;
-                    _telemetry.OnQueueNearFull(def.Name, waiting, count, def.Shape.TotalPlayers);
+                    _telemetry.OnQueueNearFull(def.UniqueId, waiting, count, def.Shape.TotalPlayers);
                 }
             }
             else
             {
-                _nearFullFired.Remove(def.Name);
+                _nearFullFired.Remove(def.UniqueId);
             }
         }
     }
@@ -836,14 +839,14 @@ public sealed class MatchmakingEngine
         for (int r = 1; r < outcome.RankedTeams.Count; r++)
         {
             foreach (var p in outcome.RankedTeams[r].Players)
-                _consecutiveDefenses.Remove((p, queue.Name));
+                _consecutiveDefenses.Remove((p, queue.UniqueId));
         }
 
         // Determine whether winners exceed the cap.
         bool atLeastOneAtCap = false;
         foreach (var p in winners)
         {
-            int prior = _consecutiveDefenses.TryGetValue((p, queue.Name), out var c) ? c : 0;
+            int prior = _consecutiveDefenses.TryGetValue((p, queue.UniqueId), out var c) ? c : 0;
             if (prior + 1 > queue.MaxConsecutiveDefenses)
             {
                 atLeastOneAtCap = true;
@@ -864,19 +867,19 @@ public sealed class MatchmakingEngine
             int defensesUsed;
             if (atLeastOneAtCap)
             {
-                _consecutiveDefenses.Remove((p, queue.Name));
-                _matcher.Enqueue(p, rating, queue.Name, groupId);
+                _consecutiveDefenses.Remove((p, queue.UniqueId));
+                _matcher.Enqueue(p, rating, queue.UniqueId, groupId);
                 defensesUsed = 0;
             }
             else
             {
-                int prior = _consecutiveDefenses.TryGetValue((p, queue.Name), out var c) ? c : 0;
-                _consecutiveDefenses[(p, queue.Name)] = prior + 1;
-                _matcher.EnqueuePriority(p, rating, queue.Name, groupId);
+                int prior = _consecutiveDefenses.TryGetValue((p, queue.UniqueId), out var c) ? c : 0;
+                _consecutiveDefenses[(p, queue.UniqueId)] = prior + 1;
+                _matcher.EnqueuePriority(p, rating, queue.UniqueId, groupId);
                 defensesUsed = prior + 1;
             }
             _telemetry.OnWinnerPromoted(
-                p, queue.Name, at, defensesUsed, queue.MaxConsecutiveDefenses, atLeastOneAtCap);
+                p, queue.UniqueId, at, defensesUsed, queue.MaxConsecutiveDefenses, atLeastOneAtCap);
         }
     }
 

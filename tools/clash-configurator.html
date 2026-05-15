@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clash Configurator</title>
+<style>
+  :root {
+    --bg: #1a1d23;
+    --panel: #232830;
+    --panel-2: #2c333d;
+    --border: #3a424f;
+    --text: #e4e6eb;
+    --text-dim: #9aa3b2;
+    --accent: #5b9dd9;
+    --accent-hover: #7ab2e3;
+    --danger: #e57373;
+    --danger-bg: #3d2424;
+    --warning: #e0b870;
+    --warning-bg: #3d3324;
+    --ok: #8fcf8f;
+    --code-bg: #0f1115;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  code, pre, .mono {
+    font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+  }
+  header.page-header {
+    padding: 16px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header.page-header h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  header.page-header p {
+    margin: 4px 0 0;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    height: calc(100vh - 65px);
+    overflow: hidden;
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; height: auto; overflow: visible; }
+    aside.preview-panel { position: static !important; height: auto !important; }
+  }
+  .form-panel {
+    overflow-y: auto;
+    padding: 16px 24px 64px;
+  }
+  aside.preview-panel {
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  .preview-toolbar h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .preview-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  pre.preview {
+    margin: 0;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .validation-box {
+    margin-bottom: 12px;
+    border-radius: 4px;
+    padding: 0;
+  }
+  .validation-box.empty { display: none; }
+  .validation-group {
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .validation-group.errors {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
+  }
+  .validation-group.warnings {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning);
+  }
+  .validation-group h3 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .validation-group.errors h3 { color: var(--danger); }
+  .validation-group.warnings h3 { color: var(--warning); }
+  .validation-group ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+  }
+  .validation-group li { margin: 2px 0; }
+  section.form-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .section-header {
+    padding: 12px 16px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .section-header h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .section-header .caret {
+    color: var(--text-dim);
+    transition: transform 0.15s ease;
+  }
+  section.form-section.collapsed .caret { transform: rotate(-90deg); }
+  section.form-section.collapsed .section-body { display: none; }
+  .section-body { padding: 16px; }
+  .section-description {
+    margin: 0 0 12px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .field {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px;
+    align-items: start;
+    margin-bottom: 10px;
+  }
+  .field > label {
+    color: var(--text-dim);
+    padding-top: 7px;
+    font-size: 13px;
+  }
+  .field-input { display: flex; flex-direction: column; gap: 4px; }
+  .field-hint {
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .field-error {
+    color: var(--danger);
+    font-size: 12px;
+    display: none;
+  }
+  .field.has-error .field-error { display: block; }
+  .field.has-error input,
+  .field.has-error select { border-color: var(--danger); }
+  input[type="text"],
+  input[type="url"],
+  input[type="password"],
+  input[type="number"],
+  select {
+    background: var(--code-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+    max-width: 380px;
+  }
+  input[type="number"] { max-width: 120px; }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  input[type="checkbox"] { vertical-align: middle; }
+  label.checkbox-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding-top: 7px;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { background: var(--accent-hover); }
+  button:disabled {
+    background: var(--border);
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+  button.subtle {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.subtle:hover { background: var(--border); }
+  button.danger {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  button.danger:hover {
+    background: var(--danger-bg);
+    border-color: var(--danger);
+  }
+  .duration {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .duration input[type="number"] {
+    width: 56px;
+    max-width: 56px;
+    text-align: center;
+  }
+  .duration .unit {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-right: 2px;
+  }
+  .duration .formatted {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-left: 8px;
+    font-family: inherit;
+  }
+  .duration.disabled input { opacity: 0.4; }
+  .duration-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 10px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+  .card-header .title {
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .card-header .title .index {
+    color: var(--text-dim);
+    margin-right: 8px;
+  }
+  .card-header .actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .card-body { padding: 14px 14px 4px; }
+  .card.collapsed .card-body { display: none; }
+  .card.collapsed .caret { transform: rotate(-90deg); }
+  .subgroup {
+    margin: 12px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--panel);
+  }
+  .subgroup h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+  }
+  .team-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 10px;
+    align-items: start;
+    margin-bottom: 8px;
+  }
+  .team-row > .team-label {
+    color: var(--text-dim);
+    padding-top: 6px;
+    font-size: 13px;
+  }
+  .spawn-points {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .spawn-pair {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .spawn-pair input[type="number"] {
+    width: 80px;
+    max-width: 80px;
+  }
+  .spawn-pair .sep { color: var(--text-dim); }
+  .ship-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .ship-row select { max-width: 130px; }
+  .add-btn-row {
+    margin-top: 8px;
+  }
+  .quality-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .quality-slider-row input[type="range"] {
+    flex: 1;
+    max-width: 260px;
+  }
+  .quality-slider-row .readout {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: var(--accent);
+    font-size: 13px;
+    min-width: 40px;
+  }
+  .conditional {
+    display: none;
+    margin-top: 8px;
+    padding-left: 12px;
+    border-left: 2px solid var(--border);
+  }
+  .conditional.shown { display: block; }
+  .empty-list {
+    color: var(--text-dim);
+    font-style: italic;
+    padding: 8px 0;
+  }
+  .copy-feedback {
+    color: var(--ok);
+    font-size: 12px;
+    margin-left: 8px;
+    display: none;
+  }
+  .copy-feedback.shown { display: inline; }
+  .output-block {
+    margin-bottom: 18px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .output-header h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .output-block pre.preview {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+  }
+  .output-empty {
+    padding: 14px 16px;
+    color: var(--text-dim);
+    font-style: italic;
+    font-size: 13px;
+  }
+  .scope-chip {
+    display: inline-flex;
+    align-items: center;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 11px;
+    margin-right: 6px;
+  }
+  .scope-chip > label {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  .scope-chip > label.active {
+    background: var(--accent);
+    color: white;
+  }
+  .scope-chip input[type="radio"] { display: none; }
+</style>
+</head>
+<body>
+
+<header class="page-header">
+  <h1>Clash Configurator</h1>
+  <p>Builds two <code>[ClashEngine]</code> blocks side by side: one for <code>conf/global.conf</code> (engine-wide settings) and one for an arena's <code>arena.conf</code> (per-arena settings). Each game type and queue picks which file it belongs in.</p>
+</header>
+
+<main>
+  <div class="form-panel">
+
+    <!-- Plug-in tuning -->
+    <section class="form-section" id="section-plugin">
+      <div class="section-header">
+        <h2>Plug-in tuning <span style="color:var(--text-dim);font-weight:normal">(<code>global.conf</code>)</span></h2>
+        <span class="caret">&#9662;</span>
+      </div>
+      <div class="section-body">
+        <p class="section-description">Engine-wide settings. Only non-default values are emitted.</p>
+        <div class="field" data-field="logVerbosity">
+          <label>LogVerbosity</label>
+          <div class="field-input">
+            <select id="pt-log-verbosity">
+              <option value="Off">Off</option>
+              <option value="Normal" selected>Normal</option>
+              <option value="Verbose">Verbose</option>
+              <option value="Trace">Trace</option>
+            </select>
+            <div class="field-hint">Runtime-mutable via <code>?clashlog</code>. Trace logs every wire event.</div>
+          </div>
+        </div>
+        <div class="field" data-field="uploadUrl">
+          <label>UploadUrl</label>
+          <div class="field-input">
+            <input type="url" id="pt-upload-url" placeholder="http://localhost:8080/api/matches">
+            <div class="field-hint">Stats-upload endpoint. Pair with UploadApiKey. Otherwise envelopes write to <code>matches/</code>.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
+        <div class="field" data-field="uploadApiKey">
+          <label>UploadApiKey</label>
+          <div class="field-input">
+            <input type="password" id="pt-upload-api-key" placeholder="(secret)">
+            <div class="field-hint">Sent as <code>X-Api-Key</code>. Required when UploadUrl is set.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
+        <div class="field" data-field="statsViewUrl">
+          <label>StatsViewUrl</label>
+          <div class="field-input">
+            <input type="url" id="pt-stats-view-url" placeholder="https://example.com/match/{matchId}">
+            <div class="field-hint">Per-match viewer template. May contain a literal <code>{matchId}</code> token.</div>
+          </div>
+        </div>
+        <div class="field" data-field="recordReplays">
+          <label>RecordReplays</label>
+          <div class="field-input">
+            <label class="checkbox-row"><input type="checkbox" id="pt-record-replays" checked> Record every started match</label>
+          </div>
+        </div>
+        <div class="field" data-field="replayRecordingDir">
+          <label>ReplayRecordingDir</label>
+          <div class="field-input">
+            <input type="text" id="pt-replay-dir" placeholder="clash-replays">
+            <div class="field-hint">Where in-flight <code>.replay</code> files land. Default is <code>clash-replays</code> next to the binary.</div>
+          </div>
+        </div>
+        <div class="field" data-field="distanceSampleHz">
+          <label>DistanceSampleHz</label>
+          <div class="field-input">
+            <input type="number" id="pt-distance-hz" min="0" max="50" step="1" placeholder="5">
+            <div class="field-hint">Distance-to-nearest-enemy sample rate. 1&ndash;50, or 0 to disable. Default 5.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DefaultQueue -->
+    <section class="form-section" id="section-default-queue">
+      <div class="section-header">
+        <h2>Default queue <span style="color:var(--text-dim);font-weight:normal">(per-arena)</span></h2>
+        <span class="caret">&#9662;</span>
+      </div>
+      <div class="section-body">
+        <p class="section-description">Goes in an arena's <code>arena.conf</code>. Sets what <code>?play</code> resolves to from that arena when no queue is named.</p>
+        <div class="field" data-field="defaultQueue">
+          <label>DefaultQueue</label>
+          <div class="field-input">
+            <select id="dq-select">
+              <option value="">(none)</option>
+            </select>
+            <div class="field-hint">Must match a queue defined below.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Game types -->
+    <section class="form-section" id="section-game-types">
+      <div class="section-header">
+        <h2>Game types</h2>
+        <span class="caret">&#9662;</span>
+      </div>
+      <div class="section-body">
+        <p class="section-description">A game type is the rules of one match shape. Each card's <em>Global / Arena</em> toggle decides whether it lands in <code>global.conf</code> (visible to every arena) or this arena's <code>arena.conf</code>.</p>
+        <div id="game-types-list"></div>
+        <div class="add-btn-row">
+          <button class="subtle" id="add-game-type-btn">+ Add game type</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Queues -->
+    <section class="form-section" id="section-queues">
+      <div class="section-header">
+        <h2>Queues</h2>
+        <span class="caret">&#9662;</span>
+      </div>
+      <div class="section-body">
+        <p class="section-description">Each queue is one matchmaking pool that produces matches under a particular game type. Use the <em>Global / Arena</em> toggle to choose which conf file the queue lands in.</p>
+        <div id="queues-list"></div>
+        <div class="add-btn-row">
+          <button class="subtle" id="add-queue-btn">+ Add queue</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <aside class="preview-panel">
+    <div class="preview-toolbar">
+      <h2>Generated config</h2>
+    </div>
+    <div class="preview-body">
+      <div class="validation-box empty" id="validation-box"></div>
+
+      <div class="output-block" id="block-global">
+        <div class="output-header">
+          <h3>conf/global.conf</h3>
+          <div>
+            <span class="copy-feedback" id="copy-feedback-global">Copied</span>
+            <button class="copy-btn" data-scope="global">Copy</button>
+          </div>
+        </div>
+        <pre class="preview" id="preview-global"></pre>
+        <div class="output-empty" id="empty-global" style="display:none">
+          Nothing global-scoped yet. Plug-in tuning or any game type / queue with <em>Global</em> scope goes here.
+        </div>
+      </div>
+
+      <div class="output-block" id="block-arena">
+        <div class="output-header">
+          <h3>arenas/&lt;your-arena&gt;/arena.conf</h3>
+          <div>
+            <span class="copy-feedback" id="copy-feedback-arena">Copied</span>
+            <button class="copy-btn" data-scope="arena">Copy</button>
+          </div>
+        </div>
+        <pre class="preview" id="preview-arena"></pre>
+        <div class="output-empty" id="empty-arena" style="display:none">
+          Nothing arena-scoped yet. <code>DefaultQueue</code> or any game type / queue with <em>Arena</em> scope goes here.
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<script>
+/* ----------------------------------------------------------------------
+   ClashEngine config keys, defaults, and validation rules are mirrored
+   from src/ClashEngine/Config/*.cs and tools/queue_designer.py.
+   ---------------------------------------------------------------------- */
+
+const SHIP_NAMES = ["warbird","javelin","spider","leviathan","terrier","weasel","lancaster","shark"];
+const ITEMS_ACTIONS = ["full","restore","burn"];
+const LOG_VERBOSITY_DEFAULT = "Normal";
+const REPLAY_DIR_DEFAULT = "clash-replays";
+const DISTANCE_HZ_DEFAULT = 5;
+
+const NAME_RE = /^[A-Za-z0-9_]+$/;
+
+const state = {
+  pluginTuning: {
+    logVerbosity: LOG_VERBOSITY_DEFAULT,
+    uploadUrl: "",
+    uploadApiKey: "",
+    statsViewUrl: "",
+    recordReplays: true,
+    replayRecordingDir: "",
+    distanceSampleHz: null,
+  },
+  defaultQueue: "",
+  gameTypes: [],
+  queues: [],
+};
+
+let nextId = 1;
+const uid = () => `id${nextId++}`;
+
+function newGameType() {
+  const idx = state.gameTypes.length + 1;
+  return {
+    _key: uid(),
+    collapsed: false,
+    scope: "global",
+    name: "",
+    id: idx,
+    teamCount: 2,
+    playersPerTeam: 4,
+    killTarget: 0,
+    timeLimitSec: null,
+    lives: 0,
+    teamCollapseGraceSec: null,
+    shipChangeGraceSec: null,
+    returnItemsAction: "full",
+    warpOnSpawn: false,
+    teamSpawns: [[], []],
+    maxSpawnDriftTiles: null,
+    shipsEnabled: false,
+    teamShips: [[], []],
+    stagingDurationSec: null,
+    countdownDurationSec: null,
+    knockoutSpecDelaySec: null,
+  };
+}
+
+function newQueue() {
+  return {
+    _key: uid(),
+    collapsed: false,
+    scope: "global",
+    name: "",
+    label: "",
+    gameType: "",
+    preset: "",
+    matchArena: "",
+    lookAhead: null,
+    relaxTimeSec: null,
+    holdWindowSec: null,
+    qualityCeiling: null,
+    vetoesRequired: null,
+    vetoWindowSec: null,
+    promoteWinners: false,
+    maxConsecutiveDefenses: null,
+  };
+}
+
+/* ----------------- Duration parsing/formatting ----------------- */
+
+// Mirrors ConfigReadHelpers.TryReadTimeSpan: HH:MM:SS, MM:SS, or bare integer seconds.
+// Output mirrors queue_designer.py _format_time: bare seconds for <60s, "H:MM:SS" otherwise.
+function formatTime(seconds) {
+  if (seconds === null || seconds === undefined) return "";
+  if (seconds === 0) return "0";
+  if (seconds > 0 && seconds < 60) return String(seconds);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+/* ----------------- DOM helpers ----------------- */
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v;
+    else if (k === "html") node.innerHTML = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+    else if (v === true) node.setAttribute(k, "");
+    else if (v === false || v === null || v === undefined) {} // skip
+    else node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+/* ----------------- Duration widget -----------------
+   Stores seconds. UI: checkbox to enable + h/m/s spinners + formatted hint.
+   `min`/`max`/`step` are in seconds. `unsetMeansDefault`: when unchecked, the value
+   is null (use engine default). For required durations (e.g. all game-type timings
+   are optional from the user side; defaults handled by emit logic), null = unset. */
+
+function durationWidget({ value, min = 0, max = null, onChange, allowUnset = true, unsetLabel = "use default" }) {
+  const wrap = el("div", { class: "duration" });
+  const enabled = value !== null && value !== undefined;
+  let secs = enabled ? value : 0;
+
+  const toggle = allowUnset
+    ? el("label", { class: "duration-toggle" },
+        el("input", {
+          type: "checkbox",
+          checked: enabled,
+          onchange: e => {
+            if (e.target.checked) {
+              applyValue(secs || 0);
+            } else {
+              onChange(null);
+              setEnabled(false);
+            }
+          }
+        }),
+        unsetLabel
+      )
+    : null;
+
+  const hIn = el("input", { type: "number", min: 0, step: 1, value: Math.floor(secs / 3600) });
+  const mIn = el("input", { type: "number", min: 0, max: 59, step: 1, value: Math.floor((secs % 3600) / 60) });
+  const sIn = el("input", { type: "number", min: 0, max: 59, step: 1, value: secs % 60 });
+  const formatted = el("span", { class: "formatted" });
+
+  function readInputs() {
+    const h = parseInt(hIn.value || "0", 10) || 0;
+    const m = parseInt(mIn.value || "0", 10) || 0;
+    const s = parseInt(sIn.value || "0", 10) || 0;
+    return h * 3600 + m * 60 + s;
+  }
+  function writeInputs(total) {
+    hIn.value = Math.floor(total / 3600);
+    mIn.value = Math.floor((total % 3600) / 60);
+    sIn.value = total % 60;
+  }
+  function updateFormatted(total) {
+    formatted.textContent = total > 0 ? `(${formatTime(total)})` : "";
+  }
+  function setEnabled(on) {
+    [hIn, mIn, sIn].forEach(i => { i.disabled = !on; });
+    wrap.classList.toggle("disabled", !on);
+    if (!on) formatted.textContent = "(unset)";
+    else updateFormatted(secs);
+  }
+  function applyValue(total) {
+    if (max !== null && total > max) total = max;
+    if (total < min) total = min;
+    secs = total;
+    writeInputs(total);
+    updateFormatted(total);
+    onChange(total);
+    setEnabled(true);
+  }
+
+  for (const inp of [hIn, mIn, sIn]) {
+    inp.addEventListener("input", () => {
+      applyValue(readInputs());
+    });
+  }
+
+  if (toggle) wrap.appendChild(toggle);
+  wrap.appendChild(hIn); wrap.appendChild(el("span", { class: "unit" }, "h"));
+  wrap.appendChild(mIn); wrap.appendChild(el("span", { class: "unit" }, "m"));
+  wrap.appendChild(sIn); wrap.appendChild(el("span", { class: "unit" }, "s"));
+  wrap.appendChild(formatted);
+
+  setEnabled(enabled || !allowUnset);
+  return wrap;
+}
+
+/* ----------------- Plug-in tuning bindings ----------------- */
+
+function bindPluginTuning() {
+  const pt = state.pluginTuning;
+  document.getElementById("pt-log-verbosity").addEventListener("change", e => {
+    pt.logVerbosity = e.target.value; render();
+  });
+  document.getElementById("pt-upload-url").addEventListener("input", e => {
+    pt.uploadUrl = e.target.value.trim(); render();
+  });
+  document.getElementById("pt-upload-api-key").addEventListener("input", e => {
+    pt.uploadApiKey = e.target.value; render();
+  });
+  document.getElementById("pt-stats-view-url").addEventListener("input", e => {
+    pt.statsViewUrl = e.target.value.trim(); render();
+  });
+  document.getElementById("pt-record-replays").addEventListener("change", e => {
+    pt.recordReplays = e.target.checked; render();
+  });
+  document.getElementById("pt-replay-dir").addEventListener("input", e => {
+    pt.replayRecordingDir = e.target.value.trim(); render();
+  });
+  document.getElementById("pt-distance-hz").addEventListener("input", e => {
+    const v = e.target.value.trim();
+    pt.distanceSampleHz = v === "" ? null : parseInt(v, 10);
+    render();
+  });
+
+  document.getElementById("dq-select").addEventListener("change", e => {
+    state.defaultQueue = e.target.value;
+    render();
+  });
+}
+
+/* ----------------- Section collapse ----------------- */
+
+function bindSectionCollapse() {
+  document.querySelectorAll("section.form-section .section-header").forEach(h => {
+    h.addEventListener("click", () => {
+      h.parentElement.classList.toggle("collapsed");
+    });
+  });
+}
+
+/* ----------------- Game type card ----------------- */
+
+function renderGameTypeCard(gt, index) {
+  const card = el("div", { class: "card" + (gt.collapsed ? " collapsed" : ""), "data-key": gt._key });
+
+  const titleSpan = el("span", { class: "title" },
+    el("span", { class: "index" }, `#${index + 1}`),
+    gt.name || "(unnamed)"
+  );
+
+  const header = el("div", { class: "card-header" },
+    el("span", {}, el("span", { class: "caret" }, "▾"), " ", titleSpan),
+    el("span", { class: "actions" },
+      scopeChip(gt.scope, s => { gt.scope = s; render(); }),
+      el("button", {
+        class: "danger",
+        onclick: (e) => { e.stopPropagation(); removeGameType(gt._key); }
+      }, "Remove")
+    )
+  );
+  header.addEventListener("click", (e) => {
+    if (e.target.closest("button") || e.target.closest(".scope-chip")) return;
+    gt.collapsed = !gt.collapsed;
+    card.classList.toggle("collapsed");
+  });
+  card.appendChild(header);
+
+  const body = el("div", { class: "card-body" });
+
+  // Name
+  body.appendChild(simpleField("Name", "Referenced by Queue<i>GameType. Case-insensitive. Alphanumeric/underscore.",
+    el("input", {
+      type: "text",
+      value: gt.name,
+      placeholder: "elimination_1v1",
+      oninput: e => { gt.name = e.target.value.trim(); titleSpan.lastChild.textContent = gt.name || "(unnamed)"; render(); }
+    }),
+    () => validateGameTypeName(gt)
+  ));
+
+  // Id
+  body.appendChild(simpleField("Id (rating bucket)", "0&ndash;255. Distinct ids isolate rating buckets.",
+    el("input", {
+      type: "number", min: 0, max: 255, step: 1, value: gt.id,
+      oninput: e => { gt.id = e.target.value === "" ? 0 : parseInt(e.target.value, 10); render(); }
+    })
+  ));
+
+  // TeamCount
+  body.appendChild(simpleField("TeamCount", "Number of teams. Must be &ge; 2.",
+    el("input", {
+      type: "number", min: 2, step: 1, value: gt.teamCount,
+      oninput: e => {
+        const v = Math.max(2, parseInt(e.target.value, 10) || 2);
+        gt.teamCount = v;
+        // resize teamSpawns and teamShips
+        while (gt.teamSpawns.length < v) gt.teamSpawns.push([]);
+        gt.teamSpawns.length = v;
+        while (gt.teamShips.length < v) gt.teamShips.push([]);
+        gt.teamShips.length = v;
+        rerenderCardBody(card, gt);
+        render();
+      }
+    })
+  ));
+
+  // PlayersPerTeam
+  body.appendChild(simpleField("PlayersPerTeam", "Players per team. Must be &ge; 1.",
+    el("input", {
+      type: "number", min: 1, step: 1, value: gt.playersPerTeam,
+      oninput: e => {
+        const v = Math.max(1, parseInt(e.target.value, 10) || 1);
+        gt.playersPerTeam = v;
+        // resize ship rows to match
+        for (const row of gt.teamShips) {
+          while (row.length < v) row.push("");
+          row.length = v;
+        }
+        rerenderCardBody(card, gt);
+        render();
+      }
+    })
+  ));
+
+  // KillTarget
+  body.appendChild(simpleField("KillTarget", "Per-team kills to win. 0 = unset (uses TimeLimit or fallback 30).",
+    el("input", {
+      type: "number", min: 0, step: 1, value: gt.killTarget,
+      oninput: e => { gt.killTarget = parseInt(e.target.value, 10) || 0; render(); }
+    })
+  ));
+
+  // TimeLimit
+  body.appendChild(simpleField("TimeLimit", "Leader at this elapsed time wins. Ties trigger sudden-death overtime.",
+    durationWidget({
+      value: gt.timeLimitSec, min: 0, allowUnset: true, unsetLabel: "set",
+      onChange: v => { gt.timeLimitSec = v; render(); }
+    })
+  ));
+
+  // Lives
+  body.appendChild(simpleField("Lives", "Per player. 0 = unlimited. Elimination matches only.",
+    el("input", {
+      type: "number", min: 0, step: 1, value: gt.lives,
+      oninput: e => { gt.lives = parseInt(e.target.value, 10) || 0; render(); }
+    })
+  ));
+
+  // ReturnItemsAction
+  body.appendChild(simpleField("ReturnItemsAction", "Inventory policy on <code>?return</code> after self-spec.",
+    selectField(ITEMS_ACTIONS, gt.returnItemsAction, v => { gt.returnItemsAction = v; render(); })
+  ));
+
+  // --- Spawns subgroup ---
+  const spawnGroup = el("div", { class: "subgroup" }, el("h4", {}, "Spawns and warp"));
+  spawnGroup.appendChild(simpleField("WarpOnSpawn", "Master switch: warp every team member to a chosen team spawn at setup/GO.",
+    el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: gt.warpOnSpawn,
+        onchange: e => {
+          gt.warpOnSpawn = e.target.checked;
+          rerenderCardBody(card, gt);
+          render();
+        }
+      }),
+      "Enabled"
+    )
+  ));
+  if (gt.warpOnSpawn) {
+    for (let t = 0; t < gt.teamCount; t++) {
+      spawnGroup.appendChild(spawnTeamRow(gt, t));
+    }
+    spawnGroup.appendChild(simpleField("MaxSpawnDrift", "Max tiles a player may drift from the chosen spawn during Staging/Countdown. 1 tile = 16px. Blank = disabled.",
+      el("input", {
+        type: "number", min: 0, step: 1,
+        value: gt.maxSpawnDriftTiles === null ? "" : gt.maxSpawnDriftTiles,
+        placeholder: "(disabled)",
+        oninput: e => {
+          const v = e.target.value.trim();
+          gt.maxSpawnDriftTiles = v === "" ? null : Math.max(0, parseInt(v, 10) || 0);
+          render();
+        }
+      })
+    ));
+  }
+  body.appendChild(spawnGroup);
+
+  // --- Per-slot ships subgroup ---
+  const shipsGroup = el("div", { class: "subgroup" }, el("h4", {}, "Per-slot ships"));
+  shipsGroup.appendChild(simpleField("Override ships", "Off &rarr; every slot is Warbird. On &rarr; pick a ship per slot for each team.",
+    el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: gt.shipsEnabled,
+        onchange: e => {
+          gt.shipsEnabled = e.target.checked;
+          if (gt.shipsEnabled) {
+            for (let t = 0; t < gt.teamCount; t++) {
+              if (!gt.teamShips[t]) gt.teamShips[t] = [];
+              while (gt.teamShips[t].length < gt.playersPerTeam) gt.teamShips[t].push("warbird");
+              gt.teamShips[t].length = gt.playersPerTeam;
+            }
+          }
+          rerenderCardBody(card, gt);
+          render();
+        }
+      }),
+      "Enabled"
+    )
+  ));
+  if (gt.shipsEnabled) {
+    for (let t = 0; t < gt.teamCount; t++) {
+      shipsGroup.appendChild(shipTeamRow(gt, t));
+    }
+  }
+  body.appendChild(shipsGroup);
+
+  // --- Match-flow timings ---
+  const timingGroup = el("div", { class: "subgroup" }, el("h4", {}, "Match-flow timings"));
+  timingGroup.appendChild(simpleField("StagingDuration", "Warmup window for idle detection. Default 10s.",
+    durationWidget({
+      value: gt.stagingDurationSec, min: 1, allowUnset: true, unsetLabel: "override",
+      onChange: v => { gt.stagingDurationSec = v; render(); }
+    })
+  ));
+  timingGroup.appendChild(simpleField("CountdownDuration", "Pre-GO countdown. Default 5s. Minimum 5s.",
+    durationWidget({
+      value: gt.countdownDurationSec, min: 5, allowUnset: true, unsetLabel: "override",
+      onChange: v => { gt.countdownDurationSec = v; render(); }
+    })
+  ));
+  timingGroup.appendChild(simpleField("KnockoutSpecDelay", "Grace between last-life death and forced spec. Elimination only. Default 0.",
+    durationWidget({
+      value: gt.knockoutSpecDelaySec, min: 0, allowUnset: true, unsetLabel: "override",
+      onChange: v => { gt.knockoutSpecDelaySec = v; render(); }
+    })
+  ));
+  timingGroup.appendChild(simpleField("TeamCollapseGrace", "How long a team can be empty before forfeiting. Default 10s.",
+    durationWidget({
+      value: gt.teamCollapseGraceSec, min: 0, allowUnset: true, unsetLabel: "override",
+      onChange: v => { gt.teamCollapseGraceSec = v; render(); }
+    })
+  ));
+  timingGroup.appendChild(simpleField("ShipChangeGracePeriod", "Window to change ships after a non-fatal death. 0 forbids all in-match ship changes. Default 10s.",
+    durationWidget({
+      value: gt.shipChangeGraceSec, min: 0, allowUnset: true, unsetLabel: "override",
+      onChange: v => { gt.shipChangeGraceSec = v; render(); }
+    })
+  ));
+  body.appendChild(timingGroup);
+
+  card.appendChild(body);
+  return card;
+}
+
+function rerenderCardBody(card, gt) {
+  // Find this card's index and rebuild
+  const list = document.getElementById("game-types-list");
+  const idx = state.gameTypes.indexOf(gt);
+  if (idx === -1) return;
+  const fresh = renderGameTypeCard(gt, idx);
+  card.replaceWith(fresh);
+}
+
+function rerenderQueueCardBody(card, q) {
+  const idx = state.queues.indexOf(q);
+  if (idx === -1) return;
+  const fresh = renderQueueCard(q, idx);
+  card.replaceWith(fresh);
+}
+
+function spawnTeamRow(gt, t) {
+  const row = el("div", { class: "team-row" });
+  row.appendChild(el("div", { class: "team-label" }, `Team${t + 1}`));
+  const points = el("div", { class: "spawn-points" });
+  const team = gt.teamSpawns[t];
+  if (team.length === 0) {
+    points.appendChild(el("div", { class: "empty-list" }, "no spawn points"));
+  } else {
+    team.forEach((p, i) => points.appendChild(spawnPairRow(gt, t, i)));
+  }
+  points.appendChild(el("div", {},
+    el("button", {
+      class: "subtle", style: "padding:4px 10px;font-size:12px;",
+      onclick: () => {
+        team.push({ x: 0, y: 0 });
+        rerenderCardBody(document.querySelector(`.card[data-key="${gt._key}"]`), gt);
+        render();
+      }
+    }, "+ add point")
+  ));
+  row.appendChild(points);
+  return row;
+}
+
+function spawnPairRow(gt, t, i) {
+  const team = gt.teamSpawns[t];
+  const p = team[i];
+  return el("div", { class: "spawn-pair" },
+    el("input", {
+      type: "number", min: -32768, max: 32767, step: 1, value: p.x,
+      oninput: e => { p.x = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+    }),
+    el("span", { class: "sep" }, ","),
+    el("input", {
+      type: "number", min: -32768, max: 32767, step: 1, value: p.y,
+      oninput: e => { p.y = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+    }),
+    el("button", {
+      class: "danger", style: "margin-left:4px;",
+      onclick: () => {
+        team.splice(i, 1);
+        rerenderCardBody(document.querySelector(`.card[data-key="${gt._key}"]`), gt);
+        render();
+      }
+    }, "×")
+  );
+}
+
+function clampInt16(v) { return Math.max(-32768, Math.min(32767, v)); }
+
+function shipTeamRow(gt, t) {
+  const row = el("div", { class: "team-row" });
+  row.appendChild(el("div", { class: "team-label" }, `Team${t + 1}`));
+  const cells = el("div", { class: "ship-row" });
+  if (!gt.teamShips[t]) gt.teamShips[t] = [];
+  while (gt.teamShips[t].length < gt.playersPerTeam) gt.teamShips[t].push("warbird");
+  gt.teamShips[t].length = gt.playersPerTeam;
+  for (let s = 0; s < gt.playersPerTeam; s++) {
+    const sel = el("select", {
+      onchange: e => { gt.teamShips[t][s] = e.target.value; render(); }
+    });
+    SHIP_NAMES.forEach(name => {
+      const opt = el("option", { value: name }, name);
+      if (gt.teamShips[t][s] === name) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    cells.appendChild(sel);
+  }
+  row.appendChild(cells);
+  return row;
+}
+
+/* ----------------- Queue card ----------------- */
+
+function renderQueueCard(q, index) {
+  const card = el("div", { class: "card" + (q.collapsed ? " collapsed" : ""), "data-key": q._key });
+
+  const titleSpan = el("span", { class: "title" },
+    el("span", { class: "index" }, `#${index + 1}`),
+    q.name || "(unnamed)"
+  );
+  const header = el("div", { class: "card-header" },
+    el("span", {}, el("span", { class: "caret" }, "▾"), " ", titleSpan),
+    el("span", { class: "actions" },
+      scopeChip(q.scope, s => { q.scope = s; render(); }),
+      el("button", {
+        class: "danger",
+        onclick: (e) => { e.stopPropagation(); removeQueue(q._key); }
+      }, "Remove")
+    )
+  );
+  header.addEventListener("click", (e) => {
+    if (e.target.closest("button") || e.target.closest(".scope-chip")) return;
+    q.collapsed = !q.collapsed;
+    card.classList.toggle("collapsed");
+  });
+  card.appendChild(header);
+
+  const body = el("div", { class: "card-body" });
+
+  body.appendChild(simpleField("Name", "Lookup id; players type with <code>?play</code>. No spaces (use underscores).",
+    el("input", {
+      type: "text", value: q.name, placeholder: "1v1",
+      oninput: e => {
+        q.name = e.target.value.trim().replace(/\s+/g, "_");
+        e.target.value = q.name;
+        titleSpan.lastChild.textContent = q.name || "(unnamed)";
+        render();
+      }
+    })
+  ));
+
+  body.appendChild(simpleField("Label", "Pretty display string for chat &amp; JSON payload. Defaults to Name.",
+    el("input", {
+      type: "text", value: q.label, placeholder: q.name || "(same as Name)",
+      oninput: e => { q.label = e.target.value; render(); }
+    })
+  ));
+
+  // GameType dropdown
+  const gtSelect = el("select", {
+    onchange: e => { q.gameType = e.target.value; render(); }
+  });
+  gtSelect.appendChild(el("option", { value: "" }, "(pick one)"));
+  state.gameTypes.forEach(gt => {
+    if (gt.name) {
+      const opt = el("option", { value: gt.name }, gt.name);
+      if (q.gameType === gt.name) opt.selected = true;
+      gtSelect.appendChild(opt);
+    }
+  });
+  body.appendChild(simpleField("GameType", "Which game type's rules this queue uses.", gtSelect));
+
+  body.appendChild(simpleField("MatchArena", "Arena to send players to for the match. Recommended: dedicated, in <code>PermanentArenas</code>.",
+    el("input", {
+      type: "text", value: q.matchArena, placeholder: "(none)",
+      oninput: e => { q.matchArena = e.target.value.trim(); render(); }
+    })
+  ));
+
+  body.appendChild(simpleField("Preset", "<code>casual</code> applies a lenient bundle: q-start/floor 0.4/0.10, no liability cap, RelaxTime 45s, half rating weight.",
+    selectField(["", "casual"], q.preset, v => { q.preset = v; rerenderQueueCardBody(card, q); render(); },
+      v => v === "" ? "(none)" : v)
+  ));
+
+  body.appendChild(simpleField("LookAhead", "Extra candidates above the minimum the matcher considers. 0 = strict FIFO.",
+    el("input", {
+      type: "number", min: 0, step: 1,
+      value: q.lookAhead === null ? "" : q.lookAhead, placeholder: "0",
+      oninput: e => {
+        const v = e.target.value.trim();
+        q.lookAhead = v === "" ? null : Math.max(0, parseInt(v, 10) || 0);
+        render();
+      }
+    })
+  ));
+
+  const relaxDefaultHint = q.preset === "casual" ? "default 0:00:45 (casual)" : "default 0:02:00";
+  body.appendChild(simpleField("RelaxTime", `Quality-relaxation duration. ${relaxDefaultHint}.`,
+    durationWidget({
+      value: q.relaxTimeSec, min: 1, allowUnset: true, unsetLabel: "override",
+      onChange: v => { q.relaxTimeSec = v; render(); }
+    })
+  ));
+
+  body.appendChild(simpleField("HoldWindow", "Wait period after finding a viable partition. 0 = pop immediately. Default 0:00:10.",
+    durationWidget({
+      value: q.holdWindowSec, min: 0, allowUnset: true, unsetLabel: "override",
+      onChange: v => { q.holdWindowSec = v; render(); }
+    })
+  ));
+
+  // Quality ceiling slider
+  const qcValue = q.qualityCeiling === null ? 0.9 : q.qualityCeiling;
+  const qcRow = el("div", { class: "quality-slider-row" });
+  const qcSlider = el("input", {
+    type: "range", min: 0, max: 1, step: 0.01, value: qcValue
+  });
+  const qcReadout = el("span", { class: "readout" }, qcValue.toFixed(2));
+  const qcCheckbox = el("input", {
+    type: "checkbox", checked: q.qualityCeiling !== null
+  });
+  const qcCheckLabel = el("label", { class: "duration-toggle" }, qcCheckbox, "override");
+  qcSlider.addEventListener("input", e => {
+    const v = parseFloat(e.target.value);
+    q.qualityCeiling = v;
+    qcReadout.textContent = v.toFixed(2);
+    qcCheckbox.checked = true;
+    render();
+  });
+  qcCheckbox.addEventListener("change", e => {
+    if (e.target.checked) {
+      q.qualityCeiling = parseFloat(qcSlider.value);
+    } else {
+      q.qualityCeiling = null;
+    }
+    render();
+  });
+  qcRow.appendChild(qcCheckLabel);
+  qcRow.appendChild(qcSlider);
+  qcRow.appendChild(qcReadout);
+  body.appendChild(simpleField("QualityCeiling", "Pop without waiting if a candidate hits this. Default 0.9.", qcRow));
+
+  body.appendChild(simpleField("VetoesRequired", "Distinct participants who must <code>?forgive</code> to rescind a penalty. Default 2.",
+    el("input", {
+      type: "number", min: 1, step: 1,
+      value: q.vetoesRequired === null ? "" : q.vetoesRequired, placeholder: "2",
+      oninput: e => {
+        const v = e.target.value.trim();
+        q.vetoesRequired = v === "" ? null : Math.max(1, parseInt(v, 10) || 1);
+        render();
+      }
+    })
+  ));
+
+  body.appendChild(simpleField("VetoWindow", "Open period for <code>?forgive</code> votes. Default 0:01:00.",
+    durationWidget({
+      value: q.vetoWindowSec, min: 1, allowUnset: true, unsetLabel: "override",
+      onChange: v => { q.vetoWindowSec = v; render(); }
+    })
+  ));
+
+  body.appendChild(simpleField("PromoteWinners", "KOTH mode: winners auto-re-enqueue at the head.",
+    el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: q.promoteWinners,
+        onchange: e => {
+          q.promoteWinners = e.target.checked;
+          rerenderQueueCardBody(card, q);
+          render();
+        }
+      }),
+      "Enabled"
+    )
+  ));
+
+  if (q.promoteWinners) {
+    body.appendChild(simpleField("MaxConsecutiveDefenses", "Max wins a champion can defend before going to the back. Default 3.",
+      el("input", {
+        type: "number", min: 1, step: 1,
+        value: q.maxConsecutiveDefenses === null ? "" : q.maxConsecutiveDefenses, placeholder: "3",
+        oninput: e => {
+          const v = e.target.value.trim();
+          q.maxConsecutiveDefenses = v === "" ? null : Math.max(1, parseInt(v, 10) || 1);
+          render();
+        }
+      })
+    ));
+  }
+
+  card.appendChild(body);
+  return card;
+}
+
+/* ----------------- Small builders ----------------- */
+
+function simpleField(labelText, hintHtml, control) {
+  const f = el("div", { class: "field" });
+  f.appendChild(el("label", {}, labelText));
+  const wrap = el("div", { class: "field-input" });
+  wrap.appendChild(control);
+  if (hintHtml) wrap.appendChild(el("div", { class: "field-hint", html: hintHtml }));
+  wrap.appendChild(el("div", { class: "field-error" }));
+  f.appendChild(wrap);
+  return f;
+}
+
+function selectField(options, current, onChange, labelFor = null) {
+  const sel = el("select", { onchange: e => onChange(e.target.value) });
+  for (const o of options) {
+    const opt = el("option", { value: o }, labelFor ? labelFor(o) : o);
+    if (o === current) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  return sel;
+}
+
+function scopeChip(currentScope, onChange) {
+  const chip = el("span", { class: "scope-chip" });
+  const radioName = `scope-${uid()}`;
+  ["global", "arena"].forEach(s => {
+    const lab = el("label", { class: currentScope === s ? "active" : "" });
+    const inp = el("input", {
+      type: "radio", name: radioName, value: s,
+      checked: currentScope === s,
+      onchange: () => {
+        chip.querySelectorAll("label").forEach(l => l.classList.remove("active"));
+        lab.classList.add("active");
+        onChange(s);
+      }
+    });
+    lab.appendChild(inp);
+    lab.appendChild(document.createTextNode(s === "global" ? "Global" : "Arena"));
+    chip.appendChild(lab);
+  });
+  return chip;
+}
+
+function validateGameTypeName() { /* validation summary handled centrally */ }
+
+/* ----------------- Add/remove handlers ----------------- */
+
+function addGameType() {
+  state.gameTypes.push(newGameType());
+  redrawGameTypes();
+  render();
+}
+
+function removeGameType(key) {
+  const idx = state.gameTypes.findIndex(g => g._key === key);
+  if (idx >= 0) state.gameTypes.splice(idx, 1);
+  redrawGameTypes();
+  redrawQueues();
+  render();
+}
+
+function addQueue() {
+  state.queues.push(newQueue());
+  redrawQueues();
+  render();
+}
+
+function removeQueue(key) {
+  const idx = state.queues.findIndex(q => q._key === key);
+  if (idx >= 0) state.queues.splice(idx, 1);
+  redrawQueues();
+  render();
+}
+
+function redrawGameTypes() {
+  const list = document.getElementById("game-types-list");
+  clear(list);
+  if (state.gameTypes.length === 0) {
+    list.appendChild(el("div", { class: "empty-list" }, "No game types yet. Click “+ Add game type” to start."));
+    return;
+  }
+  state.gameTypes.forEach((gt, i) => list.appendChild(renderGameTypeCard(gt, i)));
+}
+
+function redrawQueues() {
+  const list = document.getElementById("queues-list");
+  clear(list);
+  if (state.queues.length === 0) {
+    list.appendChild(el("div", { class: "empty-list" }, "No queues yet. Click “+ Add queue” to start."));
+    return;
+  }
+  state.queues.forEach((q, i) => list.appendChild(renderQueueCard(q, i)));
+}
+
+/* ----------------- Validation ----------------- */
+
+function validate() {
+  const errors = [];
+  const warnings = [];
+  const gtNames = new Set();
+  const queueNames = new Set();
+
+  // Plug-in tuning
+  const pt = state.pluginTuning;
+  if (pt.uploadUrl && !/^https?:\/\//i.test(pt.uploadUrl)) {
+    errors.push("UploadUrl must be an http(s) URL.");
+  }
+  if (pt.uploadUrl && !pt.uploadApiKey) {
+    warnings.push("UploadUrl is set but UploadApiKey is blank — engine will fall back to writing match envelopes to disk.");
+  }
+  if (pt.distanceSampleHz !== null && (pt.distanceSampleHz < 0 || pt.distanceSampleHz > 50)) {
+    errors.push("DistanceSampleHz must be 0 or 1–50.");
+  }
+
+  // Game types
+  state.gameTypes.forEach((gt, i) => {
+    const label = `Game type #${i + 1}${gt.name ? ` (${gt.name})` : ""} [${gt.scope}]`;
+    if (!gt.name) errors.push(`${label}: Name is required.`);
+    else if (!NAME_RE.test(gt.name)) errors.push(`${label}: Name must be alphanumeric/underscore.`);
+    else if (gtNames.has(gt.name.toLowerCase())) errors.push(`${label}: duplicate Name.`);
+    else gtNames.add(gt.name.toLowerCase());
+    if (gt.id < 0 || gt.id > 255) errors.push(`${label}: Id must be 0–255.`);
+    if (gt.teamCount < 2) errors.push(`${label}: TeamCount must be ≥ 2.`);
+    if (gt.playersPerTeam < 1) errors.push(`${label}: PlayersPerTeam must be ≥ 1.`);
+    if (gt.timeLimitSec !== null && gt.timeLimitSec <= 0)
+      errors.push(`${label}: TimeLimit must be > 0 when set.`);
+    if (gt.stagingDurationSec !== null && gt.stagingDurationSec <= 0)
+      errors.push(`${label}: StagingDuration must be > 0 when set.`);
+    if (gt.countdownDurationSec !== null && gt.countdownDurationSec < 5)
+      errors.push(`${label}: CountdownDuration must be ≥ 5s.`);
+    if (gt.warpOnSpawn) {
+      const empty = gt.teamSpawns.slice(0, gt.teamCount).filter(s => s.length === 0).length;
+      if (empty > 0 && empty < gt.teamCount) {
+        errors.push(`${label}: if any team has spawns, all teams must — ${empty} team(s) currently empty.`);
+      }
+      if (gt.teamSpawns.slice(0, gt.teamCount).every(s => s.length === 0)) {
+        warnings.push(`${label}: WarpOnSpawn is on but no team spawns are configured — engine will skip the override.`);
+      }
+    } else if (gt.maxSpawnDriftTiles !== null) {
+      warnings.push(`${label}: MaxSpawnDrift only takes effect when WarpOnSpawn is on.`);
+    }
+    if (gt.shipsEnabled) {
+      const mismatch = gt.teamShips.slice(0, gt.teamCount).find(r => r.length !== gt.playersPerTeam);
+      if (mismatch) errors.push(`${label}: per-team ship rows must each have ${gt.playersPerTeam} entries.`);
+    }
+    if (gt.killTarget === 0 && gt.timeLimitSec === null) {
+      warnings.push(`${label}: no KillTarget and no TimeLimit — engine falls back to 30 kills.`);
+    }
+  });
+
+  // Queues
+  state.queues.forEach((q, i) => {
+    const label = `Queue #${i + 1}${q.name ? ` (${q.name})` : ""} [${q.scope}]`;
+    if (!q.name) errors.push(`${label}: Name is required.`);
+    else if (!NAME_RE.test(q.name)) errors.push(`${label}: Name must be alphanumeric/underscore.`);
+    else if (queueNames.has(q.name.toLowerCase())) errors.push(`${label}: duplicate Name.`);
+    else queueNames.add(q.name.toLowerCase());
+    if (!q.gameType) {
+      errors.push(`${label}: GameType is required.`);
+    } else {
+      const referenced = state.gameTypes.find(g => g.name.toLowerCase() === q.gameType.toLowerCase());
+      if (!referenced) {
+        errors.push(`${label}: GameType "${q.gameType}" doesn't match any game type defined above.`);
+      } else if (q.scope === "global" && referenced.scope === "arena") {
+        warnings.push(`${label}: references arena-scoped game type "${referenced.name}" — a global queue may not see it. Either make the game type Global or move this queue to Arena.`);
+      }
+    }
+    if (q.qualityCeiling !== null && (q.qualityCeiling < 0 || q.qualityCeiling > 1))
+      errors.push(`${label}: QualityCeiling must be in [0,1].`);
+    if (q.vetoesRequired !== null && q.vetoesRequired < 1)
+      errors.push(`${label}: VetoesRequired must be ≥ 1.`);
+    if (q.relaxTimeSec !== null && q.relaxTimeSec <= 0)
+      errors.push(`${label}: RelaxTime must be > 0 when set.`);
+    if (q.vetoWindowSec !== null && q.vetoWindowSec <= 0)
+      errors.push(`${label}: VetoWindow must be > 0 when set.`);
+  });
+
+  // DefaultQueue must exist
+  if (state.defaultQueue && !state.queues.some(q => q.name.toLowerCase() === state.defaultQueue.toLowerCase())) {
+    errors.push(`DefaultQueue "${state.defaultQueue}" doesn't match any queue defined above.`);
+  }
+
+  return { errors, warnings };
+}
+
+/* ----------------- INI emission ----------------- */
+
+function pad(key) { return key.padEnd(28, " "); }
+function line(key, value) { return `${pad(key)} = ${value}`; }
+function formatFloat(v) {
+  // mimic Python "%g": up to 6 significant digits, no trailing zeros.
+  if (v === 0) return "0";
+  let s = parseFloat(v.toPrecision(6)).toString();
+  return s;
+}
+
+function emit() {
+  return {
+    global: emitScope("global"),
+    arena: emitScope("arena"),
+  };
+}
+
+function emitScope(scope) {
+  const out = [];
+  const pt = state.pluginTuning;
+
+  // Plug-in tuning is global-only.
+  const tuningLines = [];
+  if (scope === "global") {
+    if (pt.logVerbosity !== LOG_VERBOSITY_DEFAULT) tuningLines.push(line("LogVerbosity", pt.logVerbosity));
+    if (pt.uploadUrl) tuningLines.push(line("UploadUrl", pt.uploadUrl));
+    if (pt.uploadApiKey) tuningLines.push(line("UploadApiKey", pt.uploadApiKey));
+    if (pt.statsViewUrl) tuningLines.push(line("StatsViewUrl", pt.statsViewUrl));
+    if (pt.recordReplays !== true) tuningLines.push(line("RecordReplays", pt.recordReplays ? "1" : "0"));
+    if (pt.replayRecordingDir && pt.replayRecordingDir !== REPLAY_DIR_DEFAULT)
+      tuningLines.push(line("ReplayRecordingDir", pt.replayRecordingDir));
+    if (pt.distanceSampleHz !== null && pt.distanceSampleHz !== DISTANCE_HZ_DEFAULT)
+      tuningLines.push(line("DistanceSampleHz", String(pt.distanceSampleHz)));
+  }
+
+  // DefaultQueue is arena-only.
+  const arenaLines = [];
+  if (scope === "arena" && state.defaultQueue) {
+    arenaLines.push(line("DefaultQueue", state.defaultQueue));
+  }
+
+  const gts = state.gameTypes.filter(g => g.scope === scope);
+  const qs = state.queues.filter(q => q.scope === scope);
+
+  if (tuningLines.length === 0 && arenaLines.length === 0 && gts.length === 0 && qs.length === 0) {
+    return "";
+  }
+
+  out.push("[ClashEngine]");
+
+  if (tuningLines.length > 0) {
+    out.push("");
+    out.push("; --- Plug-in tuning ---");
+    out.push(...tuningLines);
+  }
+  if (arenaLines.length > 0) {
+    out.push("");
+    out.push("; --- Per-arena ---");
+    out.push(...arenaLines);
+  }
+  if (gts.length > 0) {
+    out.push("");
+    out.push("; --- Game types ---");
+    out.push(line("GameTypeCount", String(gts.length)));
+    gts.forEach((gt, i) => {
+      out.push("");
+      out.push(`; Game type ${i + 1}: ${gt.name || "(unnamed)"}`);
+      emitGameType(out, gt, i + 1);
+    });
+  }
+  if (qs.length > 0) {
+    out.push("");
+    out.push("; --- Queues ---");
+    out.push(line("QueueCount", String(qs.length)));
+    qs.forEach((q, i) => {
+      out.push("");
+      out.push(`; Queue ${i + 1}: ${q.name || "(unnamed)"}`);
+      emitQueue(out, q, i + 1);
+    });
+  }
+
+  return out.join("\n") + "\n";
+}
+
+function emitGameType(out, gt, idx) {
+  const p = `GameType${idx}`;
+  out.push(line(`${p}Name`, gt.name));
+  out.push(line(`${p}Id`, String(gt.id)));
+  out.push(line(`${p}TeamCount`, String(gt.teamCount)));
+  out.push(line(`${p}PlayersPerTeam`, String(gt.playersPerTeam)));
+  if (gt.killTarget > 0) out.push(line(`${p}KillTarget`, String(gt.killTarget)));
+  if (gt.timeLimitSec !== null) out.push(line(`${p}TimeLimit`, formatTime(gt.timeLimitSec)));
+  if (gt.lives > 0) out.push(line(`${p}Lives`, String(gt.lives)));
+  if (gt.teamCollapseGraceSec !== null) out.push(line(`${p}TeamCollapseGrace`, formatTime(gt.teamCollapseGraceSec)));
+  if (gt.shipChangeGraceSec !== null) out.push(line(`${p}ShipChangeGracePeriod`, formatTime(gt.shipChangeGraceSec)));
+  if (gt.returnItemsAction !== "full") out.push(line(`${p}ReturnItemsAction`, gt.returnItemsAction));
+  if (gt.warpOnSpawn) {
+    out.push(line(`${p}WarpOnSpawn`, "1"));
+    for (let t = 0; t < gt.teamCount; t++) {
+      const team = gt.teamSpawns[t] || [];
+      if (team.length > 0) {
+        out.push(line(`${p}Team${t + 1}Spawns`, team.map(pt => `${pt.x},${pt.y}`).join("; ")));
+      }
+    }
+    if (gt.maxSpawnDriftTiles !== null) out.push(line(`${p}MaxSpawnDrift`, String(gt.maxSpawnDriftTiles)));
+  }
+  if (gt.shipsEnabled) {
+    for (let t = 0; t < gt.teamCount; t++) {
+      const row = gt.teamShips[t] || [];
+      if (row.length === gt.playersPerTeam) {
+        out.push(line(`${p}Team${t + 1}Ships`, row.join(",")));
+      }
+    }
+  }
+  if (gt.stagingDurationSec !== null) out.push(line(`${p}StagingDuration`, formatTime(gt.stagingDurationSec)));
+  if (gt.countdownDurationSec !== null) out.push(line(`${p}CountdownDuration`, formatTime(gt.countdownDurationSec)));
+  if (gt.knockoutSpecDelaySec !== null) out.push(line(`${p}KnockoutSpecDelay`, formatTime(gt.knockoutSpecDelaySec)));
+}
+
+function emitQueue(out, q, idx) {
+  const p = `Queue${idx}`;
+  out.push(line(`${p}Name`, q.name));
+  if (q.label) out.push(line(`${p}Label`, q.label));
+  out.push(line(`${p}GameType`, q.gameType));
+  if (q.preset) out.push(line(`${p}Preset`, q.preset));
+  if (q.matchArena) out.push(line(`${p}MatchArena`, q.matchArena));
+  if (q.lookAhead !== null) out.push(line(`${p}LookAhead`, String(q.lookAhead)));
+  if (q.relaxTimeSec !== null) out.push(line(`${p}RelaxTime`, formatTime(q.relaxTimeSec)));
+  if (q.holdWindowSec !== null) out.push(line(`${p}HoldWindow`, formatTime(q.holdWindowSec)));
+  if (q.qualityCeiling !== null) out.push(line(`${p}QualityCeiling`, formatFloat(q.qualityCeiling)));
+  if (q.vetoesRequired !== null) out.push(line(`${p}VetoesRequired`, String(q.vetoesRequired)));
+  if (q.vetoWindowSec !== null) out.push(line(`${p}VetoWindow`, formatTime(q.vetoWindowSec)));
+  if (q.promoteWinners) out.push(line(`${p}PromoteWinners`, "1"));
+  if (q.maxConsecutiveDefenses !== null) out.push(line(`${p}MaxConsecutiveDefenses`, String(q.maxConsecutiveDefenses)));
+}
+
+/* ----------------- Render loop ----------------- */
+
+function render() {
+  // Sync DefaultQueue dropdown options
+  const dq = document.getElementById("dq-select");
+  const dqCurrent = state.defaultQueue;
+  clear(dq);
+  dq.appendChild(el("option", { value: "" }, "(none)"));
+  state.queues.forEach(q => {
+    if (q.name) {
+      const opt = el("option", { value: q.name }, q.name);
+      if (q.name === dqCurrent) opt.selected = true;
+      dq.appendChild(opt);
+    }
+  });
+  // If the previously selected queue name no longer exists, keep the string but flag in validation.
+  if (dqCurrent && !state.queues.some(q => q.name === dqCurrent)) {
+    const ghost = el("option", { value: dqCurrent }, `${dqCurrent} (unresolved)`);
+    ghost.selected = true;
+    dq.appendChild(ghost);
+  }
+
+  // Sync each queue card's GameType dropdown so renaming a game type updates them.
+  // (We do this by re-rendering nothing here -- the dropdowns are built in renderQueueCard
+  //  and we rebuild a card only when a structural change happens. For renames, we just
+  //  rebuild all queue cards so the option list reflects current game type names.)
+  // Cheap enough since the user count is tiny.
+  const queuesNeedRebuild = state.queues.length > 0;
+  if (queuesNeedRebuild) {
+    redrawQueuesIfNameSetChanged();
+  }
+
+  // Validate
+  const { errors, warnings } = validate();
+  const box = document.getElementById("validation-box");
+  clear(box);
+  if (errors.length === 0 && warnings.length === 0) {
+    box.classList.add("empty");
+  } else {
+    box.classList.remove("empty");
+    if (errors.length > 0) {
+      const g = el("div", { class: "validation-group errors" },
+        el("h3", {}, `${errors.length} error${errors.length === 1 ? "" : "s"} — fix before using this config`),
+        el("ul", {}, ...errors.map(e => el("li", { text: e })))
+      );
+      box.appendChild(g);
+    }
+    if (warnings.length > 0) {
+      const g = el("div", { class: "validation-group warnings" },
+        el("h3", {}, `${warnings.length} warning${warnings.length === 1 ? "" : "s"}`),
+        el("ul", {}, ...warnings.map(w => el("li", { text: w })))
+      );
+      box.appendChild(g);
+    }
+  }
+
+  // Emit previews
+  const out = emit();
+  for (const scope of ["global", "arena"]) {
+    const pre = document.getElementById(`preview-${scope}`);
+    const empty = document.getElementById(`empty-${scope}`);
+    if (out[scope]) {
+      pre.textContent = out[scope];
+      pre.style.display = "";
+      empty.style.display = "none";
+    } else {
+      pre.textContent = "";
+      pre.style.display = "none";
+      empty.style.display = "";
+    }
+  }
+
+  // Copy buttons enabled only when no errors AND that block has content
+  document.querySelectorAll(".copy-btn").forEach(btn => {
+    const scope = btn.dataset.scope;
+    btn.disabled = errors.length > 0 || !out[scope];
+  });
+}
+
+let lastGtNameSet = "";
+function redrawQueuesIfNameSetChanged() {
+  const cur = state.gameTypes.map(g => g.name).join("|");
+  if (cur !== lastGtNameSet) {
+    lastGtNameSet = cur;
+    redrawQueues();
+  }
+}
+
+/* ----------------- Boot ----------------- */
+
+function init() {
+  bindSectionCollapse();
+  bindPluginTuning();
+  document.getElementById("add-game-type-btn").addEventListener("click", addGameType);
+  document.getElementById("add-queue-btn").addEventListener("click", addQueue);
+  document.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const scope = btn.dataset.scope;
+      const text = document.getElementById(`preview-${scope}`).textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); } catch {}
+        document.body.removeChild(ta);
+      }
+      const fb = document.getElementById(`copy-feedback-${scope}`);
+      fb.classList.add("shown");
+      setTimeout(() => fb.classList.remove("shown"), 1500);
+    });
+  });
+
+  redrawGameTypes();
+  redrawQueues();
+  render();
+}
+
+init();
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using ClashEngine.Core.Queue;
+using SS.Core;
 using SS.Core.ComponentInterfaces;
 
 namespace ClashEngine.Config;
@@ -17,14 +18,14 @@ internal static class SpawnSetParser
     /// when no team had any spawn at all (i.e. no spawn override).
     /// </summary>
     public static IReadOnlyList<IReadOnlyList<SpawnPoint>>? Read(
-        IConfigManager config, string prefix, int teamCount, ClashLog? log)
+        IConfigManager config, ConfigHandle handle, string prefix, int teamCount, ClashLog? log)
     {
         var byTeam = new List<List<SpawnPoint>>(teamCount);
         bool anyConfigured = false;
         for (int t = 0; t < teamCount; t++)
         {
             string key = $"{prefix}Team{t + 1}Spawns";
-            var raw = config.GetStr(config.Global, ConfigConstants.Section, key);
+            var raw = config.GetStr(handle, ConfigConstants.Section, key);
             var points = ParseList(raw, log, prefix, key);
             if (points.Count > 0) anyConfigured = true;
             byTeam.Add(points);

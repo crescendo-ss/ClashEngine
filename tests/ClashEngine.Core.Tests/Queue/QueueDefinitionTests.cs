@@ -91,6 +91,40 @@ public class QueueDefinitionTests
     }
 
     [Fact]
+    public void Label_defaults_to_BaseName_when_no_label_supplied()
+    {
+        // No owner arena: BaseName == Name == "q"; Label falls back to BaseName.
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
+        Assert.Equal("q", def.BaseName);
+        Assert.Equal("q", def.Label);
+    }
+
+    [Fact]
+    public void Label_defaults_to_BaseName_when_empty_label_supplied()
+    {
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), label: "");
+        Assert.Equal("q", def.Label);
+    }
+
+    [Fact]
+    public void Operator_supplied_Label_overrides_BaseName()
+    {
+        var def = new QueueDefinition(
+            "lobby/casual_4v4", new MatchShape(2, 4), Policy(),
+            ownerArenaName: "lobby", label: "4v4 (Casual)");
+        Assert.Equal("casual_4v4", def.BaseName);
+        Assert.Equal("4v4 (Casual)", def.Label);
+    }
+
+    [Fact]
+    public void BaseName_strips_owner_arena_prefix()
+    {
+        var def = new QueueDefinition(
+            "lobby/3v3comp", new MatchShape(2, 3), Policy(), ownerArenaName: "lobby");
+        Assert.Equal("3v3comp", def.BaseName);
+    }
+
+    [Fact]
     public void FreqOf_follows_hundred_step_convention()
     {
         Assert.Equal((short)100, QueueDefinition.FreqOf(0));

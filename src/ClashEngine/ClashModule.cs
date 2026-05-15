@@ -8,7 +8,10 @@ using ClashEngine.Adapter;
 using ClashEngine.Commands;
 using ClashEngine.Config;
 using ClashEngine.Core;
+using ClashEngine.Core.GameType;
+using ClashEngine.Core.Identity;
 using ClashEngine.Core.Penalties;
+using ClashEngine.Core.Queue;
 using ClashEngine.Core.Ratings;
 using ClashEngine.Core.Stats;
 using ClashEngine.Events;
@@ -95,6 +98,19 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     // DetachModuleAsync. SS guarantees DetachModule fires for every attached arena before
     // PreUnload, but PreUnloadAsync drains any leftovers as belt-and-braces.
     private readonly Dictionary<Arena, List<Action>> _arenaUnregisterActions = new();
+
+    // Zone-wide global.conf handle. We read the [ClashEngine] section from it for zone-wide
+    // game type definitions; the section can live directly in global.conf or in any file
+    // #include'd from it. Queues without an owner arena make no sense under per-arena
+    // namespacing, so only game types are picked up at zone scope.
+    private ConfigHandle? _zoneClashHandle;
+
+    // Per-arena arena.conf handles, keyed by arena. We read the [ClashEngine] section from
+    // each one (which may sit directly in arena.conf or in any #include'd file). Each handle
+    // has a change callback registered so an operator edit -- in arena.conf itself or any
+    // included file -- triggers a re-parse + atomic registry swap (with waiter drops on
+    // queues removed or changed by the new content).
+    private readonly Dictionary<Arena, ConfigHandle> _arenaClashHandles = new();
 
     public ClashModule(
         IComponentBroker broker,
@@ -407,12 +423,32 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _commandHandlers.RegisterGlobal();
         _unregisterActions.Add(_commandHandlers.UnregisterGlobal);
 
-        MatchmakingConfig.ApplyTo(_engine, _config, _clashLog);
+        // Zone-wide global.conf. Provides shared game type definitions any arena can reference
+        // via its [ClashEngine] section. Queues are not loaded at zone scope -- per the
+        // per-arena model, every queue must have an owning arena.
+        _zoneClashHandle = await _config.OpenConfigFileAsync(null, null, OnZoneClashChanged);
+        if (_zoneClashHandle is not null)
+        {
+            LoadZoneClashContribution();
+            _unregisterActions.Add(() =>
+            {
+                _engine?.GameTypes.Remove(sourceArena: null);
+                if (_zoneClashHandle is { } h)
+                {
+                    _config.CloseConfigFile(h);
+                    _zoneClashHandle = null;
+                }
+            });
+        }
+        else
+        {
+            _clashLog.Info(LogCategory, "No global.conf found; zone-wide game types are empty.");
+        }
 
         _mainloopTimer.SetTimer(OnTick, initialDelay: 500, interval: 500, key: this);
 
         _log.LogM(LogLevel.Info, LogCategory,
-            $"ClashEngine ready ({_engine.Queues.Count} queues registered).");
+            $"ClashEngine ready ({_engine.GameTypes.Count} zone-wide game type(s), {_engine.Queues.Count} queue(s) registered so far).");
     }
 
     async Task IAsyncModuleLoaderAware.PreUnloadAsync(IComponentBroker broker, CancellationToken cancellationToken)
@@ -453,7 +489,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _penaltiesRegistration = null;
     }
 
-    Task<bool> IAsyncArenaAttachableModule.AttachModuleAsync(Arena arena, CancellationToken cancellationToken)
+    async Task<bool> IAsyncArenaAttachableModule.AttachModuleAsync(Arena arena, CancellationToken cancellationToken)
     {
         // Per-arena command registration. Construction of the command handlers happened in
         // PostLoadAsync; here we just bind their AddCommand calls to this specific arena so
@@ -469,6 +505,20 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
 
             _commandHandlers!.RegisterArena(arena);
             actions.Add(() => _commandHandlers!.UnregisterArena(arena));
+
+            // Open the arena's main conf (arena.conf). Whichever file actually carries the
+            // [ClashEngine] section -- arena.conf itself, or any file #include'd from it --
+            // contributes its game types + queues to the engine registries until the arena
+            // detaches. The host watches the entire document (base + all transitive includes)
+            // for changes and invokes OnArenaClashChanged on the mainloop thread.
+            var clashHandle = await _config.OpenConfigFileAsync(
+                arena.BaseName, null, OnArenaClashChanged, arena);
+            if (clashHandle is not null)
+            {
+                _arenaClashHandles[arena] = clashHandle;
+                LoadArenaClashContribution(arena);
+                actions.Add(() => UnloadArenaClashContribution(arena));
+            }
         }
         catch (Exception ex)
         {
@@ -479,11 +529,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             {
                 try { actions[i](); } catch { /* swallow -- already in failure path */ }
             }
-            return Task.FromResult(false);
+            return false;
         }
 
         _arenaUnregisterActions[arena] = actions;
-        return Task.FromResult(true);
+        return true;
     }
 
     Task<bool> IAsyncArenaAttachableModule.DetachModuleAsync(Arena arena, CancellationToken cancellationToken)
@@ -541,6 +591,140 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
 
         _log.LogM(LogLevel.Info, LogCategory, "ClashEngine unloaded.");
         return Task.FromResult(true);
+    }
+
+    // ---- [ClashEngine] load / reload helpers ------------------------------------------------
+
+    /// <summary>
+    /// Parses the zone-wide <c>[ClashEngine]</c> section (from global.conf or anything
+    /// <c>#include</c>'d from it) and commits its game types to the engine. Game-type IDs are
+    /// bytes persisted by <c>PersistRatingStore</c>; collisions and ID changes-by-rename are
+    /// rejected and logged. On rejection, the previous zone contribution is preserved.
+    /// </summary>
+    private void LoadZoneClashContribution()
+    {
+        if (_engine is null || _zoneClashHandle is null || _clashLog is null) return;
+
+        var parsed = MatchmakingConfig.ParseZoneGameTypes(_config, _zoneClashHandle, _clashLog);
+        if (!_engine.GameTypes.ReplaceArenaContribution(sourceArena: null, parsed, out var errors))
+        {
+            foreach (var e in errors) _clashLog.Warn(LogCategory, $"global.conf [ClashEngine]: {e}");
+            _clashLog.Warn(LogCategory, "global.conf [ClashEngine] rejected; prior zone-wide game types retained.");
+            return;
+        }
+        _clashLog.Info(LogCategory, $"global.conf [ClashEngine] loaded ({parsed.Count} zone-wide game type(s)).");
+    }
+
+    private void OnZoneClashChanged()
+    {
+        // Host fires this on the mainloop thread. Re-parse and re-commit; failures leave the
+        // prior state intact (and log the reason).
+        try { LoadZoneClashContribution(); }
+        catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"OnZoneClashChanged failed: {ex}"); }
+    }
+
+    /// <summary>
+    /// Parses <paramref name="arena"/>'s <c>[ClashEngine]</c> contribution (from its arena.conf
+    /// document, including anything <c>#include</c>'d) and commits it. On a hot reload, queues
+    /// that are removed or significantly altered are drained first and each affected player is
+    /// sent a chat notice.
+    /// </summary>
+    private void LoadArenaClashContribution(Arena arena)
+    {
+        if (_engine is null || _clashLog is null) return;
+        if (!_arenaClashHandles.TryGetValue(arena, out var handle)) return;
+
+        var contribution = MatchmakingConfig.ParseArenaContribution(_config, handle, arena.BaseName, _clashLog);
+        string src = $"arena '{arena.BaseName}' [ClashEngine]";
+
+        // 1. Commit game types FIRST so the queue parser (already done above) and any later
+        //    lookups can resolve cross-references through GameTypes. A failure here aborts the
+        //    whole reload for this arena -- queues would reference unknown IDs otherwise.
+        var gameTypeList = new List<GameTypeDef>();
+        foreach (var g in contribution.GameTypes) gameTypeList.Add(g);
+        if (!_engine.GameTypes.ReplaceArenaContribution(arena.BaseName, gameTypeList, out var gtErrors))
+        {
+            foreach (var e in gtErrors) _clashLog.Warn(LogCategory, $"{src}: {e}");
+            _clashLog.Warn(LogCategory, $"{src} rejected; prior contribution retained.");
+            return;
+        }
+
+        // 2. Preview the queue diff so we can drain waiters BEFORE the registry swap. The
+        //    matcher's per-queue dequeue path requires the queue to still be registered, so we
+        //    have to act on the old registry state.
+        if (!_engine.Queues.TryComputeArenaContributionDiff(
+                arena.BaseName, contribution.Queues, out var wouldRemove, out var wouldAdd, out var qErrors))
+        {
+            foreach (var e in qErrors) _clashLog.Warn(LogCategory, $"{src}: {e}");
+            _clashLog.Warn(LogCategory, $"{src} queues rejected; prior queues retained.");
+            return;
+        }
+
+        // 3. Drain waiters from queues that will be removed or have their shape changed by the
+        //    swap. Notify each surviving player via chat.
+        var now = _clock!.UtcNow;
+        DrainQueuesWithNotice(wouldRemove, now);
+
+        // 4. Apply the swap.
+        _engine.Queues.ApplyArenaContribution(arena.BaseName, contribution.Queues);
+
+        _clashLog.Info(LogCategory,
+            $"{src} loaded ({gameTypeList.Count} game type(s), " +
+            $"{contribution.Queues.Count} queue(s); +{wouldAdd.Count} -{wouldRemove.Count} since last load).");
+    }
+
+    private void OnArenaClashChanged(Arena arena)
+    {
+        try { LoadArenaClashContribution(arena); }
+        catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"OnArenaClashChanged({arena.Name}) failed: {ex}"); }
+    }
+
+    /// <summary>
+    /// Removes <paramref name="arena"/>'s entire <c>[ClashEngine]</c> contribution from the
+    /// engine registries and closes the arena.conf handle. Invoked from the per-arena
+    /// unregister-action list when the arena is detached.
+    /// </summary>
+    private void UnloadArenaClashContribution(Arena arena)
+    {
+        if (!_arenaClashHandles.Remove(arena, out var handle)) return;
+
+        if (_engine is not null)
+        {
+            // Drain waiters from queues we're about to remove, then drop the queues. Mirrors the
+            // hot-reload "removed queue" path so detach uses the same UX.
+            var owned = new List<QueueDefinition>();
+            foreach (var def in _engine.Queues.Definitions)
+                if (string.Equals(def.OwnerArenaName, arena.BaseName, StringComparison.OrdinalIgnoreCase))
+                    owned.Add(def);
+            DrainQueuesWithNotice(owned, _clock?.UtcNow ?? DateTimeOffset.UtcNow);
+            _engine.Queues.RemoveByOwner(arena.BaseName);
+            _engine.GameTypes.Remove(arena.BaseName);
+        }
+
+        try { _config.CloseConfigFile(handle); }
+        catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"CloseConfigFile({arena.Name}) failed: {ex}"); }
+    }
+
+    /// <summary>
+    /// Drains every waiter from each queue in <paramref name="queues"/> via the engine's normal
+    /// dequeue path (so telemetry / _multiQueue stay consistent), and sends each removed
+    /// connected player a chat notice. Must be called BEFORE the queue is removed from the
+    /// registry -- the matcher's dequeue rejects queues that aren't registered.
+    /// </summary>
+    private void DrainQueuesWithNotice(IReadOnlyList<QueueDefinition> queues, DateTimeOffset now)
+    {
+        if (_engine is null) return;
+        foreach (var def in queues)
+        {
+            var snap = def.Queue.Snapshot();
+            for (int i = 0; i < snap.Count; i++)
+            {
+                var player = snap[i].Player;
+                _engine.Dequeue(player, def.UniqueId, now);
+                if (_resolver?.Resolve(player) is { } p)
+                    _chat.SendMessage(p, $"Queue '{def.Label}' was reconfigured; you've been removed.");
+            }
+        }
     }
 
     private bool OnTick()

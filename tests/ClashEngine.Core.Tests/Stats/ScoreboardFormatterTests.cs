@@ -52,7 +52,7 @@ public class ScoreboardFormatterTests
         };
 
         return new MatchPayload(
-            SchemaVersion: 2, MatchId: System.Guid.NewGuid(), QueueName: "test", GameType: 1,
+            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: 1,
             Arena: "test", StartedAt: System.DateTimeOffset.UtcNow,
             EndedAt: System.DateTimeOffset.UtcNow,
             FinalState: "Completed", Teams: teams,
@@ -109,7 +109,7 @@ public class ScoreboardFormatterTests
         var alpha = MakeStub("Alpha");
         var bravo = MakeStub("Bravo");
         var payload = new MatchPayload(
-            SchemaVersion: 2, MatchId: System.Guid.NewGuid(), QueueName: "test", GameType: 1,
+            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: 1,
             Arena: "test", StartedAt: System.DateTimeOffset.UtcNow,
             EndedAt: System.DateTimeOffset.UtcNow,
             FinalState: "Completed", Teams: new[] { team1, team2 },
@@ -142,7 +142,7 @@ public class ScoreboardFormatterTests
         var team3 = new RankedTeamPayload(Rank: 3, Score: 2, Players: new[] { "Cobra" });
 
         var payload = new MatchPayload(
-            SchemaVersion: 2, MatchId: System.Guid.NewGuid(), QueueName: "test", GameType: 1,
+            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: 1,
             Arena: "test", StartedAt: System.DateTimeOffset.UtcNow,
             EndedAt: System.DateTimeOffset.UtcNow,
             FinalState: "Completed", Teams: new[] { team1, team2, team3 },

@@ -46,7 +46,7 @@ public class MatchExporterTests
         var r = Make4Player();
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, queueName: "4v4", gameType: 1, arena: "tdm", teams: Teams(), startedAt: null,
+            matchId, queueName: "4v4", queueLabel: null, gameType: 1, arena: "tdm", teams: Teams(), startedAt: null,
             recorder: r, outcome: Outcome(matchId));
 
         Assert.Equal(4, payload.Participants.Count);
@@ -60,7 +60,7 @@ public class MatchExporterTests
         var r = Make4Player();
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId));
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
 
         var a = payload.Participants.Single(p => p.Name == "A");
         var c = payload.Participants.Single(p => p.Name == "C");
@@ -80,7 +80,7 @@ public class MatchExporterTests
 
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId));
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
 
         var a = payload.Participants.Single(p => p.Name == "A");
         Assert.Equal(1, a.PerWeapon["Bullet"].FireCount);
@@ -95,7 +95,7 @@ public class MatchExporterTests
         var r = Make4Player();
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId));
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
 
         Assert.Equal(2, payload.Teams.Count);
         Assert.Equal(1, payload.Teams[0].Rank);
@@ -110,12 +110,13 @@ public class MatchExporterTests
         var matchId = Guid.NewGuid();
         var startedAt = new DateTimeOffset(2026, 4, 25, 11, 30, 0, TimeSpan.Zero);
         var payload = MatchExporter.Build(
-            matchId, "4v4_competitive", gameType: 7, arena: "tdm_pro",
+            matchId, "lobby/casual_4v4", queueLabel: "4v4 (Casual)", gameType: 7, arena: "tdm_pro",
             Teams(), startedAt, r, Outcome(matchId));
 
         Assert.Equal(MatchExporter.CurrentSchemaVersion, payload.SchemaVersion);
         Assert.Equal(matchId, payload.MatchId);
-        Assert.Equal("4v4_competitive", payload.QueueName);
+        Assert.Equal("lobby/casual_4v4", payload.QueueName);
+        Assert.Equal("4v4 (Casual)", payload.QueueLabel);
         Assert.Equal(7, payload.GameType);
         Assert.Equal("tdm_pro", payload.Arena);
         Assert.Equal(startedAt, payload.StartedAt);
@@ -134,7 +135,7 @@ public class MatchExporterTests
 
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId),
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId),
             ratingsAtStart: ratings);
 
         var a = payload.Participants.Single(p => p.Name == "A");
@@ -166,7 +167,7 @@ public class MatchExporterTests
             EndedAt: new DateTimeOffset(2026, 4, 25, 12, 0, 0, TimeSpan.Zero));
 
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, abandonedOutcome);
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, abandonedOutcome);
 
         Assert.Equal("Abandoned", payload.FinalState);
         Assert.Equal(2, payload.AbandonedBy.Count);
@@ -180,7 +181,7 @@ public class MatchExporterTests
         var r = Make4Player();
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId));
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
         Assert.Empty(payload.AbandonedBy);
     }
 
@@ -190,7 +191,7 @@ public class MatchExporterTests
         var r = Make4Player();
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId),
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId),
             recordingPath: "replays/2026/04/25/match_abc.ssrec");
         Assert.Equal("replays/2026/04/25/match_abc.ssrec", payload.RecordingPath);
     }
@@ -212,7 +213,7 @@ public class MatchExporterTests
 
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId),
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId),
             ratingsAtStart: ratings,
             postOrdinalByPlayer: post);
 
@@ -227,7 +228,7 @@ public class MatchExporterTests
         // No post-rating -> null delta even when pre is known.
         var ratingsOnlyA = new Dictionary<PlayerKey, RatingPayload> { [K("A")] = ratings[K("A")] };
         var noPost = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId),
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId),
             ratingsAtStart: ratingsOnlyA);
         Assert.Null(noPost.Participants.Single(p => p.Name == "A").RatingChange);
     }
@@ -261,7 +262,7 @@ public class MatchExporterTests
 
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId));
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
 
         var a = payload.Participants.Single(p => p.Name == "A");
         Assert.True(a.PerWeapon.ContainsKey("Bullet"));
@@ -285,7 +286,7 @@ public class MatchExporterTests
 
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
-            matchId, "4v4", 1, "tdm", Teams(), null, r, Outcome(matchId));
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
 
         var a = payload.Participants.Single(p => p.Name == "A");
         Assert.Equal(2, a.DistanceSamples.Count);

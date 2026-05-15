@@ -1,36 +1,37 @@
 using System;
 using System.Collections.Generic;
+using ClashEngine.Core.GameType;
 using ClashEngine.Core.Queue;
+using SS.Core;
 using SS.Core.ComponentInterfaces;
 
 namespace ClashEngine.Config;
 
 /// <summary>
-/// Parses the <c>GameType&lt;i&gt;</c> blocks under <c>[ClashEngine]</c>. Each game type
-/// describes one match's rules (team shape, win condition, lives, spawn / ship layout); a
-/// queue references one game type by name, and many queues can share a game type.
+/// Parses the <c>GameType&lt;i&gt;</c> blocks under <c>[ClashEngine]</c> in a given
+/// <see cref="ConfigHandle"/> -- arena scope (arena.conf, plus anything <c>#include</c>'d) or
+/// zone scope (global.conf, plus its includes). Each game type describes one match's rules
+/// (team shape, win condition, lives, spawn / ship layout); a queue references one game type
+/// by name, and many queues can share a game type.
 /// </summary>
 internal static class GameTypeParser
 {
     /// <summary>
-    /// Reads <c>GameTypeCount</c> and the <c>GameType1..N</c> blocks, returning a name-keyed
-    /// dictionary the queue parser can resolve queue-side <c>Queue&lt;i&gt;GameType</c>
-    /// references against. Bad or duplicate-named game types are logged at Warn and skipped.
+    /// Reads <c>GameTypeCount</c> and the <c>GameType1..N</c> blocks from <paramref name="handle"/>,
+    /// returning a name-keyed dictionary the queue parser can resolve queue-side
+    /// <c>Queue&lt;i&gt;GameType</c> references against. Bad or duplicate-named game types are
+    /// logged at Warn and skipped.
     /// </summary>
-    public static Dictionary<string, GameTypeDef> ReadAll(IConfigManager config, ClashLog? log)
+    public static Dictionary<string, GameTypeDef> ReadAll(
+        IConfigManager config, ConfigHandle handle, ClashLog? log)
     {
         var result = new Dictionary<string, GameTypeDef>(StringComparer.OrdinalIgnoreCase);
-        int gtCount = config.GetInt(config.Global, ConfigConstants.Section, "GameTypeCount", 0);
-        if (gtCount <= 0)
-        {
-            log?.Warn(ConfigConstants.LogCategory,
-                "GameTypeCount = 0 (or missing); queues that reference any game type will be skipped.");
-            return result;
-        }
+        int gtCount = config.GetInt(handle, ConfigConstants.Section, "GameTypeCount", 0);
+        if (gtCount <= 0) return result;
 
         for (int i = 1; i <= gtCount; i++)
         {
-            if (TryReadOne(config, i, log) is { } def)
+            if (TryReadOne(config, handle, i, log) is { } def)
             {
                 if (result.ContainsKey(def.Name))
                 {
@@ -45,29 +46,29 @@ internal static class GameTypeParser
         return result;
     }
 
-    private static GameTypeDef? TryReadOne(IConfigManager config, int index, ClashLog? log)
+    private static GameTypeDef? TryReadOne(IConfigManager config, ConfigHandle handle, int index, ClashLog? log)
     {
         string p = $"GameType{index}";
-        var name = config.GetStr(config.Global, ConfigConstants.Section, p + "Name");
+        var name = config.GetStr(handle, ConfigConstants.Section, p + "Name");
         if (string.IsNullOrWhiteSpace(name))
         {
             log?.Warn(ConfigConstants.LogCategory, $"{p}Name missing -- skipping this game type slot.");
             return null;
         }
 
-        int rawId = config.GetInt(config.Global, ConfigConstants.Section, p + "Id", index);
+        int rawId = config.GetInt(handle, ConfigConstants.Section, p + "Id", index);
         if (rawId < 0 || rawId > 255)
             log?.Warn(ConfigConstants.LogCategory, $"{p}Id={rawId} outside [0,255]; clamped.");
         byte id = (byte)Math.Clamp(rawId, 0, 255);
 
-        int teamCount = config.GetInt(config.Global, ConfigConstants.Section, p + "TeamCount", 2);
+        int teamCount = config.GetInt(handle, ConfigConstants.Section, p + "TeamCount", 2);
         if (teamCount < 2)
         {
             log?.Warn(ConfigConstants.LogCategory,
                 $"{p}TeamCount={teamCount} (must be >=2); skipping game type '{name}'.");
             return null;
         }
-        int perTeam = config.GetInt(config.Global, ConfigConstants.Section, p + "PlayersPerTeam", 4);
+        int perTeam = config.GetInt(handle, ConfigConstants.Section, p + "PlayersPerTeam", 4);
         if (perTeam < 1)
         {
             log?.Warn(ConfigConstants.LogCategory,
@@ -75,42 +76,42 @@ internal static class GameTypeParser
             return null;
         }
 
-        int killTarget = config.GetInt(config.Global, ConfigConstants.Section, p + "KillTarget", 0);
+        int killTarget = config.GetInt(handle, ConfigConstants.Section, p + "KillTarget", 0);
         if (killTarget < 0)
         {
             log?.Warn(ConfigConstants.LogCategory, $"{p}KillTarget={killTarget} (must be >=0); using 0.");
             killTarget = 0;
         }
-        int lives = config.GetInt(config.Global, ConfigConstants.Section, p + "Lives", 0);   // 0 = unlimited
+        int lives = config.GetInt(handle, ConfigConstants.Section, p + "Lives", 0);   // 0 = unlimited
         if (lives < 0)
         {
             log?.Warn(ConfigConstants.LogCategory, $"{p}Lives={lives} (must be >=0); using 0 (unlimited).");
             lives = 0;
         }
-        TimeSpan? timeLimit = ConfigReadHelpers.TryReadTimeSpan(config, p + "TimeLimit", log, p);
+        TimeSpan? timeLimit = ConfigReadHelpers.TryReadTimeSpan(config, handle, p + "TimeLimit", log, p);
         if (timeLimit is { } tl && tl <= TimeSpan.Zero)
         {
             log?.Warn(ConfigConstants.LogCategory, $"{p}TimeLimit={tl} must be >0; ignored.");
             timeLimit = null;
         }
 
-        var spawnSetByTeam = SpawnSetParser.Read(config, p, teamCount, log);
-        int? maxDrift = ConfigReadHelpers.TryReadInt(config, p + "MaxSpawnDrift");
+        var spawnSetByTeam = SpawnSetParser.Read(config, handle, p, teamCount, log);
+        int? maxDrift = ConfigReadHelpers.TryReadInt(config, handle, p + "MaxSpawnDrift");
         if (maxDrift is { } mdr && mdr < 0)
         {
             log?.Warn(ConfigConstants.LogCategory, $"{p}MaxSpawnDrift={mdr} must be >=0; ignored.");
             maxDrift = null;
         }
-        bool warpOnSpawn = config.GetInt(config.Global, ConfigConstants.Section, p + "WarpOnSpawn", 0) != 0;
+        bool warpOnSpawn = config.GetInt(handle, ConfigConstants.Section, p + "WarpOnSpawn", 0) != 0;
 
-        TimeSpan? stagingDuration = ReadOptionalPositiveTimeSpan(config, p + "StagingDuration", p, log);
-        TimeSpan? countdownDuration = ReadOptionalPositiveTimeSpan(config, p + "CountdownDuration", p, log);
-        TimeSpan? knockoutSpecDelay = ReadOptionalNonNegativeTimeSpan(config, p + "KnockoutSpecDelay", p, log);
-        TimeSpan? teamCollapseGrace = ReadOptionalNonNegativeTimeSpan(config, p + "TeamCollapseGrace", p, log);
-        TimeSpan? shipChangeGracePeriod = ReadOptionalNonNegativeTimeSpan(config, p + "ShipChangeGracePeriod", p, log);
-        ItemsAction returnItemsAction = ReadReturnItemsAction(config, p, log);
+        TimeSpan? stagingDuration = ReadOptionalPositiveTimeSpan(config, handle, p + "StagingDuration", p, log);
+        TimeSpan? countdownDuration = ReadOptionalPositiveTimeSpan(config, handle, p + "CountdownDuration", p, log);
+        TimeSpan? knockoutSpecDelay = ReadOptionalNonNegativeTimeSpan(config, handle, p + "KnockoutSpecDelay", p, log);
+        TimeSpan? teamCollapseGrace = ReadOptionalNonNegativeTimeSpan(config, handle, p + "TeamCollapseGrace", p, log);
+        TimeSpan? shipChangeGracePeriod = ReadOptionalNonNegativeTimeSpan(config, handle, p + "ShipChangeGracePeriod", p, log);
+        ItemsAction returnItemsAction = ReadReturnItemsAction(config, handle, p, log);
 
-        var shipBySlot = ShipBySlotParser.Read(config, p, teamCount, perTeam, log);
+        var shipBySlot = ShipBySlotParser.Read(config, handle, p, teamCount, perTeam, log);
 
         return new GameTypeDef(
             name, id, teamCount, perTeam, killTarget, lives, timeLimit,
@@ -123,9 +124,9 @@ internal static class GameTypeParser
     /// <summary>Reads <c>GameType&lt;i&gt;ReturnItemsAction</c>. Accepts <c>full</c>, <c>restore</c>,
     /// or <c>burn</c> (case-insensitive). Missing or invalid values fall back to
     /// <see cref="ItemsAction.Full"/> (the legacy behavior).</summary>
-    private static ItemsAction ReadReturnItemsAction(IConfigManager config, string prefix, ClashLog? log)
+    private static ItemsAction ReadReturnItemsAction(IConfigManager config, ConfigHandle handle, string prefix, ClashLog? log)
     {
-        var raw = config.GetStr(config.Global, ConfigConstants.Section, prefix + "ReturnItemsAction");
+        var raw = config.GetStr(handle, ConfigConstants.Section, prefix + "ReturnItemsAction");
         if (string.IsNullOrWhiteSpace(raw)) return ItemsAction.Full;
         if (Enum.TryParse<ItemsAction>(raw, ignoreCase: true, out var parsed)) return parsed;
         log?.Warn(ConfigConstants.LogCategory,
@@ -135,9 +136,9 @@ internal static class GameTypeParser
 
     /// <summary>Reads an optional <c>TimeSpan</c> that must be strictly positive when set.
     /// Bad values are warned and dropped to <see langword="null"/> (let the engine layer default).</summary>
-    private static TimeSpan? ReadOptionalPositiveTimeSpan(IConfigManager config, string key, string prefix, ClashLog? log)
+    private static TimeSpan? ReadOptionalPositiveTimeSpan(IConfigManager config, ConfigHandle handle, string key, string prefix, ClashLog? log)
     {
-        var ts = ConfigReadHelpers.TryReadTimeSpan(config, key, log, prefix);
+        var ts = ConfigReadHelpers.TryReadTimeSpan(config, handle, key, log, prefix);
         if (ts is { } v && v <= TimeSpan.Zero)
         {
             log?.Warn(ConfigConstants.LogCategory, $"{key}={v} must be > 0; using default.");
@@ -148,9 +149,9 @@ internal static class GameTypeParser
 
     /// <summary>Reads an optional <c>TimeSpan</c> that must be non-negative. Bad values are
     /// warned and dropped to <see langword="null"/>.</summary>
-    private static TimeSpan? ReadOptionalNonNegativeTimeSpan(IConfigManager config, string key, string prefix, ClashLog? log)
+    private static TimeSpan? ReadOptionalNonNegativeTimeSpan(IConfigManager config, ConfigHandle handle, string key, string prefix, ClashLog? log)
     {
-        var ts = ConfigReadHelpers.TryReadTimeSpan(config, key, log, prefix);
+        var ts = ConfigReadHelpers.TryReadTimeSpan(config, handle, key, log, prefix);
         if (ts is { } v && v < TimeSpan.Zero)
         {
             log?.Warn(ConfigConstants.LogCategory, $"{key}={v} must be >=0; using default.");

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using SS.Core;
 using SS.Core.ComponentInterfaces;
 
 namespace ClashEngine.Config;
@@ -18,14 +19,14 @@ internal static class ShipBySlotParser
     /// or wrong-sized team logs a warn and skips the override entirely.
     /// </summary>
     public static IReadOnlyList<IReadOnlyList<int>>? Read(
-        IConfigManager config, string prefix, int teamCount, int perTeam, ClashLog? log)
+        IConfigManager config, ConfigHandle handle, string prefix, int teamCount, int perTeam, ClashLog? log)
     {
         var rows = new List<List<int>>(teamCount);
         bool anyConfigured = false;
         for (int t = 0; t < teamCount; t++)
         {
             string key = $"{prefix}Team{t + 1}Ships";
-            var raw = config.GetStr(config.Global, ConfigConstants.Section, key);
+            var raw = config.GetStr(handle, ConfigConstants.Section, key);
             var slots = ParseList(raw, log, prefix, key);
             if (slots.Count > 0) anyConfigured = true;
             rows.Add(slots);
