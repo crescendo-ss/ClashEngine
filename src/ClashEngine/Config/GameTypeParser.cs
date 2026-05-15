@@ -57,9 +57,13 @@ internal static class GameTypeParser
         }
 
         int rawId = config.GetInt(handle, ConfigConstants.Section, p + "Id", index);
-        if (rawId < 0 || rawId > 255)
-            log?.Warn(ConfigConstants.LogCategory, $"{p}Id={rawId} outside [0,255]; clamped.");
-        byte id = (byte)Math.Clamp(rawId, 0, 255);
+        if (rawId < 0)
+        {
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{p}Id={rawId} must be non-negative; skipping game type '{name}'.");
+            return null;
+        }
+        uint id = (uint)rawId;
 
         int teamCount = config.GetInt(handle, ConfigConstants.Section, p + "TeamCount", 2);
         if (teamCount < 2)

@@ -206,7 +206,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
                 for (int j = 0; j < team.Count; j++)
                 {
                     var key = team[j];
-                    if (_engine.Ratings.TryGet(key, Core.Identity.GameTypeId.From(info.GameType), out var r))
+                    if (_engine.Ratings.TryGet(key, new Core.Identity.GameTypeId(info.GameType), out var r))
                     {
                         postOrdinalByName[key.Name] = r.Ordinal;
                         postOrdinalByKey[key] = r.Ordinal;
@@ -351,7 +351,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
     private readonly record struct MatchInfo(
         string QueueName,
         string QueueLabel,
-        int GameType,
+        uint GameType,
         string? Arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> Teams,
         DateTimeOffset? StartedAt,

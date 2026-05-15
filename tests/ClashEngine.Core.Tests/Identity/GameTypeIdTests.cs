@@ -7,21 +7,23 @@ public class GameTypeIdTests
     [Fact]
     public void Value_round_trips()
     {
-        Assert.Equal((byte)7, new GameTypeId(7).Value);
+        Assert.Equal(7u, new GameTypeId(7).Value);
     }
 
-    [Fact]
-    public void From_int_succeeds_in_range()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(255)]
+    [InlineData(256)]
+    [InlineData(int.MaxValue)]
+    public void From_int_accepts_non_negative(int value)
     {
-        Assert.Equal((byte)0, GameTypeId.From(0).Value);
-        Assert.Equal((byte)255, GameTypeId.From(255).Value);
+        Assert.Equal((uint)value, GameTypeId.From(value).Value);
     }
 
     [Theory]
     [InlineData(-1)]
-    [InlineData(256)]
-    [InlineData(int.MaxValue)]
-    public void From_int_throws_out_of_range(int value)
+    [InlineData(int.MinValue)]
+    public void From_int_throws_negative(int value)
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => GameTypeId.From(value));
     }

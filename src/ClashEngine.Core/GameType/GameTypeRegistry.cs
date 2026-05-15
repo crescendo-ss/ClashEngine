@@ -78,7 +78,7 @@ public sealed class GameTypeRegistry
 
         // 1. Internal consistency: no duplicate names or duplicate IDs within the incoming set.
         var byNameIncoming = new Dictionary<string, GameTypeDef>(StringComparer.OrdinalIgnoreCase);
-        var byIdIncoming = new Dictionary<byte, GameTypeDef>();
+        var byIdIncoming = new Dictionary<uint, GameTypeDef>();
         for (int i = 0; i < newDefs.Count; i++)
         {
             var d = newDefs[i];

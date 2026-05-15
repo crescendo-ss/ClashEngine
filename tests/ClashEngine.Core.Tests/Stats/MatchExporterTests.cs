@@ -117,7 +117,7 @@ public class MatchExporterTests
         Assert.Equal(matchId, payload.MatchId);
         Assert.Equal("lobby/casual_4v4", payload.QueueName);
         Assert.Equal("4v4 (Casual)", payload.QueueLabel);
-        Assert.Equal(7, payload.GameType);
+        Assert.Equal(7u, payload.GameType);
         Assert.Equal("tdm_pro", payload.Arena);
         Assert.Equal(startedAt, payload.StartedAt);
         Assert.Equal("Completed", payload.FinalState);

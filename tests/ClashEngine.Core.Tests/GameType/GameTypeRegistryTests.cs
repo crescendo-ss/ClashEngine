@@ -4,7 +4,7 @@ namespace ClashEngine.Core.Tests.GameType;
 
 public class GameTypeRegistryTests
 {
-    private static GameTypeDef Def(string name, byte id, int teamCount = 2, int perTeam = 3) =>
+    private static GameTypeDef Def(string name, uint id, int teamCount = 2, int perTeam = 3) =>
         new GameTypeDef(
             Name: name,
             Id: id,
@@ -35,7 +35,7 @@ public class GameTypeRegistryTests
         Assert.Empty(errors);
         Assert.Equal(2, r.Count);
         Assert.True(r.TryGet("elim_3v3", out var got));
-        Assert.Equal((byte)1, got.Id);
+        Assert.Equal(1u, got.Id);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class GameTypeRegistryTests
         Assert.False(ok);
         Assert.NotEmpty(errors);
         Assert.True(r.TryGet("elim_3v3", out var got));
-        Assert.Equal((byte)1, got.Id);   // original Id preserved
+        Assert.Equal(1u, got.Id);   // original Id preserved
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class GameTypeRegistryTests
         Assert.False(ok);
         Assert.Contains(errors, e => e.Contains("Id change rejected"));
         Assert.True(r.TryGet("elim_3v3", out var got));
-        Assert.Equal((byte)1, got.Id);
+        Assert.Equal(1u, got.Id);
     }
 
     [Fact]

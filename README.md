@@ -149,7 +149,7 @@ cmd_chart
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `GameType<i>Name` | string | required | Referenced by `Queue<j>GameType`. Case-insensitive. |
-| `GameType<i>Id` | int 0–255 | `i` | Bucket the rating store keys ratings under. **Two queues with different rules but the same Id share ratings** — set distinct Ids for distinct rulesets. |
+| `GameType<i>Id` | int ≥ 0 | `i` | Bucket the rating store keys ratings under. **Two queues with different rules but the same Id share ratings** — set distinct Ids for distinct rulesets. |
 | `GameType<i>TeamCount` | int ≥ 2 | 2 | Number of teams. |
 | `GameType<i>PlayersPerTeam` | int ≥ 1 | 4 | Players per team. |
 | `GameType<i>KillTarget` | int ≥ 0 | 30 (when nothing else set) | Per-team kills required to win. `0` = unset (use `TimeLimit` instead). |

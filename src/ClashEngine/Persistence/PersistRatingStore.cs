@@ -21,7 +21,11 @@ namespace ClashEngine.Persistence;
 public sealed class PersistRatingStore : IRatingStore
 {
     public const int PersistKey = 100;
-    private const ushort BlobVersion = 1;
+
+    // Wire format version. v1 wrote gameType as a byte; v2 widens it to uint32 so the on-disk
+    // format is no longer capped at 256 game types. v1 blobs are still readable for migration;
+    // we always write v2 going forward.
+    private const ushort BlobVersion = 2;
 
     private readonly object _gate = new();
     private readonly Dictionary<(PlayerKey, GameTypeId), Rating> _cache = new();
@@ -67,7 +71,7 @@ public sealed class PersistRatingStore : IRatingStore
         if (player?.Name is not { Length: > 0 } name) return;
         var key = new PlayerKey(name);
 
-        var rows = new List<(byte GameType, Rating R)>();
+        var rows = new List<(uint GameType, Rating R)>();
         lock (_gate)
         {
             foreach (var kvp in _cache)
@@ -81,7 +85,7 @@ public sealed class PersistRatingStore : IRatingStore
         writer.Write((ushort)rows.Count);
         foreach (var row in rows)
         {
-            writer.Write(row.GameType);
+            writer.Write(row.GameType);          // v2: uint32 (v1 was byte)
             writer.Write(row.R.Mu);
             writer.Write(row.R.Sigma);
             writer.Write(row.R.GamesPlayed);
@@ -106,14 +110,15 @@ public sealed class PersistRatingStore : IRatingStore
             ushort version;
             try { version = reader.ReadUInt16(); }
             catch (EndOfStreamException) { return; }
-            if (version != BlobVersion) return;   // unknown version -> ignore
+            if (version != 1 && version != BlobVersion) return;   // unknown version -> ignore
 
             ushort count = reader.ReadUInt16();
             lock (_gate)
             {
                 for (int i = 0; i < count; i++)
                 {
-                    byte gameType = reader.ReadByte();
+                    // v1 wrote gameType as a byte; v2 widens it to uint32.
+                    uint gameType = version == 1 ? reader.ReadByte() : reader.ReadUInt32();
                     double mu = reader.ReadDouble();
                     double sigma = reader.ReadDouble();
                     uint games = reader.ReadUInt32();
