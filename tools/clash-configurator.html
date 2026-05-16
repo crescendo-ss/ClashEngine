@@ -255,34 +255,89 @@
     border-color: var(--danger);
   }
   .duration {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+    max-width: 460px;
+  }
+  .duration.disabled .preset-chips,
+  .duration.disabled .custom-spinner,
+  .duration.disabled .duration-readout {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .duration-toggle {
     display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .duration .preset-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .preset-chip {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 14px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    cursor: pointer;
+  }
+  .preset-chip:hover { border-color: var(--accent); }
+  .preset-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .preset-chip.custom-btn {
+    font-family: inherit;
+  }
+  .custom-spinner {
+    display: flex;
     align-items: center;
     gap: 4px;
   }
-  .duration input[type="number"] {
-    width: 56px;
-    max-width: 56px;
+  .custom-spinner input[type="number"] {
+    width: 52px;
+    max-width: 52px;
     text-align: center;
   }
-  .duration .unit {
+  .custom-spinner .unit {
     color: var(--text-dim);
     font-size: 12px;
     margin-right: 2px;
   }
-  .duration .formatted {
+  .duration-readout {
     color: var(--text-dim);
     font-size: 12px;
-    margin-left: 8px;
-    font-family: inherit;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
   }
-  .duration.disabled input { opacity: 0.4; }
-  .duration-toggle {
-    display: inline-flex;
+  .slider-row {
+    display: flex;
     align-items: center;
-    gap: 8px;
-    margin-right: 8px;
-    font-size: 12px;
-    color: var(--text-dim);
+    gap: 10px;
+    max-width: 380px;
+  }
+  .slider-row input[type="range"] {
+    flex: 1;
+    min-width: 140px;
+  }
+  .slider-row input.slider-numeric {
+    width: 64px;
+    max-width: 64px;
+    text-align: center;
+  }
+  .slider-row .readout {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: var(--accent);
+    font-size: 13px;
+    min-width: 86px;
   }
   .card {
     background: var(--panel-2);
@@ -461,6 +516,151 @@
     color: white;
   }
   .scope-chip input[type="radio"] { display: none; }
+  .lvl-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .lvl-modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    max-width: 95vw;
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+  }
+  .lvl-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .lvl-modal-header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  .lvl-modal-header .close-x {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    padding: 0 6px;
+    cursor: pointer;
+  }
+  .lvl-modal-header .close-x:hover { color: var(--text); }
+  .lvl-modal-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .lvl-modal-toolbar .file-label {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: var(--text);
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lvl-canvas-wrap {
+    display: flex;
+    justify-content: center;
+    background: #0d1014;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px;
+    min-height: 0;
+  }
+  .lvl-canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    cursor: crosshair;
+    background: #0d1014;
+    width: min(75vh, 75vw);
+    height: min(75vh, 75vw);
+    aspect-ratio: 1 / 1;
+  }
+  .lvl-hover {
+    color: var(--text-dim);
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    min-height: 16px;
+  }
+  .team-pick {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    flex-wrap: wrap;
+  }
+  .team-pick button {
+    background: var(--code-bg);
+    color: var(--text);
+    border: none;
+    border-right: 1px solid var(--border);
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: inherit;
+  }
+  .team-pick button:last-child { border-right: none; }
+  .team-pick button:hover { background: var(--panel-2); }
+  .team-pick button.active {
+    background: var(--accent);
+    color: white;
+  }
+  .team-pick button.active:hover { background: var(--accent-hover); }
+  .team-pick .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+  .lvl-modal-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .lvl-modal-actions .left,
+  .lvl-modal-actions .right {
+    display: flex;
+    gap: 8px;
+  }
+  .lvl-modal-instructions {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin: 0;
+  }
+  .load-lvl-btn {
+    margin-top: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 6px 12px;
+  }
+  .load-lvl-btn:hover:enabled { border-color: var(--accent); }
+  .load-lvl-btn:disabled {
+    color: var(--text-dim);
+    background: var(--panel);
+  }
 </style>
 </head>
 <body>
@@ -532,7 +732,7 @@
         <div class="field" data-field="distanceSampleHz">
           <label>DistanceSampleHz</label>
           <div class="field-input">
-            <input type="number" id="pt-distance-hz" min="0" max="50" step="1" placeholder="5">
+            <div id="pt-distance-hz-mount"></div>
             <div class="field-hint">Distance-to-nearest-enemy sample rate. 1&ndash;50, or 0 to disable. Default 5.</div>
             <div class="field-error"></div>
           </div>
@@ -645,6 +845,80 @@ const DISTANCE_HZ_DEFAULT = 5;
 
 const NAME_RE = /^[A-Za-z0-9_]+$/;
 
+/* ----------------- LVL parser -----------------
+   Ported from SubspaceReplayViewer/tools/asset-pipeline/lvl.mjs (parseLvl).
+   Format: optional BMP prefix (tileset), then a stream of 4-byte Tile records:
+     struct Tile { u32 x:12, y:12, id:8 }
+   Returns { width:1024, height:1024, tiles: Uint8Array(1024*1024) }. */
+
+const kTileIdFirstDoor = 162;
+const kTileIdLastDoor = 169;
+const kAnimatedIds = [172, 216, 218, 217, 219, 220, 170];
+const kAnimatedTileSizes = [1, 1, 1, 2, 6, 5, 1];
+
+function parseLvl(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let pos = 0;
+  if (bytes.length >= 6 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    pos = dv.getUint32(2, true);
+  }
+  const tiles = new Uint8Array(1024 * 1024);
+  const end = bytes.length;
+  const tileCount = Math.floor((end - pos) / 4);
+  for (let i = 0; i < tileCount; i++) {
+    const record = dv.getUint32(pos + i * 4, true);
+    const x = record & 0xfff;
+    const y = (record >>> 12) & 0xfff;
+    const id = (record >>> 24) & 0xff;
+    if (x >= 1024 || y >= 1024) continue;
+    tiles[y * 1024 + x] = id;
+    const animIdx = kAnimatedIds.indexOf(id);
+    if (animIdx !== -1) {
+      const size = kAnimatedTileSizes[animIdx];
+      for (let dy = 0; dy < size; dy++) {
+        for (let dx = 0; dx < size; dx++) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if (xx < 1024 && yy < 1024) tiles[yy * 1024 + xx] = id;
+        }
+      }
+    }
+  }
+  return { width: 1024, height: 1024, tiles };
+}
+
+function tileCategoryColor(id) {
+  if (id === 0) return null; // empty → canvas background
+  if (id >= 1 && id <= 160) return [0x5b, 0x64, 0x70]; // walls
+  if (id >= kTileIdFirstDoor && id <= kTileIdLastDoor) return [0xc4, 0x7a, 0x3e]; // doors
+  if (id === 170) return [0x9c, 0x6c, 0xc4]; // wormhole
+  if (id === 171) return [0x5b, 0x9d, 0x6b]; // safe
+  if (id === 172) return [0xd4, 0xb9, 0x5c]; // goal
+  if (id >= 216 && id <= 220) return [0xd4, 0xa7, 0x54]; // flag/animated
+  return [0x3a, 0x42, 0x4f]; // other
+}
+
+function renderLvlToCanvas(canvas, tiles) {
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(1024, 1024);
+  const data = img.data;
+  for (let i = 0; i < 1024 * 1024; i++) {
+    const off = i * 4;
+    const color = tileCategoryColor(tiles[i]);
+    if (color === null) {
+      data[off]     = 0x0d;
+      data[off + 1] = 0x10;
+      data[off + 2] = 0x14;
+    } else {
+      data[off]     = color[0];
+      data[off + 1] = color[1];
+      data[off + 2] = color[2];
+    }
+    data[off + 3] = 0xff;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 const state = {
   pluginTuning: {
     logVerbosity: LOG_VERBOSITY_DEFAULT,
@@ -653,7 +927,7 @@ const state = {
     statsViewUrl: "",
     recordReplays: true,
     replayRecordingDir: "",
-    distanceSampleHz: null,
+    distanceSampleHz: 5,
   },
   defaultQueue: "",
   gameTypes: [],
@@ -681,7 +955,7 @@ function newGameType() {
     returnItemsAction: "full",
     warpOnSpawn: false,
     teamSpawns: [[], []],
-    maxSpawnDriftTiles: null,
+    maxSpawnDriftTiles: 0,
     shipsEnabled: false,
     teamShips: [[], []],
     stagingDurationSec: null,
@@ -704,10 +978,10 @@ function newQueue() {
     relaxTimeSec: null,
     holdWindowSec: null,
     qualityCeiling: null,
-    vetoesRequired: null,
+    vetoesRequired: 2,
     vetoWindowSec: null,
     promoteWinners: false,
-    maxConsecutiveDefenses: null,
+    maxConsecutiveDefenses: 3,
   };
 }
 
@@ -748,83 +1022,415 @@ function el(tag, attrs = {}, ...children) {
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
 /* ----------------- Duration widget -----------------
-   Stores seconds. UI: checkbox to enable + h/m/s spinners + formatted hint.
-   `min`/`max`/`step` are in seconds. `unsetMeansDefault`: when unchecked, the value
-   is null (use engine default). For required durations (e.g. all game-type timings
-   are optional from the user side; defaults handled by emit logic), null = unset. */
+   Layout: [override?] [chip] [chip] [Custom…] / (spinners if custom) / value: <fmt>
+   - State is seconds (or null when allowUnset && checkbox off).
+   - `presets` is an array of common values in seconds for the field.
+   - Clicking a preset chip sets the value and hides the spinner.
+   - Clicking Custom… reveals h/m/s spinners.
+   - Typing in a spinner that lands on a preset highlights that chip. */
 
-function durationWidget({ value, min = 0, max = null, onChange, allowUnset = true, unsetLabel = "use default" }) {
+function durationWidget({ value, min = 0, max = null, presets = [], onChange,
+                          allowUnset = true, unsetLabel = "override" }) {
+  let secs = value === null || value === undefined ? null : value;
+  let customOpen = secs !== null && !presets.includes(secs);
+
   const wrap = el("div", { class: "duration" });
-  const enabled = value !== null && value !== undefined;
-  let secs = enabled ? value : 0;
 
-  const toggle = allowUnset
-    ? el("label", { class: "duration-toggle" },
-        el("input", {
-          type: "checkbox",
-          checked: enabled,
-          onchange: e => {
-            if (e.target.checked) {
-              applyValue(secs || 0);
-            } else {
-              onChange(null);
-              setEnabled(false);
-            }
-          }
-        }),
-        unsetLabel
-      )
-    : null;
+  let overrideCheck = null;
+  if (allowUnset) {
+    overrideCheck = el("input", {
+      type: "checkbox", checked: secs !== null,
+      onchange: e => {
+        if (e.target.checked) {
+          secs = secs === null ? (presets[0] ?? 0) : secs;
+        } else {
+          secs = null;
+          customOpen = false;
+        }
+        onChange(secs);
+        update();
+      }
+    });
+    const tog = el("label", { class: "duration-toggle" }, overrideCheck, " " + unsetLabel);
+    wrap.appendChild(tog);
+  }
 
-  const hIn = el("input", { type: "number", min: 0, step: 1, value: Math.floor(secs / 3600) });
-  const mIn = el("input", { type: "number", min: 0, max: 59, step: 1, value: Math.floor((secs % 3600) / 60) });
-  const sIn = el("input", { type: "number", min: 0, max: 59, step: 1, value: secs % 60 });
-  const formatted = el("span", { class: "formatted" });
+  const chipRow = el("div", { class: "preset-chips" });
+  wrap.appendChild(chipRow);
 
-  function readInputs() {
+  const spinnerRow = el("div", { class: "custom-spinner" });
+  const hIn = el("input", { type: "number", min: 0, step: 1, value: 0 });
+  const mIn = el("input", { type: "number", min: 0, max: 59, step: 1, value: 0 });
+  const sIn = el("input", { type: "number", min: 0, max: 59, step: 1, value: 0 });
+  function readSpinners() {
     const h = parseInt(hIn.value || "0", 10) || 0;
     const m = parseInt(mIn.value || "0", 10) || 0;
     const s = parseInt(sIn.value || "0", 10) || 0;
     return h * 3600 + m * 60 + s;
   }
-  function writeInputs(total) {
+  function writeSpinners(total) {
+    if (document.activeElement === hIn || document.activeElement === mIn || document.activeElement === sIn) return;
     hIn.value = Math.floor(total / 3600);
     mIn.value = Math.floor((total % 3600) / 60);
     sIn.value = total % 60;
   }
-  function updateFormatted(total) {
-    formatted.textContent = total > 0 ? `(${formatTime(total)})` : "";
-  }
-  function setEnabled(on) {
-    [hIn, mIn, sIn].forEach(i => { i.disabled = !on; });
-    wrap.classList.toggle("disabled", !on);
-    if (!on) formatted.textContent = "(unset)";
-    else updateFormatted(secs);
-  }
-  function applyValue(total) {
-    if (max !== null && total > max) total = max;
-    if (total < min) total = min;
-    secs = total;
-    writeInputs(total);
-    updateFormatted(total);
-    onChange(total);
-    setEnabled(true);
-  }
-
-  for (const inp of [hIn, mIn, sIn]) {
-    inp.addEventListener("input", () => {
-      applyValue(readInputs());
+  for (const i of [hIn, mIn, sIn]) {
+    i.addEventListener("input", () => {
+      let v = readSpinners();
+      if (max !== null && v > max) v = max;
+      if (v < min) v = min;
+      secs = v;
+      onChange(secs);
+      drawChipsAndReadout();
     });
   }
+  spinnerRow.appendChild(hIn); spinnerRow.appendChild(el("span", { class: "unit" }, "h"));
+  spinnerRow.appendChild(mIn); spinnerRow.appendChild(el("span", { class: "unit" }, "m"));
+  spinnerRow.appendChild(sIn); spinnerRow.appendChild(el("span", { class: "unit" }, "s"));
+  wrap.appendChild(spinnerRow);
 
-  if (toggle) wrap.appendChild(toggle);
-  wrap.appendChild(hIn); wrap.appendChild(el("span", { class: "unit" }, "h"));
-  wrap.appendChild(mIn); wrap.appendChild(el("span", { class: "unit" }, "m"));
-  wrap.appendChild(sIn); wrap.appendChild(el("span", { class: "unit" }, "s"));
-  wrap.appendChild(formatted);
+  const readout = el("div", { class: "duration-readout" });
+  wrap.appendChild(readout);
 
-  setEnabled(enabled || !allowUnset);
+  function setSecs(v) {
+    if (max !== null && v > max) v = max;
+    if (v < min) v = min;
+    secs = v;
+    onChange(secs);
+    update();
+  }
+
+  function drawChipsAndReadout() {
+    clear(chipRow);
+    if (secs === null) {
+      readout.textContent = "(unset — engine default)";
+      return;
+    }
+    presets.forEach(p => {
+      const chip = el("button", {
+        class: "preset-chip" + (secs === p ? " active" : ""),
+        onclick: () => { customOpen = false; setSecs(p); }
+      }, formatTime(p));
+      chipRow.appendChild(chip);
+    });
+    const isPreset = presets.includes(secs);
+    const customBtn = el("button", {
+      class: "preset-chip custom-btn" + ((!isPreset || customOpen) ? " active" : ""),
+      onclick: () => { customOpen = !customOpen; update(); }
+    }, "Custom…");
+    chipRow.appendChild(customBtn);
+    readout.textContent = `value: ${formatTime(secs)}`;
+  }
+
+  function update() {
+    if (overrideCheck) overrideCheck.checked = secs !== null;
+    wrap.classList.toggle("disabled", secs === null);
+    if (secs === null) {
+      chipRow.style.display = "none";
+      spinnerRow.style.display = "none";
+      readout.textContent = "(unset — engine default)";
+      return;
+    }
+    chipRow.style.display = "";
+    const showSpinner = customOpen || !presets.includes(secs);
+    spinnerRow.style.display = showSpinner ? "" : "none";
+    if (showSpinner) writeSpinners(secs);
+    drawChipsAndReadout();
+  }
+
+  update();
   return wrap;
+}
+
+/* ----------------- Slider widget -----------------
+   onChange fires on every step (state + preview update).
+   onCommit fires only on release / blur — use it for heavier work like rebuilding
+   sibling DOM that contains the slider itself (e.g. teamCount resizing spawn rows). */
+function sliderField({ value, min, max, step = 1, onChange, onCommit = null, formatDisplay = v => String(v) }) {
+  const row = el("div", { class: "slider-row" });
+  const slider = el("input", { type: "range", min, max, step, value });
+  const numIn = el("input", { type: "number", min, max, step, value, class: "slider-numeric" });
+  const readout = el("span", { class: "readout" }, formatDisplay(value));
+  let current = value;
+  function apply(v) {
+    if (Number.isNaN(v)) v = min;
+    if (v < min) v = min;
+    if (v > max) v = max;
+    current = v;
+    slider.value = v;
+    if (document.activeElement !== numIn) numIn.value = v;
+    readout.textContent = formatDisplay(v);
+    onChange(v);
+  }
+  slider.addEventListener("input", e => apply(parseFloat(e.target.value)));
+  slider.addEventListener("change", () => { if (onCommit) onCommit(current); });
+  numIn.addEventListener("input", e => {
+    const raw = e.target.value;
+    if (raw === "") return;
+    apply(parseFloat(raw));
+  });
+  numIn.addEventListener("change", () => { if (onCommit) onCommit(current); });
+  numIn.addEventListener("blur", () => {
+    if (numIn.value === "") apply(min);
+    if (onCommit) onCommit(current);
+  });
+  row.appendChild(slider);
+  row.appendChild(numIn);
+  row.appendChild(readout);
+  return row;
+}
+
+/* ----------------- LVL visual spawn-editor modal -----------------
+   Loads a .lvl, renders it at 1024×1024 (1 css-px per tile), lets the user
+   click to place tile-center-snapped spawns. Bidirectional with the existing
+   (x,y) input list: keyed-in spawns show as markers, modal clicks update
+   gt.teamSpawns directly. Cached map persists across opens. */
+
+let lvlModalEl = null;
+let lvlModalCanvas = null;
+let lvlModalTeamPick = null;
+let lvlModalHover = null;
+let lvlModalFileLabel = null;
+let lvlModalActiveTeam = 0;
+let lvlModalGt = null;
+let lvlLastBytes = null;
+let lvlLastTiles = null;
+let lvlLastName = null;
+
+function teamColor(idx) { return `hsl(${(idx * 70) % 360}deg, 70%, 60%)`; }
+
+function buildLvlModal() {
+  const fileInput = el("input", { type: "file", accept: ".lvl", style: "display:none" });
+  fileInput.addEventListener("change", handleLvlFileChange);
+
+  lvlModalFileLabel = el("span", { class: "file-label" }, "no file loaded");
+  lvlModalTeamPick = el("div", { class: "team-pick" });
+  lvlModalCanvas = el("canvas", { class: "lvl-canvas", width: 1024, height: 1024 });
+  lvlModalCanvas.addEventListener("click", handleLvlCanvasClick);
+  lvlModalCanvas.addEventListener("contextmenu", handleLvlCanvasContextMenu);
+  lvlModalCanvas.addEventListener("mousemove", handleLvlCanvasMove);
+  lvlModalCanvas.addEventListener("mouseleave", () => { lvlModalHover.textContent = ""; });
+  lvlModalHover = el("div", { class: "lvl-hover" });
+
+  const header = el("div", { class: "lvl-modal-header" },
+    el("h2", {}, "Place spawns visually"),
+    el("button", { class: "close-x", title: "Close", onclick: closeLvlModal }, "×")
+  );
+
+  const toolbar = el("div", { class: "lvl-modal-toolbar" },
+    el("button", { class: "subtle", onclick: () => fileInput.click() }, "Choose .lvl file"),
+    fileInput,
+    lvlModalFileLabel,
+    el("span", { style: "flex:1" }),
+    el("span", {}, "Place for: "),
+    lvlModalTeamPick
+  );
+
+  const instructions = el("p", { class: "lvl-modal-instructions" },
+    "Left-click a tile to add a spawn for the active team. Right-click near a spawn to remove it. Other teams' spawns are dimmed for reference."
+  );
+
+  const canvasWrap = el("div", { class: "lvl-canvas-wrap" }, lvlModalCanvas);
+
+  const actions = el("div", { class: "lvl-modal-actions" },
+    el("span", { class: "left" },
+      el("button", { class: "subtle danger", onclick: clearActiveTeamSpawns }, "Clear team"),
+      el("button", { class: "subtle danger", onclick: clearAllTeamSpawns }, "Clear all teams")
+    ),
+    el("span", { class: "right" },
+      lvlModalHover,
+      el("button", { onclick: closeLvlModal }, "Done")
+    )
+  );
+
+  const modal = el("div", { class: "lvl-modal" }, header, toolbar, instructions, canvasWrap, actions);
+  const backdrop = el("div", { class: "lvl-modal-backdrop" }, modal);
+  // Click on backdrop (outside the modal card) closes.
+  backdrop.addEventListener("click", e => { if (e.target === backdrop) closeLvlModal(); });
+  // Esc to close.
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && lvlModalEl && lvlModalEl.parentNode) closeLvlModal();
+  });
+  return backdrop;
+}
+
+function openLvlModal(gt) {
+  if (!lvlModalEl) lvlModalEl = buildLvlModal();
+  lvlModalGt = gt;
+  lvlModalActiveTeam = Math.min(lvlModalActiveTeam, gt.teamCount - 1);
+  if (lvlModalActiveTeam < 0) lvlModalActiveTeam = 0;
+  document.body.appendChild(lvlModalEl);
+  lvlModalFileLabel.textContent = lvlLastName || "no file loaded";
+  rebuildTeamPick();
+  drawLvlCanvas();
+}
+
+function closeLvlModal() {
+  if (lvlModalEl && lvlModalEl.parentNode) lvlModalEl.parentNode.removeChild(lvlModalEl);
+  if (lvlModalGt) {
+    const cardEl = document.querySelector(`.card[data-key="${lvlModalGt._key}"]`);
+    if (cardEl) rerenderCardBody(cardEl, lvlModalGt);
+  }
+  lvlModalGt = null;
+  render();
+}
+
+function rebuildTeamPick() {
+  clear(lvlModalTeamPick);
+  if (!lvlModalGt) return;
+  for (let t = 0; t < lvlModalGt.teamCount; t++) {
+    const team = lvlModalGt.teamSpawns[t] || [];
+    const count = team.length;
+    const isActive = t === lvlModalActiveTeam;
+    const btn = el("button", {
+      class: isActive ? "active" : "",
+      onclick: () => {
+        lvlModalActiveTeam = t;
+        rebuildTeamPick();
+        drawLvlCanvas();
+      }
+    },
+      el("span", { class: "swatch", style: `background:${teamColor(t)}` }),
+      ` Team ${t + 1} · ${count}`
+    );
+    lvlModalTeamPick.appendChild(btn);
+  }
+}
+
+function drawLvlCanvas() {
+  if (!lvlModalCanvas) return;
+  const ctx = lvlModalCanvas.getContext("2d");
+  if (lvlLastTiles) {
+    renderLvlToCanvas(lvlModalCanvas, lvlLastTiles);
+  } else {
+    ctx.fillStyle = "#0d1014";
+    ctx.fillRect(0, 0, 1024, 1024);
+    ctx.fillStyle = "#9aa3b2";
+    ctx.font = "24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Choose a .lvl file to render the map.", 512, 512);
+  }
+  if (!lvlModalGt) return;
+  // Draw inactive teams first so the active team's markers paint on top.
+  for (let t = 0; t < lvlModalGt.teamCount; t++) {
+    if (t === lvlModalActiveTeam) continue;
+    const team = lvlModalGt.teamSpawns[t] || [];
+    for (const p of team) drawSpawnCross(ctx, Math.floor(p.x / 16), Math.floor(p.y / 16), teamColor(t), false);
+  }
+  const activeTeam = lvlModalGt.teamSpawns[lvlModalActiveTeam] || [];
+  for (const p of activeTeam) drawSpawnCross(ctx, Math.floor(p.x / 16), Math.floor(p.y / 16), teamColor(lvlModalActiveTeam), true);
+  ctx.globalAlpha = 1.0;
+}
+
+function drawSpawnCross(ctx, tx, ty, color, isActive) {
+  if (isActive) {
+    // White halo so the cross stays legible over walls, doors, and goals alike.
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(tx - 5, ty - 1, 11, 3);
+    ctx.fillRect(tx - 1, ty - 5, 3, 11);
+    // Colored 9-tile-arm + sign sits inside the halo.
+    ctx.fillStyle = color;
+    ctx.fillRect(tx - 4, ty, 9, 1);
+    ctx.fillRect(tx, ty - 4, 1, 9);
+  } else {
+    // Inactive: smaller cross, no halo, dimmed.
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = color;
+    ctx.fillRect(tx - 3, ty, 7, 1);
+    ctx.fillRect(tx, ty - 3, 1, 7);
+  }
+}
+
+function eventToTile(e) {
+  const rect = lvlModalCanvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * (lvlModalCanvas.width / rect.width);
+  const cy = (e.clientY - rect.top) * (lvlModalCanvas.height / rect.height);
+  return {
+    tx: Math.max(0, Math.min(1023, Math.floor(cx))),
+    ty: Math.max(0, Math.min(1023, Math.floor(cy)))
+  };
+}
+
+function handleLvlCanvasClick(e) {
+  e.preventDefault();
+  if (!lvlModalGt) return;
+  const { tx, ty } = eventToTile(e);
+  if (!lvlModalGt.teamSpawns[lvlModalActiveTeam]) lvlModalGt.teamSpawns[lvlModalActiveTeam] = [];
+  const team = lvlModalGt.teamSpawns[lvlModalActiveTeam];
+  const px = tx * 16 + 8;
+  const py = ty * 16 + 8;
+  if (team.some(p => p.x === px && p.y === py)) return;
+  team.push({ x: px, y: py });
+  drawLvlCanvas();
+  rebuildTeamPick();
+  render();
+}
+
+function handleLvlCanvasContextMenu(e) {
+  e.preventDefault();
+  if (!lvlModalGt) return;
+  const { tx, ty } = eventToTile(e);
+  const team = lvlModalGt.teamSpawns[lvlModalActiveTeam] || [];
+  let bestIdx = -1, bestDist = Infinity;
+  for (let i = 0; i < team.length; i++) {
+    const stx = Math.floor(team[i].x / 16);
+    const sty = Math.floor(team[i].y / 16);
+    const d = Math.abs(stx - tx) + Math.abs(sty - ty);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  if (bestIdx !== -1 && bestDist <= 5) {
+    team.splice(bestIdx, 1);
+    drawLvlCanvas();
+    rebuildTeamPick();
+    render();
+  }
+}
+
+function handleLvlCanvasMove(e) {
+  if (!lvlModalCanvas) return;
+  const { tx, ty } = eventToTile(e);
+  lvlModalHover.textContent = `tile (${tx}, ${ty}) · pixel (${tx * 16 + 8}, ${ty * 16 + 8})`;
+}
+
+function handleLvlFileChange(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const bytes = new Uint8Array(reader.result);
+    try {
+      const parsed = parseLvl(bytes);
+      lvlLastBytes = bytes;
+      lvlLastTiles = parsed.tiles;
+      lvlLastName = file.name;
+      lvlModalFileLabel.textContent = file.name;
+      drawLvlCanvas();
+    } catch (err) {
+      lvlLastTiles = null;
+      lvlModalFileLabel.textContent = `Failed: ${err.message}`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  // Reset so picking the same file twice still fires change.
+  e.target.value = "";
+}
+
+function clearActiveTeamSpawns() {
+  if (!lvlModalGt) return;
+  lvlModalGt.teamSpawns[lvlModalActiveTeam] = [];
+  drawLvlCanvas();
+  rebuildTeamPick();
+  render();
+}
+
+function clearAllTeamSpawns() {
+  if (!lvlModalGt) return;
+  for (let t = 0; t < lvlModalGt.teamCount; t++) lvlModalGt.teamSpawns[t] = [];
+  drawLvlCanvas();
+  rebuildTeamPick();
+  render();
 }
 
 /* ----------------- Plug-in tuning bindings ----------------- */
@@ -849,11 +1455,13 @@ function bindPluginTuning() {
   document.getElementById("pt-replay-dir").addEventListener("input", e => {
     pt.replayRecordingDir = e.target.value.trim(); render();
   });
-  document.getElementById("pt-distance-hz").addEventListener("input", e => {
-    const v = e.target.value.trim();
-    pt.distanceSampleHz = v === "" ? null : parseInt(v, 10);
-    render();
-  });
+  document.getElementById("pt-distance-hz-mount").appendChild(
+    sliderField({
+      value: pt.distanceSampleHz, min: 0, max: 50, step: 1,
+      onChange: v => { pt.distanceSampleHz = v; render(); },
+      formatDisplay: v => v === 0 ? "0 (disabled)" : `${v} Hz`
+    })
+  );
 
   document.getElementById("dq-select").addEventListener("change", e => {
     state.defaultQueue = e.target.value;
@@ -912,46 +1520,44 @@ function renderGameTypeCard(gt, index) {
   ));
 
   // Id
-  body.appendChild(simpleField("Id (rating bucket)", "0&ndash;255. Distinct ids isolate rating buckets.",
+  body.appendChild(simpleField("Id (rating bucket)", "Non-negative integer. Distinct ids isolate rating buckets.",
     el("input", {
-      type: "number", min: 0, max: 255, step: 1, value: gt.id,
+      type: "number", min: 0, step: 1, value: gt.id,
       oninput: e => { gt.id = e.target.value === "" ? 0 : parseInt(e.target.value, 10); render(); }
     })
   ));
 
   // TeamCount
-  body.appendChild(simpleField("TeamCount", "Number of teams. Must be &ge; 2.",
-    el("input", {
-      type: "number", min: 2, step: 1, value: gt.teamCount,
-      oninput: e => {
-        const v = Math.max(2, parseInt(e.target.value, 10) || 2);
+  body.appendChild(simpleField("TeamCount", "Number of teams. 2&ndash;12.",
+    sliderField({
+      value: gt.teamCount, min: 2, max: 12, step: 1,
+      onChange: v => {
         gt.teamCount = v;
-        // resize teamSpawns and teamShips
         while (gt.teamSpawns.length < v) gt.teamSpawns.push([]);
         gt.teamSpawns.length = v;
         while (gt.teamShips.length < v) gt.teamShips.push([]);
         gt.teamShips.length = v;
-        rerenderCardBody(card, gt);
         render();
-      }
+      },
+      onCommit: () => rerenderCardBody(card, gt),
+      formatDisplay: v => `${v} teams`
     })
   ));
 
   // PlayersPerTeam
-  body.appendChild(simpleField("PlayersPerTeam", "Players per team. Must be &ge; 1.",
-    el("input", {
-      type: "number", min: 1, step: 1, value: gt.playersPerTeam,
-      oninput: e => {
-        const v = Math.max(1, parseInt(e.target.value, 10) || 1);
+  body.appendChild(simpleField("PlayersPerTeam", "Players per team. 1&ndash;50.",
+    sliderField({
+      value: gt.playersPerTeam, min: 1, max: 50, step: 1,
+      onChange: v => {
         gt.playersPerTeam = v;
-        // resize ship rows to match
         for (const row of gt.teamShips) {
           while (row.length < v) row.push("");
           row.length = v;
         }
-        rerenderCardBody(card, gt);
         render();
-      }
+      },
+      onCommit: () => rerenderCardBody(card, gt),
+      formatDisplay: v => `${v} per team`
     })
   ));
 
@@ -967,15 +1573,17 @@ function renderGameTypeCard(gt, index) {
   body.appendChild(simpleField("TimeLimit", "Leader at this elapsed time wins. Ties trigger sudden-death overtime.",
     durationWidget({
       value: gt.timeLimitSec, min: 0, allowUnset: true, unsetLabel: "set",
+      presets: [120, 300, 600, 900, 1800],
       onChange: v => { gt.timeLimitSec = v; render(); }
     })
   ));
 
   // Lives
   body.appendChild(simpleField("Lives", "Per player. 0 = unlimited. Elimination matches only.",
-    el("input", {
-      type: "number", min: 0, step: 1, value: gt.lives,
-      oninput: e => { gt.lives = parseInt(e.target.value, 10) || 0; render(); }
+    sliderField({
+      value: gt.lives, min: 0, max: 20, step: 1,
+      onChange: v => { gt.lives = v; render(); },
+      formatDisplay: v => v === 0 ? "0 (unlimited)" : `${v} lives`
     })
   ));
 
@@ -1000,27 +1608,34 @@ function renderGameTypeCard(gt, index) {
     )
   ));
   if (gt.warpOnSpawn) {
+    const loadLvlBtn = el("button", {
+      class: "load-lvl-btn",
+      onclick: () => openLvlModal(gt)
+    }, "🗺  Load .lvl to place visually…");
+    spawnGroup.appendChild(simpleField("Visual editor",
+      "Optional: load the arena's <code>.lvl</code> to click spawn points on the rendered map. Equivalent to typing (x,y) below.",
+      loadLvlBtn));
     for (let t = 0; t < gt.teamCount; t++) {
       spawnGroup.appendChild(spawnTeamRow(gt, t));
     }
-    spawnGroup.appendChild(simpleField("MaxSpawnDrift", "Max tiles a player may drift from the chosen spawn during Staging/Countdown. 1 tile = 16px. Blank = disabled.",
-      el("input", {
-        type: "number", min: 0, step: 1,
-        value: gt.maxSpawnDriftTiles === null ? "" : gt.maxSpawnDriftTiles,
-        placeholder: "(disabled)",
-        oninput: e => {
-          const v = e.target.value.trim();
-          gt.maxSpawnDriftTiles = v === "" ? null : Math.max(0, parseInt(v, 10) || 0);
-          render();
-        }
+    spawnGroup.appendChild(simpleField("MaxSpawnDrift", "Max tiles a player may drift from the chosen spawn during Staging/Countdown. 1 tile = 16px. 0 = disabled.",
+      sliderField({
+        value: gt.maxSpawnDriftTiles, min: 0, max: 25, step: 1,
+        onChange: v => { gt.maxSpawnDriftTiles = v; render(); },
+        formatDisplay: v => v === 0 ? "0 (disabled)" : `${v} tile${v === 1 ? "" : "s"}`
       })
     ));
   }
   body.appendChild(spawnGroup);
 
+  /* TODO(per-slot ships): pending audit of the per-team ship-roster feature in the
+     engine before re-exposing in the UI. Re-enable this block to expose:
+       - "Override ships" checkbox (gt.shipsEnabled)
+       - one shipTeamRow(gt, t) per team with PlayersPerTeam ship dropdowns
+     The emit and validation paths below are commented out in parallel.
   // --- Per-slot ships subgroup ---
   const shipsGroup = el("div", { class: "subgroup" }, el("h4", {}, "Per-slot ships"));
-  shipsGroup.appendChild(simpleField("Override ships", "Off &rarr; every slot is Warbird. On &rarr; pick a ship per slot for each team.",
+  shipsGroup.appendChild(simpleField("Override ships", "Off → every slot is Warbird. On → pick a ship per slot for each team.",
     el("label", { class: "checkbox-row" },
       el("input", {
         type: "checkbox", checked: gt.shipsEnabled,
@@ -1046,36 +1661,42 @@ function renderGameTypeCard(gt, index) {
     }
   }
   body.appendChild(shipsGroup);
+  */
 
   // --- Match-flow timings ---
   const timingGroup = el("div", { class: "subgroup" }, el("h4", {}, "Match-flow timings"));
   timingGroup.appendChild(simpleField("StagingDuration", "Warmup window for idle detection. Default 10s.",
     durationWidget({
       value: gt.stagingDurationSec, min: 1, allowUnset: true, unsetLabel: "override",
+      presets: [5, 10, 15, 30, 60],
       onChange: v => { gt.stagingDurationSec = v; render(); }
     })
   ));
   timingGroup.appendChild(simpleField("CountdownDuration", "Pre-GO countdown. Default 5s. Minimum 5s.",
     durationWidget({
       value: gt.countdownDurationSec, min: 5, allowUnset: true, unsetLabel: "override",
+      presets: [5, 10, 15, 30],
       onChange: v => { gt.countdownDurationSec = v; render(); }
     })
   ));
   timingGroup.appendChild(simpleField("KnockoutSpecDelay", "Grace between last-life death and forced spec. Elimination only. Default 0.",
     durationWidget({
       value: gt.knockoutSpecDelaySec, min: 0, allowUnset: true, unsetLabel: "override",
+      presets: [0, 1, 2, 3, 5],
       onChange: v => { gt.knockoutSpecDelaySec = v; render(); }
     })
   ));
   timingGroup.appendChild(simpleField("TeamCollapseGrace", "How long a team can be empty before forfeiting. Default 10s.",
     durationWidget({
       value: gt.teamCollapseGraceSec, min: 0, allowUnset: true, unsetLabel: "override",
+      presets: [5, 10, 15, 30, 60],
       onChange: v => { gt.teamCollapseGraceSec = v; render(); }
     })
   ));
   timingGroup.appendChild(simpleField("ShipChangeGracePeriod", "Window to change ships after a non-fatal death. 0 forbids all in-match ship changes. Default 10s.",
     durationWidget({
       value: gt.shipChangeGraceSec, min: 0, allowUnset: true, unsetLabel: "override",
+      presets: [0, 5, 10, 15, 30],
       onChange: v => { gt.shipChangeGraceSec = v; render(); }
     })
   ));
@@ -1262,6 +1883,7 @@ function renderQueueCard(q, index) {
   body.appendChild(simpleField("RelaxTime", `Quality-relaxation duration. ${relaxDefaultHint}.`,
     durationWidget({
       value: q.relaxTimeSec, min: 1, allowUnset: true, unsetLabel: "override",
+      presets: [30, 45, 60, 120, 300],
       onChange: v => { q.relaxTimeSec = v; render(); }
     })
   ));
@@ -1269,6 +1891,7 @@ function renderQueueCard(q, index) {
   body.appendChild(simpleField("HoldWindow", "Wait period after finding a viable partition. 0 = pop immediately. Default 0:00:10.",
     durationWidget({
       value: q.holdWindowSec, min: 0, allowUnset: true, unsetLabel: "override",
+      presets: [0, 5, 10, 15, 30],
       onChange: v => { q.holdWindowSec = v; render(); }
     })
   ));
@@ -1305,20 +1928,17 @@ function renderQueueCard(q, index) {
   body.appendChild(simpleField("QualityCeiling", "Pop without waiting if a candidate hits this. Default 0.9.", qcRow));
 
   body.appendChild(simpleField("VetoesRequired", "Distinct participants who must <code>?forgive</code> to rescind a penalty. Default 2.",
-    el("input", {
-      type: "number", min: 1, step: 1,
-      value: q.vetoesRequired === null ? "" : q.vetoesRequired, placeholder: "2",
-      oninput: e => {
-        const v = e.target.value.trim();
-        q.vetoesRequired = v === "" ? null : Math.max(1, parseInt(v, 10) || 1);
-        render();
-      }
+    sliderField({
+      value: q.vetoesRequired, min: 1, max: 10, step: 1,
+      onChange: v => { q.vetoesRequired = v; render(); },
+      formatDisplay: v => `${v} vote${v === 1 ? "" : "s"}`
     })
   ));
 
   body.appendChild(simpleField("VetoWindow", "Open period for <code>?forgive</code> votes. Default 0:01:00.",
     durationWidget({
       value: q.vetoWindowSec, min: 1, allowUnset: true, unsetLabel: "override",
+      presets: [30, 60, 120, 300],
       onChange: v => { q.vetoWindowSec = v; render(); }
     })
   ));
@@ -1339,14 +1959,10 @@ function renderQueueCard(q, index) {
 
   if (q.promoteWinners) {
     body.appendChild(simpleField("MaxConsecutiveDefenses", "Max wins a champion can defend before going to the back. Default 3.",
-      el("input", {
-        type: "number", min: 1, step: 1,
-        value: q.maxConsecutiveDefenses === null ? "" : q.maxConsecutiveDefenses, placeholder: "3",
-        oninput: e => {
-          const v = e.target.value.trim();
-          q.maxConsecutiveDefenses = v === "" ? null : Math.max(1, parseInt(v, 10) || 1);
-          render();
-        }
+      sliderField({
+        value: q.maxConsecutiveDefenses, min: 1, max: 10, step: 1,
+        onChange: v => { q.maxConsecutiveDefenses = v; render(); },
+        formatDisplay: v => `${v} win${v === 1 ? "" : "s"}`
       })
     ));
   }
@@ -1466,7 +2082,7 @@ function validate() {
   if (pt.uploadUrl && !pt.uploadApiKey) {
     warnings.push("UploadUrl is set but UploadApiKey is blank — engine will fall back to writing match envelopes to disk.");
   }
-  if (pt.distanceSampleHz !== null && (pt.distanceSampleHz < 0 || pt.distanceSampleHz > 50)) {
+  if (pt.distanceSampleHz < 0 || pt.distanceSampleHz > 50) {
     errors.push("DistanceSampleHz must be 0 or 1–50.");
   }
 
@@ -1477,7 +2093,7 @@ function validate() {
     else if (!NAME_RE.test(gt.name)) errors.push(`${label}: Name must be alphanumeric/underscore.`);
     else if (gtNames.has(gt.name.toLowerCase())) errors.push(`${label}: duplicate Name.`);
     else gtNames.add(gt.name.toLowerCase());
-    if (gt.id < 0 || gt.id > 255) errors.push(`${label}: Id must be 0–255.`);
+    if (gt.id < 0) errors.push(`${label}: Id must be ≥ 0.`);
     if (gt.teamCount < 2) errors.push(`${label}: TeamCount must be ≥ 2.`);
     if (gt.playersPerTeam < 1) errors.push(`${label}: PlayersPerTeam must be ≥ 1.`);
     if (gt.timeLimitSec !== null && gt.timeLimitSec <= 0)
@@ -1494,13 +2110,15 @@ function validate() {
       if (gt.teamSpawns.slice(0, gt.teamCount).every(s => s.length === 0)) {
         warnings.push(`${label}: WarpOnSpawn is on but no team spawns are configured — engine will skip the override.`);
       }
-    } else if (gt.maxSpawnDriftTiles !== null) {
+    } else if (gt.maxSpawnDriftTiles > 0) {
       warnings.push(`${label}: MaxSpawnDrift only takes effect when WarpOnSpawn is on.`);
     }
+    /* TODO(per-slot ships): validation suppressed pending engine-feature audit. Re-enable alongside the UI and emit code.
     if (gt.shipsEnabled) {
       const mismatch = gt.teamShips.slice(0, gt.teamCount).find(r => r.length !== gt.playersPerTeam);
       if (mismatch) errors.push(`${label}: per-team ship rows must each have ${gt.playersPerTeam} entries.`);
     }
+    */
     if (gt.killTarget === 0 && gt.timeLimitSec === null) {
       warnings.push(`${label}: no KillTarget and no TimeLimit — engine falls back to 30 kills.`);
     }
@@ -1525,7 +2143,7 @@ function validate() {
     }
     if (q.qualityCeiling !== null && (q.qualityCeiling < 0 || q.qualityCeiling > 1))
       errors.push(`${label}: QualityCeiling must be in [0,1].`);
-    if (q.vetoesRequired !== null && q.vetoesRequired < 1)
+    if (q.vetoesRequired < 1)
       errors.push(`${label}: VetoesRequired must be ≥ 1.`);
     if (q.relaxTimeSec !== null && q.relaxTimeSec <= 0)
       errors.push(`${label}: RelaxTime must be > 0 when set.`);
@@ -1573,7 +2191,7 @@ function emitScope(scope) {
     if (pt.recordReplays !== true) tuningLines.push(line("RecordReplays", pt.recordReplays ? "1" : "0"));
     if (pt.replayRecordingDir && pt.replayRecordingDir !== REPLAY_DIR_DEFAULT)
       tuningLines.push(line("ReplayRecordingDir", pt.replayRecordingDir));
-    if (pt.distanceSampleHz !== null && pt.distanceSampleHz !== DISTANCE_HZ_DEFAULT)
+    if (pt.distanceSampleHz !== DISTANCE_HZ_DEFAULT)
       tuningLines.push(line("DistanceSampleHz", String(pt.distanceSampleHz)));
   }
 
@@ -1646,8 +2264,9 @@ function emitGameType(out, gt, idx) {
         out.push(line(`${p}Team${t + 1}Spawns`, team.map(pt => `${pt.x},${pt.y}`).join("; ")));
       }
     }
-    if (gt.maxSpawnDriftTiles !== null) out.push(line(`${p}MaxSpawnDrift`, String(gt.maxSpawnDriftTiles)));
+    if (gt.maxSpawnDriftTiles > 0) out.push(line(`${p}MaxSpawnDrift`, String(gt.maxSpawnDriftTiles)));
   }
+  /* TODO(per-slot ships): emit suppressed pending engine-feature audit. Re-enable alongside the UI subgroup above.
   if (gt.shipsEnabled) {
     for (let t = 0; t < gt.teamCount; t++) {
       const row = gt.teamShips[t] || [];
@@ -1656,6 +2275,7 @@ function emitGameType(out, gt, idx) {
       }
     }
   }
+  */
   if (gt.stagingDurationSec !== null) out.push(line(`${p}StagingDuration`, formatTime(gt.stagingDurationSec)));
   if (gt.countdownDurationSec !== null) out.push(line(`${p}CountdownDuration`, formatTime(gt.countdownDurationSec)));
   if (gt.knockoutSpecDelaySec !== null) out.push(line(`${p}KnockoutSpecDelay`, formatTime(gt.knockoutSpecDelaySec)));
@@ -1672,10 +2292,10 @@ function emitQueue(out, q, idx) {
   if (q.relaxTimeSec !== null) out.push(line(`${p}RelaxTime`, formatTime(q.relaxTimeSec)));
   if (q.holdWindowSec !== null) out.push(line(`${p}HoldWindow`, formatTime(q.holdWindowSec)));
   if (q.qualityCeiling !== null) out.push(line(`${p}QualityCeiling`, formatFloat(q.qualityCeiling)));
-  if (q.vetoesRequired !== null) out.push(line(`${p}VetoesRequired`, String(q.vetoesRequired)));
+  if (q.vetoesRequired !== 2) out.push(line(`${p}VetoesRequired`, String(q.vetoesRequired)));
   if (q.vetoWindowSec !== null) out.push(line(`${p}VetoWindow`, formatTime(q.vetoWindowSec)));
   if (q.promoteWinners) out.push(line(`${p}PromoteWinners`, "1"));
-  if (q.maxConsecutiveDefenses !== null) out.push(line(`${p}MaxConsecutiveDefenses`, String(q.maxConsecutiveDefenses)));
+  if (q.promoteWinners && q.maxConsecutiveDefenses !== 3) out.push(line(`${p}MaxConsecutiveDefenses`, String(q.maxConsecutiveDefenses)));
 }
 
 /* ----------------- Render loop ----------------- */
