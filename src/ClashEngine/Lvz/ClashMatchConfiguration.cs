@@ -1,6 +1,7 @@
 using System;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Queue;
+using ClashEngine.Stats;
 using OpenSkillSharp;
 using SS.Matchmaking.OpenSkill;
 using SS.Matchmaking.TeamVersus;
@@ -59,6 +60,13 @@ internal sealed class ClashMatchConfiguration : IMatchConfiguration
     double IMatchConfiguration.OpenSkillSigmaDecayPerDay => 0;
     bool IMatchConfiguration.OpenSkillUseScoresWhenPossible => false;
     OrdinalArgs IMatchConfiguration.OpenSkillDisplayOrdinal => default;
+
+    // SS.Matchmaking.TeamVersusStats reads this to delay kill-damage stat processing while the
+    // late C2S Damage packet lands. Nothing in the MatchLvz / MatchFocus consumption graph reads
+    // it, and TeamVersusStats does not run against Clash matches -- ClashEngine owns its own
+    // late-damage grace window (StatsListener.LateDamageGraceMs). EIM for the same binary-skew
+    // robustness reasons as the OpenSkill members above; the value is inert here.
+    int IMatchConfiguration.PlayerKillDamageStatsDelayMs => StatsListener.LateDamageGraceMs;
 
     private sealed class ClashMatchBoxConfiguration : IMatchBoxConfiguration
     {
