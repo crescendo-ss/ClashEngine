@@ -27,6 +27,11 @@ public sealed class MatchAudience
     private readonly IArenaManager _arenaManager;
     private readonly IChat _chat;
 
+    // Late-bound: the replay recorder is constructed after this helper (and only when replay
+    // recording is enabled), so it's wired via SetChatRecorder rather than the ctor. Null when
+    // recording is disabled or in test paths -- recording then silently no-ops.
+    private IMatchChatRecorder? _chatRecorder;
+
     public MatchAudience(IComponentBroker broker, IPlayerData playerData, IArenaManager arenaManager, IChat chat)
     {
         _broker = broker ?? throw new ArgumentNullException(nameof(broker));
@@ -59,6 +64,11 @@ public sealed class MatchAudience
             if (sent.Add(p)) Send(p, message, sound);
         }
 
+        // Record this as a single arena chat event in the match's replay. Driven here (not in
+        // the recorder's chat callback) so it's exactly one event per broadcast and scoped to
+        // matchId -- server-sent arena messages have no source player to scope by otherwise.
+        _chatRecorder?.RecordArenaMessage(matchId, message, sound);
+
         if (string.IsNullOrEmpty(arenaName)) return;
         var arena = _arenaManager.FindArena(arenaName);
         if (arena is null) return;
@@ -86,6 +96,18 @@ public sealed class MatchAudience
         }
         finally { _broker.ReleaseInterface(ref focus); }
     }
+
+    /// <summary>Wire the replay-recorder sink. Called once by <c>ClashModule</c> after the
+    /// recorder is constructed (recording enabled). Passing the same instance again is harmless.</summary>
+    public void SetChatRecorder(IMatchChatRecorder? recorder) => _chatRecorder = recorder;
+
+    /// <summary>
+    /// Record an arena chat line that ClashEngine delivered to a match's participants outside
+    /// the <see cref="Broadcast"/> path (the per-player ship-lock notice). Recording-only -- it
+    /// does not send anything; the caller has already delivered the message.
+    /// </summary>
+    public void RecordArenaLine(Guid matchId, ReadOnlySpan<char> message, ChatSound sound = ChatSound.None)
+        => _chatRecorder?.RecordArenaMessage(matchId, message, sound);
 
     private void Send(Player p, string message, ChatSound sound)
     {

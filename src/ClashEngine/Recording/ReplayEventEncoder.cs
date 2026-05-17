@@ -70,6 +70,28 @@ internal static class ReplayEventEncoder
         session.RecorderQueue.Add(new MatchRecorder.RecordBuffer(buffer, totalLength));
     }
 
+    /// <summary>
+    /// Encode a server-originated arena chat line (no source player) -- the countdown ticks,
+    /// "GO!", scoreboard, etc. that ClashEngine broadcasts to a match's audience. Uses a -1
+    /// player id (the format's "no player" sentinel, matching <see cref="EncodeAttach"/>); the
+    /// replay module renders <see cref="ChatMessageType.Arena"/> lines without a sender anyway.
+    /// </summary>
+    public static void EncodeArenaChat(
+        MatchRecorder.Session session,
+        ChatSound sound,
+        ReadOnlySpan<char> message)
+    {
+        int messageByteCount = StringUtils.DefaultEncoding.GetByteCount(message) + 1;
+        int totalLength = Chat.Length + messageByteCount;
+
+        byte[] buffer = Pool.Rent(totalLength);
+        ref Chat chat = ref MemoryMarshal.AsRef<Chat>(buffer.AsSpan(0, Chat.Length));
+        chat = new(ServerTick.Now, (short)-1, ChatMessageType.Arena, sound, (ushort)messageByteCount);
+        Span<byte> messageBytes = buffer.AsSpan(Chat.Length, messageByteCount);
+        messageBytes.WriteNullTerminatedString(message);
+        session.RecorderQueue.Add(new MatchRecorder.RecordBuffer(buffer, totalLength));
+    }
+
     public static void EncodeCrownToggle(MatchRecorder.Session session, Player player, bool on)
     {
         byte[] buffer = Pool.Rent(CrownToggle.Length);

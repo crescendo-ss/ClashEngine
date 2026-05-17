@@ -780,6 +780,10 @@ public sealed class MatchOrchestrator
     {
         foreach (var p in ResolveParticipants())
             _chat.SendMessage(p, message);
+
+        // Same line for every participant -- record it once as a single arena line in the
+        // replay, mirroring how Broadcast-delivered lines are captured.
+        _audience?.RecordArenaLine(_matchId, message);
     }
 
     /// <summary>

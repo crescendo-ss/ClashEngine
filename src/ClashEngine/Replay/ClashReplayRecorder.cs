@@ -38,7 +38,7 @@ namespace ClashEngine.Replay;
 /// on the recorder's worker thread, so the file isn't fully on disk until the session goes
 /// inactive -- that's what <see cref="IsRecordingComplete"/> waits on.</para>
 /// </remarks>
-public sealed class ClashReplayRecorder : IMatchmakingTelemetry
+public sealed class ClashReplayRecorder : IMatchmakingTelemetry, IMatchChatRecorder
 {
     private const string LogCategory = nameof(ClashReplayRecorder);
 
@@ -155,6 +155,21 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry
                 _log.LogM(LogLevel.Warn, LogCategory,
                     $"Pruned stale recording entry for match {id:N} ({h.FilePath}); upload likely failed.");
         }
+    }
+
+    /// <summary>
+    /// <see cref="IMatchChatRecorder"/>: append a server-originated arena chat line to the
+    /// match's session. No-op if the match has no active session (recording not started,
+    /// already stopped, or in the post-match tail after the queue was completed). Runs on the
+    /// mainloop, same as the recorder's other event callbacks.
+    /// </summary>
+    public void RecordArenaMessage(Guid matchId, ReadOnlySpan<char> message, ChatSound sound)
+    {
+        if (!_byMatch.TryGetValue(matchId, out var h)) return;
+        if (h.StopRequested) return;
+        var session = h.Session;
+        if (!session.IsActive || session.RecorderQueue.IsAddingCompleted) return;
+        ReplayEventEncoder.EncodeArenaChat(session, sound, message);
     }
 
     public void OnMatchProposed(MatchProposal proposal)

@@ -299,6 +299,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
                 _replayRecorder = new ClashReplayRecorder(
                     _engine, _matchRecorder, _arenaManager, _resolver, _mainloopTimer, _log, recordingDir);
                 _unregisterActions.Add(_replayRecorder.Shutdown);
+
+                // Route match-audience arena lines (countdown/GO/scoreboard/...) into the
+                // per-match replay. Only wired when recording is enabled; otherwise the
+                // audience's recorder stays null and recording silently no-ops.
+                matchAudience.SetChatRecorder(_replayRecorder);
             }
         }
 
