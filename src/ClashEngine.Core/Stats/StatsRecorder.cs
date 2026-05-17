@@ -30,6 +30,15 @@ public sealed class StatsRecorder
     /// <see cref="OnLeaveMatch"/> (a true exit from the match).
     /// </summary>
     private readonly Dictionary<PlayerKey, IReadOnlyDictionary<ItemKind, int>> _lastLeaveInventory = new();
+
+    /// <summary>
+    /// Last non-spec ship name observed per player (<c>"Warbird"</c>..<c>"Shark"</c>), stamped
+    /// onto a life when it closes so the lives timeline reports the ship the player died /
+    /// finished the match in. Updated by <see cref="OnShipSelected"/>; we deliberately never
+    /// store a spec transition so the value survives the spec-away that match-end/leave triggers,
+    /// regardless of event ordering. Cleared by <see cref="OnLeaveMatch"/>.
+    /// </summary>
+    private readonly Dictionary<PlayerKey, string> _currentShip = new();
     private readonly DamageDecay _decay;
     private readonly double _assistThresholdFraction;
 
@@ -151,6 +160,18 @@ public sealed class StatsRecorder
         // they came back any other way (rejoin after disconnect, sub flow), the snapshot is
         // stale.
         _lastLeaveInventory.Remove(player);
+    }
+
+    /// <summary>
+    /// Record the ship <paramref name="player"/> is now in. The adapter calls this on every
+    /// ship-change to a combat ship (never for a spec transition), so the stored value is always
+    /// the player's last real ship and can be stamped onto a life at close time -- giving "ship
+    /// at death" / "ship at match-end before being specced". No-op for unregistered players.
+    /// </summary>
+    public void OnShipSelected(PlayerKey player, string shipName, uint atTick)
+    {
+        if (!_stats.ContainsKey(player)) return;
+        _currentShip[player] = shipName;
     }
 
     /// <summary>
@@ -418,7 +439,8 @@ public sealed class StatsRecorder
         // empty. Recovery is cleared in FinalizeKillAttribution along with the non-self path.
         if (killer == victim)
         {
-            victimStats.CloseLife(atTick, LifeEndReason.KilledByEnemy, knockoutBy: null);
+            victimStats.CloseLife(atTick, LifeEndReason.KilledByEnemy, knockoutBy: null,
+                shipAtEnd: _currentShip.GetValueOrDefault(victim));
             return true;
         }
 
@@ -442,7 +464,8 @@ public sealed class StatsRecorder
         victimStats.CloseLife(
             atTick,
             sameTeam ? LifeEndReason.KilledByTeammate : LifeEndReason.KilledByEnemy,
-            knockoutBy: killer);
+            knockoutBy: killer,
+            shipAtEnd: _currentShip.GetValueOrDefault(victim));
         return true;
     }
 
@@ -560,9 +583,11 @@ public sealed class StatsRecorder
     {
         if (!_stats.TryGetValue(player, out var stats)) return;
         stats.SnapshotInventoryAsWasted();
-        stats.CloseLife(atTick, LifeEndReason.LeftMatch, knockoutBy: null);
+        stats.CloseLife(atTick, LifeEndReason.LeftMatch, knockoutBy: null,
+            shipAtEnd: _currentShip.GetValueOrDefault(player));
         _lastPositionTick.Remove(player);
         _pendingDeathTick.Remove(player);
+        _currentShip.Remove(player);
         // A true exit from the match invalidates any saved return-snapshot -- the player isn't
         // coming back via ?return after this point.
         _lastLeaveInventory.Remove(player);
@@ -575,8 +600,9 @@ public sealed class StatsRecorder
     /// leftover from a match they actually survived.</summary>
     public void OnMatchEnded(uint atTick)
     {
-        foreach (var stats in _stats.Values)
-            stats.CloseLife(atTick, LifeEndReason.MatchEnded, knockoutBy: null);
+        foreach (var (player, stats) in _stats)
+            stats.CloseLife(atTick, LifeEndReason.MatchEnded, knockoutBy: null,
+                shipAtEnd: _currentShip.GetValueOrDefault(player));
     }
 
     private bool SameTeam(PlayerKey a, PlayerKey b)

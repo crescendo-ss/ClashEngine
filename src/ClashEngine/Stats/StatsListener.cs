@@ -70,6 +70,7 @@ public sealed class StatsListener
     private PlayerPositionPacketCallback.PlayerPositionPacketDelegate? _onPosition;
     private SpawnCallback.SpawnDelegate? _onSpawn;
     private GreenCallback.GreenDelegate? _onGreen;
+    private ShipFreqChangeCallback.ShipFreqChangeDelegate? _onShipFreqChange;
     private bool _registered;
 
     public StatsListener(
@@ -101,12 +102,14 @@ public sealed class StatsListener
         _onPosition = OnPlayerPositionPacket;
         _onSpawn = OnSpawn;
         _onGreen = OnGreen;
+        _onShipFreqChange = OnShipFreqChange;
         _onDeferredKillFinalize = OnDeferredKillFinalize;
 
         PlayerDamageCallback.Register(_broker, _onDamage);
         PlayerPositionPacketCallback.Register(_broker, _onPosition);
         SpawnCallback.Register(_broker, _onSpawn);
         GreenCallback.Register(_broker, _onGreen);
+        ShipFreqChangeCallback.Register(_broker, _onShipFreqChange);
         _registered = true;
     }
 
@@ -117,6 +120,7 @@ public sealed class StatsListener
         if (_onPosition is not null) PlayerPositionPacketCallback.Unregister(_broker, _onPosition);
         if (_onSpawn is not null) SpawnCallback.Unregister(_broker, _onSpawn);
         if (_onGreen is not null) GreenCallback.Unregister(_broker, _onGreen);
+        if (_onShipFreqChange is not null) ShipFreqChangeCallback.Unregister(_broker, _onShipFreqChange);
 
         // Flush any pending deferred attributions synchronously so we don't leak unfinalized
         // kills on shutdown (would leave PlayerStats.KillDamage/Assist short of the final kill
@@ -216,6 +220,22 @@ public sealed class StatsListener
         var recorder = _registry.RecorderFor(pkey);
         if (recorder is null) return;
         recorder.OnSpawn(pkey, (uint)ServerTick.Now);
+    }
+
+    /// <summary>
+    /// Tracks the player's current combat ship so a life can be stamped with the ship the
+    /// player died / finished the match in. We deliberately ignore the spec transition (the
+    /// match-end / leave-driven spec-away): the recorder keeps the last real ship so the close
+    /// reports it regardless of event ordering. The placement that puts a player into the match
+    /// (spec -> combat ship) also flows through here, which seeds the first life's ship.
+    /// </summary>
+    private void OnShipFreqChange(Player player, ShipType newShip, ShipType oldShip, short newFreq, short oldFreq)
+    {
+        if (newShip == ShipType.Spec) return;
+        if (_resolver.KeyOf(player) is not PlayerKey pkey) return;
+        var recorder = _registry.RecorderFor(pkey);
+        if (recorder is null) return;
+        recorder.OnShipSelected(pkey, ShipSection.Of(newShip), (uint)ServerTick.Now);
     }
 
     /// <summary>Called by <see cref="ClashEngine.Events.MatchKillRouter"/> as a pre-engine

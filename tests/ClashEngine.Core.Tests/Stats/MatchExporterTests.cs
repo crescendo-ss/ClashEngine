@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Stats;
@@ -73,10 +74,12 @@ public class MatchExporterTests
     {
         var r = Make4Player();
         r.OnSpawn(K("A"), 0);
+        r.OnShipSelected(K("A"), "Spider", 50);
         r.OnWeaponFired(K("A"), WeaponKind.Bullet, 1, false, 100);
         r.OnDamage(K("C"), K("A"), 200, WeaponKind.Bullet, 0, 100);
         r.OnItemUsed(K("A"), ItemKind.Repel, 110);
-        r.OnKill(K("C"), K("A"), 120);
+        r.OnKill(K("C"), K("A"), 120); // A kills C; A's life stays open
+        r.OnMatchEnded(200);           // closes A's open life, stamping shipAtEnd
 
         var matchId = Guid.NewGuid();
         var payload = MatchExporter.Build(
@@ -87,6 +90,40 @@ public class MatchExporterTests
         Assert.Equal(1, a.PerWeapon["Bullet"].HitCount);
         Assert.Equal(1, a.ItemUses["Repel"]);
         Assert.NotEmpty(a.Lives);
+        Assert.Equal("Spider", a.Lives.Single().ShipAtEnd);
+    }
+
+    [Fact]
+    public void Build_emits_schema_version_4()
+    {
+        var r = Make4Player();
+        var matchId = Guid.NewGuid();
+        var payload = MatchExporter.Build(
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
+
+        Assert.Equal(4, MatchExporter.CurrentSchemaVersion);
+        Assert.Equal(4, payload.SchemaVersion);
+    }
+
+    [Fact]
+    public void Serialized_json_uses_schema_field_names_for_ship_at_end()
+    {
+        // Mirrors the uploader's camelCase policy (HttpMatchUploader/JsonFileMatchUploader):
+        // the emitted property name must match schema/match.schema.json's "shipAtEnd".
+        var r = Make4Player();
+        r.OnSpawn(K("A"), 0);
+        r.OnShipSelected(K("A"), "Leviathan", 50);
+        r.OnKill(K("A"), K("C"), 120);
+
+        var matchId = Guid.NewGuid();
+        var payload = MatchExporter.Build(
+            matchId, "4v4", null, 1, "tdm", Teams(), null, r, Outcome(matchId));
+
+        var json = JsonSerializer.Serialize(
+            payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        Assert.Contains("\"schemaVersion\":4", json);
+        Assert.Contains("\"shipAtEnd\":\"Leviathan\"", json);
     }
 
     [Fact]

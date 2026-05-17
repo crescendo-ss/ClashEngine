@@ -74,4 +74,5 @@ public sealed record LifeStatsPayload(
     string? KnockoutBy,
     int Kills,
     int DamageDealt,
-    int DamageTaken);
+    int DamageTaken,
+    string? ShipAtEnd);

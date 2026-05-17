@@ -323,7 +323,7 @@ When a match ends, ClashEngine builds a `MatchPayload` (schema in `schema/match.
 
 - Match metadata (id, queue, game type, arena, start/end times, final state).
 - Ranked teams with their scores.
-- Every participant's full stats: K/D/A/KOs/teamkills, decay-weighted KillDamage and ForcedRepelDamage/Credit, per-weapon shot accounting, item uses, wasted items, distance samples, life timeline, pre- and post-match rating.
+- Every participant's full stats: K/D/A/KOs/teamkills, decay-weighted KillDamage and ForcedRepelDamage/Credit, per-weapon shot accounting, item uses, wasted items, distance samples, life timeline (each life carries `shipAtEnd` — the ship the player died / finished the match in), pre- and post-match rating.
 
 If `UploadUrl` + `UploadApiKey` are configured, the payload + replay file are POSTed as `multipart/form-data`. Otherwise the payload is written to disk under `<AppContext.BaseDirectory>/matches/{matchId}.json` for batch upload by another process.
 

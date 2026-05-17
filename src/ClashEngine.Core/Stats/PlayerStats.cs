@@ -233,9 +233,9 @@ public sealed class PlayerStats
         return life;
     }
 
-    internal void CloseLife(uint endTick, LifeEndReason reason, PlayerKey? knockoutBy)
+    internal void CloseLife(uint endTick, LifeEndReason reason, PlayerKey? knockoutBy, string? shipAtEnd)
     {
         var open = CurrentLife;
-        open?.Close(endTick, reason, knockoutBy);
+        open?.Close(endTick, reason, knockoutBy, shipAtEnd);
     }
 }

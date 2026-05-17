@@ -49,8 +49,9 @@ public class PlayerStatsTests
     {
         var p = Make();
         p.OpenLife(100);
-        p.CloseLife(150, LifeEndReason.KilledByEnemy, knockoutBy: K("Y"));
+        p.CloseLife(150, LifeEndReason.KilledByEnemy, knockoutBy: K("Y"), shipAtEnd: "Javelin");
         Assert.Null(p.CurrentLife);
+        Assert.Equal("Javelin", p.Lives[0].ShipAtEnd);
         var second = p.OpenLife(160);
         Assert.Equal(160u, second.StartTick);
         Assert.Equal(2, p.Lives.Count);

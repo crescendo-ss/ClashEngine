@@ -416,6 +416,74 @@ public class StatsRecorderTests
         Assert.Null(life.KnockoutBy);
     }
 
+    // --- per-life ship ---
+
+    [Fact]
+    public void Kill_stamps_ship_at_end_from_last_ship_selected()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnShipSelected(K("C"), "Spider", atTick: 10);
+        r.OnKill(K("C"), K("A"), atTick: 100);
+        Assert.Equal("Spider", r.Stats[K("C")].Lives.Single().ShipAtEnd);
+    }
+
+    [Fact]
+    public void Match_end_stamps_ship_at_end()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("A"), 0);
+        r.OnShipSelected(K("A"), "Terrier", atTick: 5);
+        r.OnMatchEnded(atTick: 1000);
+        Assert.Equal("Terrier", r.Stats[K("A")].Lives.Single().ShipAtEnd);
+    }
+
+    [Fact]
+    public void Leave_match_stamps_ship_at_end()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("A"), 0);
+        r.OnShipSelected(K("A"), "Weasel", atTick: 5);
+        r.OnLeaveMatch(K("A"), atTick: 500);
+        Assert.Equal("Weasel", r.Stats[K("A")].Lives.Single().ShipAtEnd);
+    }
+
+    [Fact]
+    public void Ship_at_end_is_null_when_no_ship_was_ever_selected()
+    {
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnKill(K("C"), K("A"), atTick: 100);
+        Assert.Null(r.Stats[K("C")].Lives.Single().ShipAtEnd);
+    }
+
+    [Fact]
+    public void Latest_ship_selection_before_close_wins()
+    {
+        // A mid-life ship change must be reflected: the life reports the ship the player
+        // actually died in, not the one they spawned in.
+        var r = Make4Player();
+        r.OnSpawn(K("C"), atTick: 0);
+        r.OnShipSelected(K("C"), "Warbird", atTick: 10);
+        r.OnShipSelected(K("C"), "Javelin", atTick: 50);
+        r.OnKill(K("C"), K("A"), atTick: 100);
+        Assert.Equal("Javelin", r.Stats[K("C")].Lives.Single().ShipAtEnd);
+    }
+
+    [Fact]
+    public void Ship_selection_is_per_life_not_carried_after_leave()
+    {
+        // OnLeaveMatch evicts the tracked ship; a fresh registration + spawn for the same
+        // key must not inherit the previous ship.
+        var r = Make4Player();
+        r.OnSpawn(K("A"), 0);
+        r.OnShipSelected(K("A"), "Lancaster", atTick: 5);
+        r.OnLeaveMatch(K("A"), atTick: 500);
+        r.OnSpawn(K("A"), atTick: 600);
+        r.OnMatchEnded(atTick: 1000);
+        Assert.Null(r.Stats[K("A")].Lives[^1].ShipAtEnd);
+    }
+
     [Fact]
     public void Events_for_unregistered_players_are_silently_ignored()
     {

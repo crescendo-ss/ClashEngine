@@ -10,7 +10,7 @@ namespace ClashEngine.Core.Stats;
 /// </summary>
 public static class MatchExporter
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public static MatchPayload Build(
         Guid matchId,
@@ -96,7 +96,8 @@ public static class MatchExporter
                     l.KnockoutBy?.Name,
                     l.Kills,
                     l.DamageDealt,
-                    l.DamageTaken));
+                    l.DamageTaken,
+                    l.ShipAtEnd));
             }
 
             RatingPayload? rating = null;

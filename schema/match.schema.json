@@ -18,8 +18,8 @@
   "properties": {
     "schemaVersion": {
       "type": "integer",
-      "const": 3,
-      "description": "Wire format version. Increment on any breaking change."
+      "const": 4,
+      "description": "Wire format version. Increment on any breaking change. v4 added life.shipAtEnd."
     },
     "matchId": {
       "type": "string",
@@ -316,6 +316,11 @@
         "knockoutBy": {
           "type": ["string", "null"],
           "description": "Player who closed this life (the killer). Null when not applicable."
+        },
+        "shipAtEnd": {
+          "type": ["string", "null"],
+          "enum": ["Warbird", "Javelin", "Spider", "Leviathan", "Terrier", "Weasel", "Lancaster", "Shark", null],
+          "description": "Ship the player was in when this life ended (at death, or at match-end before being specced). Null if the ship was never observed."
         },
         "kills": { "type": "integer", "minimum": 0 },
         "damageDealt": { "type": "integer", "minimum": 0 },
