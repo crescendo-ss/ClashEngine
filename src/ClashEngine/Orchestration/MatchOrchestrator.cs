@@ -608,10 +608,13 @@ public sealed class MatchOrchestrator
             _countdownSecondsRemaining = (int)_queue.CountdownDuration.TotalSeconds;
             _timer.SetTimer(OnCountdownTick, 1000, 1000, this);
 
-            // For long countdowns (>10s), tell players how long they're waiting; for short ones,
-            // the "-3-" tick is close enough that an explicit duration would just be noise.
-            BroadcastToAll(_countdownSecondsRemaining > 10
-                ? $"All set! Starting in {_countdownSecondsRemaining} seconds!"
+            // For countdowns with a pre-lock ship-pick window (CountdownDuration >
+            // ShipLockBeforeStart), tell players how many seconds they have to finalize their
+            // ship. For shorter countdowns the lock is immediate and the "-3-" tick is close
+            // enough that an explicit duration would be noise.
+            int pickSeconds = _countdownSecondsRemaining - (int)MatchFreqAdvisor.ShipLockBeforeStart.TotalSeconds;
+            BroadcastToAll(pickSeconds > 0
+                ? $"All set! Pick your final ship -- {pickSeconds}s until lock, then GO."
                 : "All set!");
 
             // If CountdownDuration is short enough that the advisor's ShipChangeAllowedUntil

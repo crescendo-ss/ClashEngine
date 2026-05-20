@@ -183,8 +183,8 @@ These keys move the match's pre-GO physical setup off the arena's default spawn 
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `GameType<i>StagingDuration` | seconds or `HH:MM:SS` | `10` | Length of the warmup window between match formation and the pre-GO countdown. Players have this long to demonstrate non-idleness (move/rotate/fire). The first detected movement DMs the player a confirmation; players still idle at the end fail the readiness check and the match is cancelled. |
-| `GameType<i>CountdownDuration` | seconds or `HH:MM:SS` | `5` | Length of the pre-GO countdown. The orchestrator broadcasts `All set!` up-front (with `Starting in N seconds!` appended when `N > 10`), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Minimum 5 seconds. |
+| `GameType<i>StagingDuration` | seconds or `HH:MM:SS` | `10` | Upper bound on the warmup window between match formation and the pre-GO countdown. Each player must demonstrate non-idleness (move/rotate/fire); the first detected movement DMs the player a confirmation, and staging ends early as soon as every participant has flipped non-idle. Any player still idle at the time limit fails the readiness check and the match is cancelled. |
+| `GameType<i>CountdownDuration` | seconds or `HH:MM:SS` | `10` | Length of the pre-GO countdown. The orchestrator broadcasts `All set! Pick your final ship -- Ns until lock, then GO.` up-front, then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ships lock 5 s before GO, so values above that leave a ship-pick window at the start of the countdown. Minimum 5 seconds. |
 | `GameType<i>KnockoutSpecDelay` | seconds or `HH:MM:SS` | `0` | Grace between a player's last-life death and the forced spec, so residual mines/bombs they just fired can still land. Only meaningful for elimination matches (`Lives > 0`); match-end cleanup specs everyone immediately regardless. |
 
 ### Queues
@@ -247,8 +247,8 @@ GameType1WarpOnSpawn       = 1
 GameType1Team1Spawns       = 7680,4096; 7680,4112; 7680,4128
 GameType1Team2Spawns       = 8704,4096; 8704,4112; 8704,4128
 GameType1MaxSpawnDrift     = 6             ; tiles
-GameType1StagingDuration   = 8             ; seconds (default 10)
-GameType1CountdownDuration = 5             ; seconds (min/default 5)
+GameType1StagingDuration   = 8             ; seconds, upper bound (default 10)
+GameType1CountdownDuration = 10            ; seconds (min 5, default 10; ships lock 5s before GO)
 ```
 
 `Zone/arenas/1v1comp/arena.conf` — the standard arena conf plus the two queues owned by this arena:
@@ -310,8 +310,8 @@ Add `1v1comp` to `PermanentArenas` and grant the chat commands in `groupdef.dir/
 A match progresses through five orchestrator phases:
 
 1. **Setup.** Players are warped into the configured `MatchArena`, set to their assigned ship + freq, freq-locked, and (if `WarpOnSpawn`) warped to the team's chosen spawn. Ship changes are unrestricted through the end of Staging.
-2. **Staging** (`StagingDuration`, default 10 s). Idle detection: each player must demonstrate non-idleness via rotation, movement, or weapon fire. The first detected movement DMs the player `Got it -- you're ready. Standby for the countdown.` so they know the readiness check has registered. Players may change ships freely during this phase to pick their loadout. Drift enforcement runs here. Any player still idle at the end → match cancelled, idle players flagged AFK.
-3. **Countdown** (`CountdownDuration`, min/default 5 s). Broadcasts `All set!` up-front (with `Starting in N seconds!` appended when `N > 10`), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ship changes are now locked to the participant's current ship. Drift enforcement still active. At `GO!` the team re-warps to the chosen spawn.
+2. **Staging** (up to `StagingDuration`, default 10 s). Idle detection: each player must demonstrate non-idleness via rotation, movement, or weapon fire. The first detected movement DMs the player `Got it -- you're ready. Standby for the countdown.` Staging ends early as soon as every participant has flipped non-idle; if anyone is still idle at the time limit the match is cancelled and idle players are flagged AFK. Players may change ships freely during this phase. Drift enforcement runs here.
+3. **Countdown** (`CountdownDuration`, default 10 s, min 5 s). Broadcasts `All set! Pick your final ship -- Ns until lock, then GO.` up-front (or just `All set!` for countdowns at the 5 s minimum), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ships lock 5 s before GO; the seconds before that remain a free ship-pick window. Drift enforcement still active. At `GO!` the team re-warps to the chosen spawn.
 4. **Live.** Engine FSM runs end-policy, kill counting, lives tracking, team-collapse detection (if a team has no live members for the team-collapse grace window, they forfeit; surviving teams hear a 10 s warning). After each non-fatal death the player is DMed `You have Ns to change ships before being locked back to your current ship.` (`N` = `ShipChangeGracePeriod`); knockouts (last life) skip this since they go straight to spec.
 5. **Cleanup.** Match-end summary chat broadcast (`Match over! Team A/B wins.` plus the full scoreboard table). Players are unlocked and sent to spec.
 

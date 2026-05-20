@@ -125,7 +125,7 @@ public sealed class QueueDefinition
         MaxSpawnDriftTiles = maxSpawnDriftTiles;
         WarpOnSpawn = warpOnSpawn;
         StagingDuration = stagingDuration ?? TimeSpan.FromSeconds(10);
-        CountdownDuration = countdownDuration ?? TimeSpan.FromSeconds(5);
+        CountdownDuration = countdownDuration ?? TimeSpan.FromSeconds(10);
         LookAheadWindow = effectiveLookAhead;
         PromoteWinnersToFront = promoteWinnersToFront;
         MaxConsecutiveDefenses = maxConsecutiveDefenses;
@@ -237,8 +237,10 @@ public sealed class QueueDefinition
     /// <summary>
     /// Length of the pre-GO countdown. The orchestrator broadcasts <c>"All set!"</c> up-front
     /// (with <c>"Starting in N seconds!"</c> appended for N&gt;10), then ticks <c>"-3-"</c>
-    /// → <c>"-2-"</c> → <c>"-1-"</c> → <c>"GO!"</c> over the final 3s. Minimum and default
-    /// 5 seconds.
+    /// → <c>"-2-"</c> → <c>"-1-"</c> → <c>"GO!"</c> over the final 3s. Ships lock
+    /// <see cref="ClashEngine.Adapter.MatchFreqAdvisor.ShipLockBeforeStart"/> (5s) before GO,
+    /// so values above that leave a free ship-pick window at the start of the countdown.
+    /// Minimum 5s, default 10s (5s pick + 5s locked).
     /// </summary>
     public TimeSpan CountdownDuration { get; }
 

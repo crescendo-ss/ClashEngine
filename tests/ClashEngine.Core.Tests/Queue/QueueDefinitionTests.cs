@@ -198,11 +198,12 @@ public class QueueDefinitionTests
     }
 
     [Fact]
-    public void StagingDuration_and_CountdownDuration_default_to_10s_and_5s()
+    public void StagingDuration_and_CountdownDuration_default_to_10s_and_10s()
     {
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
         Assert.Equal(TimeSpan.FromSeconds(10), def.StagingDuration);
-        Assert.Equal(TimeSpan.FromSeconds(5), def.CountdownDuration);
+        // Countdown defaults to 10s -- 5s ship-pick window + 5s locked before GO.
+        Assert.Equal(TimeSpan.FromSeconds(10), def.CountdownDuration);
     }
 
     [Fact]
