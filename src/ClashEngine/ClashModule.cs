@@ -81,6 +81,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private MatchFreqAdvisor? _freqAdvisor;
     private IMatchUploader? _matchUploader;
     private IGameTypeRegistrar? _gameTypeRegistrar;
+    private IRatingSync? _ratingSync;
+    private RatingSyncCoordinator? _ratingSyncCoordinator;
     private ClashReplayRecorder? _replayRecorder;
 
     // Penalty-tracker memory grows unbounded without periodic pruning. Pruning on every 500 ms
@@ -310,6 +312,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
 
         _matchUploader = BuildMatchUploader(_replayRecorder);
         _gameTypeRegistrar = BuildGameTypeRegistrar();
+        _ratingSync = BuildRatingSync();
 
         Func<Guid, string?>? recordingPathLookup = _replayRecorder is not null
             ? (Func<Guid, string?>)(id => _replayRecorder.GetRecordingPath(id))
@@ -381,7 +384,22 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _engine.SetTelemetry(new CompositeTelemetry(listeners.ToArray()));
 
         _observer = new PlayerStateObserver(broker, _engine, _resolver, _clock, _clashLog);
+        // Rating sync coordinator: pull on connect, bulk push on disconnect. Constructed AFTER
+        // _ratingSync so the no-server fallback is in place; subscribed to PlayerStateObserver
+        // events BEFORE Register() so the very first connect event reaches the coordinator.
+        // Uses the same in-memory rating store the engine reads, so a pull populates the same
+        // rows ?play and the matcher consult.
+        _ratingSyncCoordinator = new RatingSyncCoordinator(_ratingSync!, ratingStore, _engine.GameTypes, _log);
+        _observer.PlayerConnected += _ratingSyncCoordinator.OnPlayerConnected;
+        _observer.PlayerDisconnected += _ratingSyncCoordinator.OnPlayerDisconnected;
         _observer.Register();
+        _unregisterActions.Add(() =>
+        {
+            _observer!.PlayerConnected -= _ratingSyncCoordinator.OnPlayerConnected;
+            _observer.PlayerDisconnected -= _ratingSyncCoordinator.OnPlayerDisconnected;
+            _ratingSyncCoordinator.Dispose();
+            _ratingSyncCoordinator = null;
+        });
         _unregisterActions.Add(_observer.Unregister);
 
         _lvzAdapter.Register();
@@ -566,6 +584,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             disposableUploader.Dispose();
         if (_gameTypeRegistrar is IDisposable disposableRegistrar)
             disposableRegistrar.Dispose();
+        if (_ratingSync is IDisposable disposableSync)
+            disposableSync.Dispose();
 
         // _matchRecorder.Unregister was already invoked via the _unregisterActions list during
         // PreUnloadAsync; here we only release the server interfaces it depended on.
@@ -597,6 +617,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _lvzAdapter = null;
         _matchUploader = null;
         _gameTypeRegistrar = null;
+        _ratingSync = null;
+        _ratingSyncCoordinator = null;
         _replayRecorder = null;
 
         _log.LogM(LogLevel.Info, LogCategory, "ClashEngine unloaded.");
@@ -886,5 +908,26 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             return new HttpGameTypeRegistrar(registrationUrl, apiKey, _log);
         }
         return new NoStatsServerGameTypeRegistrar(_log);
+    }
+
+    /// <summary>
+    /// Picks the rating-sync sink based on config. With <c>UploadUrl</c> + <c>UploadApiKey</c>
+    /// set, derives the stats-API base from the upload URL (strips <c>/matches</c> or
+    /// <c>/gametypes</c> if present) and returns an HTTP-backed sync. Without an
+    /// <c>UploadUrl</c>, falls back to the no-op stub so the engine keeps running and the
+    /// local <see cref="PersistRatingStore"/> remains the source of truth.
+    /// </summary>
+    private IRatingSync BuildRatingSync()
+    {
+        var url = _config.GetStr(_config.Global, "ClashEngine", "UploadUrl");
+        var apiKey = _config.GetStr(_config.Global, "ClashEngine", "UploadApiKey");
+        var apiBase = HttpRatingSync.DeriveStatsApiBase(url);
+        if (!string.IsNullOrWhiteSpace(apiBase) && !string.IsNullOrWhiteSpace(apiKey))
+        {
+            _log.LogM(LogLevel.Info, LogCategory,
+                $"Rating sync enabled -> GET/PUT {apiBase}/players/.../rating, POST {apiBase}/ratings");
+            return new HttpRatingSync(apiBase, apiKey, _log);
+        }
+        return new NoStatsServerRatingSync(_log);
     }
 }

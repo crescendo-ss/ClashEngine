@@ -24,6 +24,22 @@ public sealed class PlayerStateObserver
     private readonly IClock _clock;
     private readonly ClashLog _log;
 
+    /// <summary>
+    /// Fires after the engine has been notified of a Connect, with the resolved
+    /// <see cref="PlayerKey"/> and the connect timestamp. Subscribers run on the mainloop
+    /// thread; long-running work (HTTP I/O for rating sync, for example) should be dispatched
+    /// off-thread by the subscriber.
+    /// </summary>
+    public event Action<PlayerKey, DateTimeOffset>? PlayerConnected;
+
+    /// <summary>
+    /// Fires on Disconnect immediately BEFORE <see cref="PlayerKeyResolver.OnDisconnect"/> runs,
+    /// while the resolver can still map the player back to a <see cref="PlayerKey"/>. The
+    /// subscriber can snapshot any per-player state (e.g. rating rows for a push) before the
+    /// player session unwinds. Subscribers run on the mainloop thread.
+    /// </summary>
+    public event Action<PlayerKey, DateTimeOffset>? PlayerDisconnected;
+
     public PlayerStateObserver(
         IComponentBroker broker,
         MatchmakingEngine engine,
@@ -64,19 +80,31 @@ public sealed class PlayerStateObserver
                 _resolver.OnConnect(player);
                 if (_resolver.KeyOf(player) is PlayerKey k1)
                 {
-                    _engine.OnPlayerConnected(k1, _clock.UtcNow);
+                    var connectAt = _clock.UtcNow;
+                    _engine.OnPlayerConnected(k1, connectAt);
                     if (_log.IsDebug)
                         _log.Debug(LogCategory, $"Connected: {k1.Name}");
+                    // Fired AFTER engine state is updated so any subscriber that consults
+                    // engine state (eligibility, queue membership, in-flight match) sees a
+                    // consistent post-connect view. Exceptions are logged and swallowed --
+                    // a misbehaving subscriber must not strand the connect callback.
+                    Fire(PlayerConnected, k1, connectAt, "PlayerConnected");
                 }
                 break;
 
             case PlayerAction.Disconnect:
                 if (_resolver.KeyOf(player) is PlayerKey k2)
                 {
-                    _engine.OnPlayerDisconnected(k2, _clock.UtcNow);
+                    var disconnectAt = _clock.UtcNow;
+                    // Fire the event BEFORE engine state changes so a subscriber can still
+                    // snapshot per-player rows the engine is about to release (e.g. the
+                    // rating-sync coordinator pushing the player's full row set).
+                    Fire(PlayerDisconnected, k2, disconnectAt, "PlayerDisconnected");
+
+                    _engine.OnPlayerDisconnected(k2, disconnectAt);
                     // A disconnect (or zone exit) is a hard departure from the party. Spec'ing
                     // is handled separately in OnShipFreqChange and deliberately does NOT drop.
-                    _engine.LeaveGroup(k2, _clock.UtcNow);
+                    _engine.LeaveGroup(k2, disconnectAt);
                     // Drop pending invitations on either side so they don't outlive the session.
                     // Deliberately not done on LeaveArena -- arena hops are transient and the
                     // invitation should still be there when the player returns.
@@ -143,4 +171,23 @@ public sealed class PlayerStateObserver
     // Kill events are routed by MatchKillRouter (which calls engine.OnKill on our behalf and
     // then fans out to readers in registration order). PlayerStateObserver no longer subscribes
     // to KillCallback directly.
+
+    /// <summary>
+    /// Invokes a (possibly null) lifecycle event with a single try/catch around the delegate
+    /// invocation list. A throwing subscriber is logged at Error and the remaining subscribers
+    /// still fire -- <c>Delegate.GetInvocationList</c> is iterated explicitly rather than
+    /// relying on <c>?.Invoke</c> so one bad handler can't block the rest.
+    /// </summary>
+    private void Fire(Action<PlayerKey, DateTimeOffset>? evt, PlayerKey key, DateTimeOffset at, string label)
+    {
+        if (evt is null) return;
+        foreach (var handler in evt.GetInvocationList())
+        {
+            try { ((Action<PlayerKey, DateTimeOffset>)handler)(key, at); }
+            catch (Exception ex)
+            {
+                _log.Warn(LogCategory, $"{label} subscriber threw: {ex}");
+            }
+        }
+    }
 }

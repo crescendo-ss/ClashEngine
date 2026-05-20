@@ -139,29 +139,12 @@ public sealed class HttpGameTypeRegistrar : IGameTypeRegistrar, IDisposable
         string.IsNullOrEmpty(s) || s.Length <= max ? s : s.Substring(0, max) + "...";
 
     /// <summary>
-    /// Derives the gametype-registration URL from the configured match <c>UploadUrl</c>.
-    /// Convention: the stats server exposes <c>/api/matches</c> for match envelopes and
-    /// <c>/api/gametypes</c> for gametype registration on the same host + base path.
+    /// Convenience passthrough to <see cref="Core.Stats.StatsApiPaths.DeriveGameTypeRegistrationUrl"/>
+    /// so existing callers in this project keep the same entry point. The actual convention
+    /// lives in Core (it's the same one <see cref="HttpRatingSync"/> uses).
     /// </summary>
-    /// <remarks>
-    /// <para>If <paramref name="uploadUrl"/> ends with <c>/matches</c> (case-insensitive),
-    /// the trailing segment is replaced with <c>/gametypes</c>. Otherwise <c>/gametypes</c>
-    /// is appended (after stripping any trailing slash).</para>
-    /// <para>Returns <see langword="null"/> when <paramref name="uploadUrl"/> is null or
-    /// whitespace -- the host's fail-closed policy then rejects every gametype registration
-    /// attempt (because no UploadUrl means no stats server is configured).</para>
-    /// </remarks>
-    public static string? DeriveRegistrationUrl(string? uploadUrl)
-    {
-        if (string.IsNullOrWhiteSpace(uploadUrl)) return null;
-        var trimmed = uploadUrl.TrimEnd();
-
-        const string MatchesSuffix = "/matches";
-        if (trimmed.EndsWith(MatchesSuffix, StringComparison.OrdinalIgnoreCase))
-            return trimmed.Substring(0, trimmed.Length - MatchesSuffix.Length) + "/gametypes";
-
-        return trimmed.TrimEnd('/') + "/gametypes";
-    }
+    public static string? DeriveRegistrationUrl(string? uploadUrl) =>
+        Core.Stats.StatsApiPaths.DeriveGameTypeRegistrationUrl(uploadUrl);
 
     public void Dispose()
     {
