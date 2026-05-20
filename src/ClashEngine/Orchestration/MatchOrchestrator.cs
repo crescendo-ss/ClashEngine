@@ -207,8 +207,8 @@ public sealed class MatchOrchestrator
         // private "beep" (same sound players hear when TeamVersus drops them into a match).
         // Spectators get a plain arena broadcast since they don't need the call-to-action.
         var notice =
-            $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. " +
-            "Change ships freely until just before the match starts. Spec to abandon.";
+            $"Match found! Move or fire to confirm you're here (up to {(int)_queue.StagingDuration.TotalSeconds}s). " +
+            "Change ships freely; you lock 5s before GO. Spec to abandon.";
         SendDmToParticipants(notice);
         BroadcastToSpectators(notice);
     }
@@ -529,6 +529,18 @@ public sealed class MatchOrchestrator
             // First detected movement after placement -- confirm to the player so they know
             // the readiness check has registered and they don't need to keep wiggling.
             _chat.SendMessage(readyPlayer, "Got it -- you're ready. Standby for the countdown.");
+
+            // Staging is up-to StagingDuration: as soon as every participant has flipped
+            // non-idle, short-circuit to the countdown instead of burning the rest of the
+            // window. The timer-fired path remains the fallback for the AFK case;
+            // OnStagingEnd is safe to call from this synchronous path because it just runs
+            // its existing all-ready branch (afk.Count == 0). Clear the timer first so a
+            // late-firing slot can't double-enter.
+            if (Phase == MatchPhase.Staging && _idleTracker.GetStillIdle().Count == 0)
+            {
+                _timer.ClearTimer(OnStagingEnd, this);
+                OnStagingEnd();
+            }
         }
     }
 
