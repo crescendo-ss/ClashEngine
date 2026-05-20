@@ -202,9 +202,9 @@ public sealed class MatchOrchestrator
         // One-shot timer: SS mainloop rejects interval=0 (must be > 0 or Timeout.Infinite).
         _timer.SetTimer(OnStagingEnd, (int)_queue.StagingDuration.TotalMilliseconds, Timeout.Infinite, this);
 
-        // Mirror SS.Matchmaking.TeamVersusMatch: DM the "you've been placed" notice to each
-        // participant as a private message FROM THEMSELVES so it lands in their personal chat
-        // window (Continuum renders it as "(theirname)>...") and is visually impossible to miss.
+        // Mirror SS.Matchmaking.TeamVersusMatch:4842: send the match-found notice to each
+        // participant as a senderless RemotePrivate so Continuum plays its standard incoming-
+        // private "beep" (same sound players hear when TeamVersus drops them into a match).
         // Spectators get a plain arena broadcast since they don't need the call-to-action.
         var notice =
             $"Match found! Move or fire within {(int)_queue.StagingDuration.TotalSeconds} seconds to confirm. " +
@@ -347,12 +347,38 @@ public sealed class MatchOrchestrator
         // newly-attached spectators wouldn't be associated with this match.
         RefreshMatchFocus(key, player);
 
+        // Mirror SS.Matchmaking.TeamVersusMatch:2762: announce the return to the match audience
+        // (participants + focused spectators) with the items-action that was just applied and the
+        // returner's remaining lives, so opponents see e.g.
+        //   "Player returned to the match. [Items Restored] [Lives: 2]"
+        var returnNotice = $"{key.Name} returned to the match.";
+        var itemsDesc = GetItemsActionDescription(_queue.ReturnItemsAction);
+        if (!string.IsNullOrEmpty(itemsDesc))
+            returnNotice += $" [{itemsDesc}]";
+        if (match.LivesPerPlayer.HasValue && match.LivesRemaining.TryGetValue(key, out var lives))
+            returnNotice += $" [Lives: {lives}]";
+        BroadcastToAll(returnNotice);
+
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
                 $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq} " +
                 $"(items={_queue.ReturnItemsAction}).");
         return ReturnResult.Placed;
     }
+
+    /// <summary>
+    /// Human-facing label for an <see cref="ItemsAction"/>, mirroring
+    /// SS.Matchmaking.TeamVersusMatch's <c>GetItemsActionDescription</c> verbatim so the
+    /// "?return" broadcast in the two modules reads identically. Used inside the
+    /// <c>[...]</c> bracket of the return notice.
+    /// </summary>
+    private static string GetItemsActionDescription(ItemsAction action) => action switch
+    {
+        ItemsAction.Full => "Full Ship",
+        ItemsAction.Burn => "Items Burned",
+        ItemsAction.Restore => "Items Restored",
+        _ => string.Empty,
+    };
 
     /// <summary>
     /// Walk the broker's <see cref="IMatchFocusAdvisor"/> set to find the <see cref="IMatch"/>
@@ -753,12 +779,13 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// Deliver <paramref name="message"/> to each resolvable participant as a true RemotePrivate
-    /// chat line, mirroring SS.Matchmaking.TeamVersusMatch's ready-up notice
-    /// (<c>TeamVersusMatch.cs:5723</c>): biller-routed, sender = the player's own name. Continuum
-    /// renders this as an inbound ":theirname:message" line at the top of chat -- visually
-    /// distinct from arena chatter and from the prior "(theirname)>message" self-echo, which
-    /// players were missing.
+    /// Deliver <paramref name="message"/> to each resolvable participant as a senderless
+    /// RemotePrivate chat line, mirroring SS.Matchmaking.TeamVersusMatch's match-found notice
+    /// (<c>TeamVersusMatch.cs:4842</c>): <see cref="IChat.SendAnyMessage"/> with
+    /// <see cref="ChatMessageType.RemotePrivate"/>, no <c>from</c>, and
+    /// <see cref="ChatSound.None"/>. Continuum plays its standard incoming-private sound (the
+    /// "beep") on receipt; with no sender it lands as a bare line rather than the prior
+    /// "(theirname)>message" self-echo, which clients muted as an outbound echo.
     /// </summary>
     private void SendDmToParticipants(string message)
     {
@@ -767,7 +794,7 @@ public sealed class MatchOrchestrator
         {
             set.Clear();
             set.Add(p);
-            _chat.SendRemotePrivMessage(set, ChatSound.None, [], p.Name, message);
+            _chat.SendAnyMessage(set, ChatMessageType.RemotePrivate, ChatSound.None, null, message);
         }
     }
 
