@@ -17,10 +17,9 @@ namespace ClashEngine.Core.Ratings;
 /// has no persisted rating for them -- typically a new install, a fresh PersistRatingStore,
 /// or a player who has played on a different zone instance.</para>
 ///
-/// <para>There is intentionally no push API here. A separate
-/// <c>ratings-batch.schema.json</c> documents the bulk-push wire shape for a future durable
-/// upload-queue feature, but until that lands the engine relies on the match-envelope
-/// channel + local PersistRatingStore. See the commit history for the rationale.</para>
+/// <para>There is intentionally no push API here. The engine relies on the match-envelope
+/// channel + local PersistRatingStore to keep the server's <c>playerRatings</c> table in
+/// sync; see the commit history for the rationale.</para>
 ///
 /// <para>Implementations must never throw from <see cref="TryPullAsync"/>; transport
 /// failures should be captured into a <see langword="null"/> return and logged inside the
