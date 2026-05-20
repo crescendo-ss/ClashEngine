@@ -339,12 +339,11 @@ public sealed class MatchOrchestrator
         // Snapshot consumed; clear so the next leave-cycle isn't tainted by a stale value.
         _shipAtLeave.Remove(key);
 
-        // Re-fire MatchAddPlayingCallback so SS.Matchmaking.MatchFocus rebuilds the returner's
-        // PlayingInMatch state and re-attaches their current spectators to this match. The
-        // initial firing happens at OnMatchStarted; subsequent ship<->spec transitions don't
-        // re-fire it, so without this the IPlayerPositionAdvisor would drop other participants'
-        // position packets to a returner whose PlayingInMatch was somehow cleared, and any
-        // newly-attached spectators wouldn't be associated with this match.
+        // Drive SS.Matchmaking.MatchFocus through a PlayingInMatch null cycle so MatchLvz
+        // re-sends the statbox LVZ. MatchFocus.SetPlaying early-returns when the player is
+        // already PlayingInMatch (which it is -- SS doesn't clear it on the active->spec
+        // transition), so MatchFocusChangedCallback never fires and MatchLvz's
+        // SetAndSendMatchLvz no-ops on newState==oldState. See RefreshMatchFocus.
         RefreshMatchFocus(key, player);
 
         // Mirror SS.Matchmaking.TeamVersusMatch:2762: announce the return to the match audience
@@ -381,13 +380,17 @@ public sealed class MatchOrchestrator
     };
 
     /// <summary>
-    /// Walk the broker's <see cref="IMatchFocusAdvisor"/> set to find the <see cref="IMatch"/>
-    /// for this match (the LVZ adapter is the canonical advisor) and fire
-    /// <see cref="MatchAddPlayingCallback"/> for <paramref name="player"/>. MatchFocus's
-    /// <c>SetPlaying</c> is idempotent, so re-firing it on a player whose PlayingInMatch was
-    /// already correct is a no-op; the value of the call is in the cases where the state had
-    /// drifted (e.g. the player rotated through a different match's spectator focus while specced).
-    /// No-op if the broker wasn't injected (test paths) or no advisor is registered.
+    /// Force-refresh the returning participant's MatchLvz state by walking the broker's
+    /// <see cref="IMatchFocusAdvisor"/> set, then firing <see cref="MatchRemovePlayingCallback"/>
+    /// followed by <see cref="MatchAddPlayingCallback"/> for that match. The forced Remove->Add
+    /// cycle is load-bearing: SS.Matchmaking.MatchFocus.SetPlaying early-returns when
+    /// <c>PlayingInMatch</c> already equals the target (it does -- MatchFocus doesn't clear
+    /// PlayingInMatch on active->spec), and MatchLvz only redraws via
+    /// <c>MatchFocusChangedCallback</c>, which only fires on a real state transition. Routing
+    /// through null in between guarantees the change-callback fires twice and MatchLvz's
+    /// <c>SetAndSendMatchLvz</c> sees a different (newState, oldState) pair on the second call,
+    /// breaking past its own no-op guard. No-op if the broker wasn't injected (test paths) or no
+    /// advisor returned a match for this player.
     /// </summary>
     private void RefreshMatchFocus(PlayerKey key, Player player)
     {
@@ -397,9 +400,16 @@ public sealed class MatchOrchestrator
         {
             var match = advisor.GetMatch(player);
             if (match is null) continue;
+            MatchRemovePlayingCallback.Fire(_broker, match, key.Name, player);
             MatchAddPlayingCallback.Fire(_broker, match, key.Name, player);
+            if (_verbose.IsDebug)
+                _verbose.Debug(LogCategory,
+                    $"Match {_matchId:N}: refreshed match focus for {key.Name} (remove+add).");
             return;
         }
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"Match {_matchId:N}: no IMatchFocusAdvisor returned a match for {key.Name}; statbox refresh skipped.");
     }
 
     /// <summary>
