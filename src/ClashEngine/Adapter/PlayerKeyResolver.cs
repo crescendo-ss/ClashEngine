@@ -43,7 +43,42 @@ public sealed class PlayerKeyResolver
     public Player? Resolve(PlayerKey key) =>
         !key.IsDefault && _byName.TryGetValue(key.Name, out var p) ? p : null;
 
+    /// <summary>
+    /// Typo-tolerant lookup for command arguments that take a player name. Builds the
+    /// candidate roster from connected players in <paramref name="scope"/> (pass null for
+    /// zone-wide) and delegates to <see cref="PlayerNameMatcher.Resolve"/>, which layers
+    /// exact / unique prefix / unique Damerau-Levenshtein and rejects ties.
+    ///
+    /// Arena-scoping the candidate set is what makes the ambiguity-rejection rule useful --
+    /// a zone-wide pool would have too many collisions on short prefixes, so almost every
+    /// typo would be reported as ambiguous. Commands that legitimately want zone-wide
+    /// resolution (e.g. operator tools targeting offline players) should keep using
+    /// <see cref="Resolve(PlayerKey)"/> or build their own candidate set.
+    ///
+    /// <see cref="FuzzyResolve.Player"/> is non-null exactly when the match is
+    /// Exact/Prefix/Fuzzy; for None/Ambiguous it's null and the caller should surface
+    /// <see cref="NameMatch.Candidates"/> in the error message.
+    /// </summary>
+    public FuzzyResolve ResolveFuzzy(string typed, Arena? scope)
+    {
+        var names = new List<string>(_byName.Count);
+        foreach (var p in _byName.Values)
+        {
+            if (string.IsNullOrEmpty(p.Name)) continue;
+            if (scope is not null && !ReferenceEquals(p.Arena, scope)) continue;
+            names.Add(p.Name);
+        }
+
+        var match = PlayerNameMatcher.Resolve(typed, names);
+        Player? player = match.Name is { } n && _byName.TryGetValue(n, out var hit) ? hit : null;
+        return new FuzzyResolve(match, player);
+    }
+
     public void Clear() => _byName.Clear();
 
     public int Count => _byName.Count;
 }
+
+/// <summary>Result of <see cref="PlayerKeyResolver.ResolveFuzzy"/>. <see cref="Player"/> is
+/// non-null iff <see cref="Match"/>.Kind is Exact, Prefix, or Fuzzy.</summary>
+public readonly record struct FuzzyResolve(NameMatch Match, Player? Player);

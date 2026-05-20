@@ -492,15 +492,20 @@ public sealed class MatchmakingCommands
         foreach (var raw in arg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             // Resolve before inviting so a typo or offline name produces explicit feedback
-            // instead of a ghost ledger entry. Use the canonical-cased name from the resolved
-            // player for all replies.
-            var resolved = _resolver.Resolve(new PlayerKey(raw));
-            if (resolved is null || _resolver.KeyOf(resolved) is not PlayerKey inviteeKey)
+            // instead of a ghost ledger entry. ResolveFuzzy tries exact, then unique prefix,
+            // then unique Damerau-Levenshtein within the inviter's arena -- ambiguous matches
+            // are rejected so we don't quietly invite the wrong person.
+            var fuzzy = _resolver.ResolveFuzzy(raw, player.Arena);
+            if (fuzzy.Player is null || _resolver.KeyOf(fuzzy.Player) is not PlayerKey inviteeKey)
             {
-                _chat.SendMessage(player, $"No player named '{raw}' is online.");
+                _chat.SendMessage(player, fuzzy.Match.Kind == NameMatchKind.Ambiguous
+                    ? $"'{raw}' is ambiguous -- matches {FormatCandidates(fuzzy.Match.Candidates)}. Be more specific."
+                    : $"No player named '{raw}' is online.");
                 continue;
             }
             var displayName = inviteeKey.Name;
+            if (_log.IsDebug && fuzzy.Match.Kind != NameMatchKind.Exact)
+                _log.Debug(LogCategory, $"?party {k.Name} resolved \"{raw}\" -> {displayName} via {fuzzy.Match.Kind}");
 
             var result = _engine.InviteToGroup(k, inviteeKey, now);
             if (_log.IsDebug)
@@ -924,5 +929,16 @@ public sealed class MatchmakingCommands
     {
         if (ts.TotalSeconds < 60) return $"{(int)ts.TotalSeconds}s";
         return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
+    }
+
+    /// <summary>Renders an ambiguity message's candidate list, capping at <paramref name="max"/>
+    /// so a wide prefix collision (e.g. "?party C" in a busy arena) doesn't blow past the chat
+    /// line length and get truncated by the client.</summary>
+    private static string FormatCandidates(IReadOnlyList<string> names, int max = 5)
+    {
+        if (names.Count <= max) return string.Join(", ", names);
+        var head = new string[max];
+        for (int i = 0; i < max; i++) head[i] = names[i];
+        return $"{string.Join(", ", head)}, ... (+{names.Count - max} more)";
     }
 }
