@@ -32,14 +32,6 @@ public sealed class PlayerStateObserver
     /// </summary>
     public event Action<PlayerKey, DateTimeOffset>? PlayerConnected;
 
-    /// <summary>
-    /// Fires on Disconnect immediately BEFORE <see cref="PlayerKeyResolver.OnDisconnect"/> runs,
-    /// while the resolver can still map the player back to a <see cref="PlayerKey"/>. The
-    /// subscriber can snapshot any per-player state (e.g. rating rows for a push) before the
-    /// player session unwinds. Subscribers run on the mainloop thread.
-    /// </summary>
-    public event Action<PlayerKey, DateTimeOffset>? PlayerDisconnected;
-
     public PlayerStateObserver(
         IComponentBroker broker,
         MatchmakingEngine engine,
@@ -95,16 +87,10 @@ public sealed class PlayerStateObserver
             case PlayerAction.Disconnect:
                 if (_resolver.KeyOf(player) is PlayerKey k2)
                 {
-                    var disconnectAt = _clock.UtcNow;
-                    // Fire the event BEFORE engine state changes so a subscriber can still
-                    // snapshot per-player rows the engine is about to release (e.g. the
-                    // rating-sync coordinator pushing the player's full row set).
-                    Fire(PlayerDisconnected, k2, disconnectAt, "PlayerDisconnected");
-
-                    _engine.OnPlayerDisconnected(k2, disconnectAt);
+                    _engine.OnPlayerDisconnected(k2, _clock.UtcNow);
                     // A disconnect (or zone exit) is a hard departure from the party. Spec'ing
                     // is handled separately in OnShipFreqChange and deliberately does NOT drop.
-                    _engine.LeaveGroup(k2, disconnectAt);
+                    _engine.LeaveGroup(k2, _clock.UtcNow);
                     // Drop pending invitations on either side so they don't outlive the session.
                     // Deliberately not done on LeaveArena -- arena hops are transient and the
                     // invitation should still be there when the player returns.

@@ -384,19 +384,18 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _engine.SetTelemetry(new CompositeTelemetry(listeners.ToArray()));
 
         _observer = new PlayerStateObserver(broker, _engine, _resolver, _clock, _clashLog);
-        // Rating sync coordinator: pull on connect, bulk push on disconnect. Constructed AFTER
-        // _ratingSync so the no-server fallback is in place; subscribed to PlayerStateObserver
-        // events BEFORE Register() so the very first connect event reaches the coordinator.
-        // Uses the same in-memory rating store the engine reads, so a pull populates the same
-        // rows ?play and the matcher consult.
+        // Rating sync coordinator: pull-on-first-connect. Match envelopes carry post-match
+        // ratings BACK to the server, so there's no push path here -- the coordinator only
+        // seeds the local cache when a player connects to a zone that has no persisted data
+        // for them. Subscribed to PlayerStateObserver BEFORE Register() so the very first
+        // connect event reaches the coordinator; uses the same in-memory rating store the
+        // engine reads so a pull populates the same rows ?play and the matcher consult.
         _ratingSyncCoordinator = new RatingSyncCoordinator(_ratingSync!, ratingStore, _engine.GameTypes, _log);
         _observer.PlayerConnected += _ratingSyncCoordinator.OnPlayerConnected;
-        _observer.PlayerDisconnected += _ratingSyncCoordinator.OnPlayerDisconnected;
         _observer.Register();
         _unregisterActions.Add(() =>
         {
             _observer!.PlayerConnected -= _ratingSyncCoordinator.OnPlayerConnected;
-            _observer.PlayerDisconnected -= _ratingSyncCoordinator.OnPlayerDisconnected;
             _ratingSyncCoordinator.Dispose();
             _ratingSyncCoordinator = null;
         });

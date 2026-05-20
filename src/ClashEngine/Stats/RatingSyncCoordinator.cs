@@ -10,28 +10,31 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Stats;
 
 /// <summary>
-/// Bridges player connect / disconnect lifecycle into <see cref="IRatingSync"/>:
-/// <list type="bullet">
-///   <item><b>Connect</b>: fire-and-forget pull of every registered gametype's rating for
-///         the connecting player. The pull merges back into <see cref="IRatingStore"/> with
-///         a newer-<see cref="Rating.LastSeen"/>-wins guard so a freshly-finalized match
-///         (whose envelope hasn't reached the stats server yet) isn't clobbered by an older
-///         server row.</item>
-///   <item><b>Disconnect</b>: fire-and-forget bulk push of every row the player owns in the
-///         local store. The server's <c>updatedAt</c> guard makes the push idempotent for
-///         rows the server already has at the same or newer timestamp, so we don't need to
-///         track which rows changed locally during the session.</item>
-/// </list>
+/// Seeds a player's local <see cref="IRatingStore"/> from the stats server <i>only the
+/// first time they connect to a zone that has no persisted data for them</i>. After that
+/// the local store + the match-upload envelope channel keep ratings consistent without
+/// further pulls or pushes.
 /// </summary>
 /// <remarks>
-/// <para>All HTTP work happens off the mainloop via <see cref="Task.Run(Func{Task})"/>; the
-/// connect/disconnect handlers return immediately so <see cref="Events.PlayerStateObserver"/>
-/// can finish its callback. Errors are logged and swallowed -- a sync failure must not
-/// destabilize the player session.</para>
+/// <para>The gate is "does the local cache hold ANY row for this player?". If yes (any
+/// gametype), we trust the local store -- it was either loaded from
+/// <see cref="Persistence.PersistRatingStore"/>'s persisted blob during the player's
+/// session-load, or written during this session by <see cref="Core.Ratings.RatingUpdater"/>.
+/// If no, we fire off a per-gametype pull. A null pull (server has no row either) leaves the
+/// cache empty -- <see cref="IRatingStore.Get"/> returns <see cref="Rating.Default"/> on a
+/// miss, so "start from scratch" is the natural behavior.</para>
 ///
-/// <para>Cancellation: <see cref="Dispose"/> cancels every in-flight pull/push so the engine
-/// can unload cleanly without waiting on outstanding HTTP. The coordinator does NOT block on
-/// completion -- in-flight tasks observe the cancellation token and unwind on their own.</para>
+/// <para>There is intentionally no push. Match envelopes carry post-match ratings back to
+/// the server as a side effect of every finalized match; a separate disconnect or periodic
+/// push would just be a parallel channel for the same data without fixing the actual failure
+/// modes (envelope queue overflow / zone crash mid-session) -- those want a durable upload
+/// queue, not a second channel.</para>
+///
+/// <para>HTTP work runs on <see cref="Task.Run(Func{Task})"/>; the connect handler returns
+/// immediately so <see cref="Events.PlayerStateObserver"/> can finish its mainloop callback.
+/// Failures are logged and swallowed. <see cref="Dispose"/> cancels every in-flight pull;
+/// the coordinator does not block on completion -- in-flight tasks observe the cancellation
+/// token and unwind on their own.</para>
 /// </remarks>
 public sealed class RatingSyncCoordinator : IDisposable
 {
@@ -56,13 +59,15 @@ public sealed class RatingSyncCoordinator : IDisposable
     }
 
     /// <summary>
-    /// PlayerStateObserver.PlayerConnected handler. Fire-and-forget per-gametype pull; the
-    /// handler itself returns synchronously so the observer's mainloop callback finishes
-    /// promptly. <paramref name="at"/> is unused -- the engine's local clock has no bearing
-    /// on the server's <c>updatedAt</c> compare; we use whatever the server returns.
+    /// PlayerStateObserver.PlayerConnected handler. If the local cache already has any row
+    /// for this player (across any gametype), the pull is skipped -- the local store is
+    /// already the source of truth. Otherwise per-gametype pulls fire off-thread and any
+    /// row the server returns is written into the cache.
     /// </summary>
     public void OnPlayerConnected(PlayerKey key, DateTimeOffset at)
     {
+        if (HasAnyLocalRating(key)) return;
+
         // Snapshot the gametype names up-front. The registry can be hot-reloaded; pulling
         // against whatever is registered at connect-time is the right semantics (a gametype
         // that later disappears just stops being pulled on subsequent connects).
@@ -84,74 +89,41 @@ public sealed class RatingSyncCoordinator : IDisposable
     }
 
     /// <summary>
-    /// PlayerStateObserver.PlayerDisconnected handler. Snapshots the player's full row set
-    /// synchronously (so we capture state BEFORE the engine releases anything), then fires
-    /// the push off-thread.
+    /// Walks the rating-store snapshot looking for any entry matching <paramref name="key"/>.
+    /// The snapshot is a point-in-time copy, safe to enumerate on the mainloop thread.
+    /// Returns true on the first hit; we don't care which gametype it is.
     /// </summary>
-    public void OnPlayerDisconnected(PlayerKey key, DateTimeOffset at)
+    private bool HasAnyLocalRating(PlayerKey key)
     {
-        // Snapshot synchronously while we still have a coherent view. The Snapshot() copy is
-        // safe to read off-thread.
-        var entries = new List<RatingEntry>();
         foreach (var entry in _ratings.Snapshot())
         {
-            if (entry.Player.Equals(key)) entries.Add(entry);
+            if (entry.Player.Equals(key)) return true;
         }
-        if (entries.Count == 0) return;
-
-        var token = _cts.Token;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var result = await _sync.TryPushBatchAsync(entries, token).ConfigureAwait(false);
-                // The sync impl already logs success / failure detail; here we only need to
-                // surface the disconnect-scoped context the impl doesn't have.
-                if (result.Status == RatingPushStatus.Ok && _log is { } log)
-                {
-                    log.LogM(LogLevel.Drivel, LogCategory,
-                        $"Pushed disconnect snapshot for '{key.Name}' ({entries.Count} row(s), " +
-                        $"{result.Accepted} stored, {result.Skipped} skipped).");
-                }
-            }
-            catch (OperationCanceledException) { /* shutdown */ }
-            catch (Exception ex)
-            {
-                _log.LogM(LogLevel.Warn, LogCategory,
-                    $"Push-on-disconnect failed for '{key.Name}': {ex}");
-            }
-        }, token);
+        return false;
     }
 
     private async Task PullAllAsync(PlayerKey key, IReadOnlyList<string> gameTypeNames, CancellationToken ct)
     {
-        int merged = 0;
-        int kept = 0;
+        int seeded = 0;
+        int serverEmpty = 0;
         for (int i = 0; i < gameTypeNames.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
             string gt = gameTypeNames[i];
             Rating? remote = await _sync.TryPullAsync(key.Name, gt, ct).ConfigureAwait(false);
-            if (remote is null) continue;
-
-            // Newer-updatedAt-wins. If the local cache has a row whose LastSeen is at or
-            // after the server's, we don't overwrite -- avoids stomping a just-finalized
-            // match whose envelope is still queued in the HttpMatchUploader.
-            if (_ratings.TryGet(key, gt, out var local) && local.LastSeen >= remote.Value.LastSeen)
+            if (remote is null)
             {
-                kept++;
+                serverEmpty++;
                 continue;
             }
-
             _ratings.Set(key, gt, remote.Value);
-            merged++;
+            seeded++;
         }
 
-        if (merged > 0 || kept > 0)
+        if (seeded > 0 || serverEmpty > 0)
         {
             _log.LogM(LogLevel.Drivel, LogCategory,
-                $"Pulled ratings for '{key.Name}': {merged} merged, {kept} kept-newer-local, " +
-                $"{gameTypeNames.Count - merged - kept} server-empty.");
+                $"Seeded ratings for '{key.Name}': {seeded} from server, {serverEmpty} server-empty (left at default).");
         }
     }
 
