@@ -210,6 +210,23 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
+    public void Queue_membership_persists_across_OnPlayerLeftArena()
+    {
+        // Queue membership only drops on ?cancel, disconnect, match formation, or eligibility
+        // changes -- not on arena hops. Verifies a queued player can ?go elsewhere and back
+        // without losing their spot.
+        var h = new Harness();
+        h.Connect("A");
+        Assert.Equal(EnqueueResult.Ok, h.Engine.TryEnqueue(K("A"), "2v2", T0));
+
+        h.Engine.OnPlayerLeftArena(K("A"), T0);
+
+        h.Engine.Queues.TryGet("2v2", out var def);
+        Assert.Single(def!.Queue.Snapshot());
+        Assert.True(def.Queue.Contains(K("A")));
+    }
+
+    [Fact]
     public void Player_failing_to_join_in_time_cancels_match_and_penalizes_them()
     {
         var h = new Harness(joinTimeout: TimeSpan.FromMinutes(1));

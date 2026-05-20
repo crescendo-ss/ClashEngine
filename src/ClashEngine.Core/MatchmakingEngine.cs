@@ -154,8 +154,13 @@ public sealed class MatchmakingEngine
         return true;
     }
 
-    /// <summary>Player has left the arena outright (e.g. <c>?go pub</c>). Drops them from any
-    /// queues they're sitting in and starts the abandonment grace clock if they were in a match.</summary>
+    /// <summary>
+    /// Player has left the arena outright (e.g. <c>?go pub</c>). Starts the abandonment grace
+    /// clock if they were in a match. Does NOT touch queue membership -- a queued player who
+    /// arena-hops keeps their spot. The only paths that drop a queue entry are <c>?cancel</c>,
+    /// disconnect, match formation (matcher's automatic dequeue), and eligibility changes; the
+    /// orchestrator's cross-arena warp on match formation therefore no longer self-dequeues here.
+    /// </summary>
     public void OnPlayerLeftArena(PlayerKey player, DateTimeOffset at)
     {
         if (_matchOf.TryGetValue(player, out var matchId))
@@ -165,7 +170,6 @@ public sealed class MatchmakingEngine
             m.OnPlayerLeft(player, at);
             DiffCollapsedAndEmit(m, prev);
         }
-        _matcher.DequeueEverywhere(player);
     }
 
     /// <summary>

@@ -286,12 +286,13 @@ public class KothModeTests
     }
 
     [Fact]
-    public void OnPlayerLeftArena_after_KOTH_promotion_would_drop_winners_documents_why_split_exists()
+    public void OnPlayerLeftArena_after_KOTH_promotion_preserves_winners_in_queue()
     {
-        // Documents the pre-split behavior so the OnPlayerSpecced vs OnPlayerLeftArena
-        // distinction has a regression anchor. Routing the post-finalize spec wave through
-        // OnPlayerLeftArena (the old path) ate the freshly promoted winners. The production
-        // observer now uses OnPlayerSpecced -- this test verifies the difference is real.
+        // OnPlayerLeftArena no longer self-dequeues -- queue membership persists across any
+        // arena change. The fix originally surfaced in the KOTH path (winners briefly visible
+        // in the queue after promotion, then yanked by a leave-arena side effect on the
+        // cleanup spec wave); the new policy makes the engine event safe to call from any
+        // arena-change path.
         var h = new Harness(killTarget: 1);
         h.ConnectAll("A", "B", "C", "D");
         h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
@@ -315,15 +316,17 @@ public class KothModeTests
                 h.Engine.OnPlayerLeftArena(match.Teams[t][j], h.Clock.UtcNow);
 
         h.Engine.Queues.TryGet("koth2v2", out var def);
-        Assert.Empty(def!.Queue.Snapshot());   // confirms the bug shape the new method avoids
+        var snap = def!.Queue.Snapshot();
+        foreach (var w in winners)
+            Assert.Contains(snap, e => e.Player == w);
     }
 
     [Fact]
-    public void OnPlayerLeftArena_still_drops_a_queued_player_who_actually_leaves_the_arena()
+    public void OnPlayerLeftArena_keeps_a_queued_player_in_the_queue()
     {
-        // The OnPlayerSpecced/OnPlayerLeftArena split: real arena exits (e.g. ?go pub) keep
-        // the old dequeue-on-leave semantic, so a player who hops arenas while queued is not
-        // left waiting in a queue tied to an arena they're no longer in.
+        // Queue membership persists across arena changes -- only ?cancel, disconnect, match
+        // formation, and ineligibility changes drop a queue entry. A player who ?go's elsewhere
+        // and back keeps their spot.
         var h = new Harness(killTarget: 1);
         h.ConnectAll("A");
         h.Engine.TryEnqueue(K("A"), "koth2v2", T0);
@@ -333,7 +336,7 @@ public class KothModeTests
 
         h.Engine.OnPlayerLeftArena(K("A"), T0);
 
-        Assert.Empty(def.Queue.Snapshot());
+        Assert.Single(def.Queue.Snapshot());
     }
 
     [Fact]
