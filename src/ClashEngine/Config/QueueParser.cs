@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using ClashEngine.Core;
 using ClashEngine.Core.GameType;
-using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Penalties;
@@ -95,7 +94,7 @@ internal static class QueueParser
                 uniqueId: QueueRegistry.QualifyName(ownerArenaName, baseName),
                 shape: shape,
                 qualityPolicy: quality,
-                gameType: new GameTypeId(gt.Id),
+                gameType: gt.Name,
                 endPolicyFactory: endPolicy,
                 griefingHeuristicFactory: griefing,
                 vetoesRequired: effectiveVetoes,
@@ -133,7 +132,7 @@ internal static class QueueParser
         {
             string Note(bool defaulted) => defaulted ? " (default)" : "";
             log.Debug(ConfigConstants.LogCategory,
-                $"Queue '{def.UniqueId}' parsed: GameType='{gt.Name}' (id={gt.Id}, shape={gt.TeamCount}x{gt.PlayersPerTeam}), " +
+                $"Queue '{def.UniqueId}' parsed: GameType='{gt.Name}' (shape={gt.TeamCount}x{gt.PlayersPerTeam}), " +
                 $"Preset={(casual ? "casual" : "(none)")}, " +
                 $"Label='{def.Label}', " +
                 $"MatchArena={(string.IsNullOrWhiteSpace(arenaName) ? "(none)" : arenaName)}, " +

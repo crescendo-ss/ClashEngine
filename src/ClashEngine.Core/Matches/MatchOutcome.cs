@@ -4,6 +4,8 @@ using ClashEngine.Core.Identity;
 
 namespace ClashEngine.Core.Matches;
 
+// GameType identifier is the registry name (string), matching the v5 match-upload schema.
+
 /// <summary>One team's slot in a final ranking. Lower <see cref="Rank"/> = better placement (1 = winner).</summary>
 public sealed record RankedTeam(int Rank, IReadOnlyList<PlayerKey> Players, int Score);
 
@@ -30,7 +32,7 @@ public sealed record PlayerOutcomeStats(int Kills, TimeSpan TimeAlive);
 /// </remarks>
 public sealed record MatchOutcome(
     Guid MatchId,
-    GameTypeId GameType,
+    string GameType,
     IReadOnlyList<RankedTeam> RankedTeams,
     IReadOnlyList<PlayerKey> AbandonedBy,
     MatchState FinalState,

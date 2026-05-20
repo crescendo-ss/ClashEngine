@@ -14,7 +14,7 @@ public class TeamCollapseGraceTests
         int? livesPerPlayer = null)
     {
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },
@@ -92,7 +92,7 @@ public class TeamCollapseGraceTests
         // C leaves, returns within grace, match later completes via kill count.
         // Returning clears the candidate flag; C should not appear in AbandonedBy.
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },
@@ -129,7 +129,7 @@ public class TeamCollapseGraceTests
             new[] { K("D") },
         };
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1), teams,
+            Guid.NewGuid(), "gt1", teams,
             new KillCountEndPolicy(1000),
             joinTimeout: TimeSpan.FromMinutes(1),
             graceWindow: TimeSpan.FromSeconds(30),

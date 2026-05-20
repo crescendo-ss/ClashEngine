@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Penalties;
@@ -31,7 +30,7 @@ public sealed class QueueRegistry
         string name,
         MatchShape shape,
         PartitionQualityPolicy qualityPolicy,
-        GameTypeId gameType = default,
+        string gameType = "",
         Func<IMatchEndPolicy>? endPolicyFactory = null,
         Func<IGriefingHeuristic>? griefingHeuristicFactory = null,
         int vetoesRequired = 2,
@@ -289,7 +288,7 @@ public sealed class QueueRegistry
         if (!string.Equals(a.UniqueId, b.UniqueId, StringComparison.OrdinalIgnoreCase)) return false;
         if (a.Shape.TeamCount != b.Shape.TeamCount) return false;
         if (a.Shape.PlayersPerTeam != b.Shape.PlayersPerTeam) return false;
-        if (a.GameType != b.GameType) return false;
+        if (!string.Equals(a.GameType, b.GameType, StringComparison.OrdinalIgnoreCase)) return false;
         if (!string.Equals(a.Label, b.Label, StringComparison.Ordinal)) return false;
         if (!string.Equals(a.MatchArenaName, b.MatchArenaName, StringComparison.OrdinalIgnoreCase)) return false;
         if (a.LookAheadWindow != b.LookAheadWindow) return false;

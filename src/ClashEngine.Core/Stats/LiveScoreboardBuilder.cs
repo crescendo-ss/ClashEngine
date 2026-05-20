@@ -29,7 +29,7 @@ public static class LiveScoreboardBuilder
         Guid matchId,
         string? queueName,
         string? queueLabel,
-        uint gameType,
+        string gameType,
         string? arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> teams,
         DateTimeOffset? startedAt,

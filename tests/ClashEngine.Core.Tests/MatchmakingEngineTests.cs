@@ -39,7 +39,7 @@ public class MatchmakingEngineTests
                 "2v2",
                 new MatchShape(2, 2),
                 new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-                new GameTypeId(1),
+                "gt1",
                 () => new KillCountEndPolicy(killTarget));
         }
 
@@ -156,8 +156,8 @@ public class MatchmakingEngineTests
         Assert.Equal(MatchState.Completed, h.Telemetry.Ended[0].FinalState);
 
         // Ratings updated: winner mu rises, loser mu falls.
-        Assert.True(h.Ratings.Get(winners[0], new GameTypeId(1)).Mu > Rating.Default.Mu);
-        Assert.True(h.Ratings.Get(losers[0], new GameTypeId(1)).Mu < Rating.Default.Mu);
+        Assert.True(h.Ratings.Get(winners[0], "gt1").Mu > Rating.Default.Mu);
+        Assert.True(h.Ratings.Get(losers[0], "gt1").Mu < Rating.Default.Mu);
 
         // Players are no longer in match.
         foreach (var p in winners.Concat(losers))
@@ -297,7 +297,7 @@ public class MatchmakingEngineTests
             "duel",
             new MatchShape(2, 1),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2),
+            "gt2",
             () => new KillCountEndPolicy(3));
 
         h.Connect("A", "B", "C", "D");

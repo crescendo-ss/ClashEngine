@@ -80,6 +80,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private MatchLvzAdapter? _lvzAdapter;
     private MatchFreqAdvisor? _freqAdvisor;
     private IMatchUploader? _matchUploader;
+    private IGameTypeRegistrar? _gameTypeRegistrar;
     private ClashReplayRecorder? _replayRecorder;
 
     // Penalty-tracker memory grows unbounded without periodic pruning. Pruning on every 500 ms
@@ -308,6 +309,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         }
 
         _matchUploader = BuildMatchUploader(_replayRecorder);
+        _gameTypeRegistrar = BuildGameTypeRegistrar();
 
         Func<Guid, string?>? recordingPathLookup = _replayRecorder is not null
             ? (Func<Guid, string?>)(id => _replayRecorder.GetRecordingPath(id))
@@ -434,7 +436,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _zoneClashHandle = await _config.OpenConfigFileAsync(null, null, OnZoneClashChanged);
         if (_zoneClashHandle is not null)
         {
-            LoadZoneClashContribution();
+            await LoadZoneClashContributionAsync(cancellationToken).ConfigureAwait(false);
             _unregisterActions.Add(() =>
             {
                 _engine?.GameTypes.Remove(sourceArena: null);
@@ -521,7 +523,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             if (clashHandle is not null)
             {
                 _arenaClashHandles[arena] = clashHandle;
-                LoadArenaClashContribution(arena);
+                await LoadArenaClashContributionAsync(arena, cancellationToken).ConfigureAwait(false);
                 actions.Add(() => UnloadArenaClashContribution(arena));
             }
         }
@@ -562,6 +564,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // is cancelled before the broker tears down dependent interfaces.
         if (_matchUploader is IDisposable disposableUploader)
             disposableUploader.Dispose();
+        if (_gameTypeRegistrar is IDisposable disposableRegistrar)
+            disposableRegistrar.Dispose();
 
         // _matchRecorder.Unregister was already invoked via the _unregisterActions list during
         // PreUnloadAsync; here we only release the server interfaces it depended on.
@@ -592,6 +596,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _distanceSampler = null;
         _lvzAdapter = null;
         _matchUploader = null;
+        _gameTypeRegistrar = null;
         _replayRecorder = null;
 
         _log.LogM(LogLevel.Info, LogCategory, "ClashEngine unloaded.");
@@ -602,86 +607,161 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
 
     /// <summary>
     /// Parses the zone-wide <c>[ClashEngine]</c> section (from global.conf or anything
-    /// <c>#include</c>'d from it) and commits its game types to the engine. Game-type IDs are
-    /// bytes persisted by <c>PersistRatingStore</c>; collisions and ID changes-by-rename are
-    /// rejected and logged. On rejection, the previous zone contribution is preserved.
+    /// <c>#include</c>'d from it), POSTs each parsed gametype to the stats server via
+    /// <see cref="IGameTypeRegistrar"/>, and commits the accepted subset to the engine.
+    /// Rejected and unreachable gametypes are dropped with a warn so the registry contains
+    /// only stats-server-validated entries (fail-closed). On any rejection during the commit
+    /// step, the previous zone contribution is preserved.
     /// </summary>
-    private void LoadZoneClashContribution()
+    private async Task LoadZoneClashContributionAsync(CancellationToken ct)
     {
         if (_engine is null || _zoneClashHandle is null || _clashLog is null) return;
 
-        var parsed = MatchmakingConfig.ParseZoneGameTypes(_config, _zoneClashHandle, _clashLog);
-        if (!_engine.GameTypes.ReplaceArenaContribution(sourceArena: null, parsed, out var errors))
+        var parsed = MatchmakingConfig.ParseGameTypes(_config, _zoneClashHandle, _clashLog);
+        var accepted = await RegisterGameTypesAsync(
+            parsed, MatchmakingConfig.ZoneOriginArena, "global.conf [ClashEngine]", ct).ConfigureAwait(false);
+
+        var acceptedList = new List<GameTypeDef>(accepted.Values);
+        if (!_engine.GameTypes.ReplaceArenaContribution(sourceArena: null, acceptedList, out var errors))
         {
             foreach (var e in errors) _clashLog.Warn(LogCategory, $"global.conf [ClashEngine]: {e}");
             _clashLog.Warn(LogCategory, "global.conf [ClashEngine] rejected; prior zone-wide game types retained.");
             return;
         }
-        _clashLog.Info(LogCategory, $"global.conf [ClashEngine] loaded ({parsed.Count} zone-wide game type(s)).");
+        _clashLog.Info(LogCategory,
+            $"global.conf [ClashEngine] loaded ({acceptedList.Count} zone-wide game type(s) accepted of {parsed.Count} parsed).");
     }
 
     private void OnZoneClashChanged()
     {
-        // Host fires this on the mainloop thread. Re-parse and re-commit; failures leave the
-        // prior state intact (and log the reason).
-        try { LoadZoneClashContribution(); }
-        catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"OnZoneClashChanged failed: {ex}"); }
+        // Host fires this on the mainloop thread. The reload is async (HTTP POSTs to the
+        // stats server) so we fire-and-forget on the mainloop; a top-level catch ensures a
+        // failure here can't surface back into the config-change pipeline. Subsequent reloads
+        // serialize by virtue of the host raising change events sequentially.
+        _ = Task.Run(async () =>
+        {
+            try { await LoadZoneClashContributionAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"OnZoneClashChanged failed: {ex}"); }
+        });
     }
 
     /// <summary>
     /// Parses <paramref name="arena"/>'s <c>[ClashEngine]</c> contribution (from its arena.conf
-    /// document, including anything <c>#include</c>'d) and commits it. On a hot reload, queues
-    /// that are removed or significantly altered are drained first and each affected player is
-    /// sent a chat notice.
+    /// document, including anything <c>#include</c>'d), validates every parsed gametype with
+    /// the stats server, and commits the accepted gametypes + their queues. On a hot reload,
+    /// queues that are removed or significantly altered are drained first and each affected
+    /// player is sent a chat notice. Queues whose gametype was rejected/unreachable are
+    /// dropped at parse time -- they never reach the registry.
     /// </summary>
-    private void LoadArenaClashContribution(Arena arena)
+    private async Task LoadArenaClashContributionAsync(Arena arena, CancellationToken ct)
     {
         if (_engine is null || _clashLog is null) return;
         if (!_arenaClashHandles.TryGetValue(arena, out var handle)) return;
 
-        var contribution = MatchmakingConfig.ParseArenaContribution(_config, handle, arena.BaseName, _clashLog);
         string src = $"arena '{arena.BaseName}' [ClashEngine]";
 
-        // 1. Commit game types FIRST so the queue parser (already done above) and any later
-        //    lookups can resolve cross-references through GameTypes. A failure here aborts the
-        //    whole reload for this arena -- queues would reference unknown IDs otherwise.
-        var gameTypeList = new List<GameTypeDef>();
-        foreach (var g in contribution.GameTypes) gameTypeList.Add(g);
-        if (!_engine.GameTypes.ReplaceArenaContribution(arena.BaseName, gameTypeList, out var gtErrors))
+        // 1. Parse + register gametypes. Only the accepted subset reaches the queue parser.
+        var parsedGameTypes = MatchmakingConfig.ParseGameTypes(_config, handle, _clashLog);
+        var accepted = await RegisterGameTypesAsync(
+            parsedGameTypes, arena.BaseName, src, ct).ConfigureAwait(false);
+
+        var acceptedList = new List<GameTypeDef>(accepted.Values);
+        if (!_engine.GameTypes.ReplaceArenaContribution(arena.BaseName, acceptedList, out var gtErrors))
         {
             foreach (var e in gtErrors) _clashLog.Warn(LogCategory, $"{src}: {e}");
             _clashLog.Warn(LogCategory, $"{src} rejected; prior contribution retained.");
             return;
         }
 
-        // 2. Preview the queue diff so we can drain waiters BEFORE the registry swap. The
+        // 2. Parse queues against the accepted gametype dictionary. Queues that reference an
+        //    unaccepted gametype get a warn and are dropped here (rather than registered against
+        //    a phantom dependency).
+        var queues = MatchmakingConfig.ParseArenaQueues(_config, handle, arena.BaseName, accepted, _clashLog);
+
+        // 3. Preview the queue diff so we can drain waiters BEFORE the registry swap. The
         //    matcher's per-queue dequeue path requires the queue to still be registered, so we
         //    have to act on the old registry state.
         if (!_engine.Queues.TryComputeArenaContributionDiff(
-                arena.BaseName, contribution.Queues, out var wouldRemove, out var wouldAdd, out var qErrors))
+                arena.BaseName, queues, out var wouldRemove, out var wouldAdd, out var qErrors))
         {
             foreach (var e in qErrors) _clashLog.Warn(LogCategory, $"{src}: {e}");
             _clashLog.Warn(LogCategory, $"{src} queues rejected; prior queues retained.");
             return;
         }
 
-        // 3. Drain waiters from queues that will be removed or have their shape changed by the
+        // 4. Drain waiters from queues that will be removed or have their shape changed by the
         //    swap. Notify each surviving player via chat.
         var now = _clock!.UtcNow;
         DrainQueuesWithNotice(wouldRemove, now);
 
-        // 4. Apply the swap.
-        _engine.Queues.ApplyArenaContribution(arena.BaseName, contribution.Queues);
+        // 5. Apply the swap.
+        _engine.Queues.ApplyArenaContribution(arena.BaseName, queues);
 
         _clashLog.Info(LogCategory,
-            $"{src} loaded ({gameTypeList.Count} game type(s), " +
-            $"{contribution.Queues.Count} queue(s); +{wouldAdd.Count} -{wouldRemove.Count} since last load).");
+            $"{src} loaded ({acceptedList.Count} of {parsedGameTypes.Count} game type(s) accepted, " +
+            $"{queues.Count} queue(s); +{wouldAdd.Count} -{wouldRemove.Count} since last load).");
     }
 
     private void OnArenaClashChanged(Arena arena)
     {
-        try { LoadArenaClashContribution(arena); }
-        catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"OnArenaClashChanged({arena.Name}) failed: {ex}"); }
+        _ = Task.Run(async () =>
+        {
+            try { await LoadArenaClashContributionAsync(arena, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception ex) { _log.LogM(LogLevel.Error, LogCategory, $"OnArenaClashChanged({arena.Name}) failed: {ex}"); }
+        });
+    }
+
+    /// <summary>
+    /// POSTs every parsed gametype to <see cref="IGameTypeRegistrar"/> serially, returning a
+    /// name-keyed dictionary of the accepted subset. Rejected and unreachable gametypes are
+    /// logged at Warn and dropped. Serial (not fan-out) because operators rarely declare more
+    /// than a handful per arena and serial keeps log ordering deterministic for triage.
+    /// </summary>
+    private async Task<Dictionary<string, GameTypeDef>> RegisterGameTypesAsync(
+        IReadOnlyDictionary<string, GameTypeDef> parsed,
+        string originArena,
+        string sourceLabel,
+        CancellationToken ct)
+    {
+        var accepted = new Dictionary<string, GameTypeDef>(StringComparer.OrdinalIgnoreCase);
+        if (parsed.Count == 0 || _gameTypeRegistrar is null || _clashLog is null) return accepted;
+
+        foreach (var (name, def) in parsed)
+        {
+            var registration = new GameTypeRegistration(
+                Name: def.Name,
+                Label: def.Label,
+                Description: def.Description,
+                Metadata: def.Metadata,
+                OriginArena: originArena);
+
+            RegistrationResult result;
+            try { result = await _gameTypeRegistrar.TryRegisterAsync(registration, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _clashLog.Warn(LogCategory,
+                    $"{sourceLabel}: gametype '{name}' registration threw: {ex.Message}; dropped.");
+                continue;
+            }
+
+            switch (result.Status)
+            {
+                case RegistrationStatus.Accepted:
+                    accepted[name] = def;
+                    break;
+                case RegistrationStatus.Rejected:
+                    _clashLog.Warn(LogCategory,
+                        $"{sourceLabel}: gametype '{name}' rejected by stats server ({result.Detail}); dropped.");
+                    break;
+                case RegistrationStatus.Unreachable:
+                    _clashLog.Warn(LogCategory,
+                        $"{sourceLabel}: gametype '{name}' unreachable ({result.Detail}); dropped this reload, will retry on next load.");
+                    break;
+            }
+        }
+
+        return accepted;
     }
 
     /// <summary>
@@ -783,5 +863,28 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _log.LogM(LogLevel.Info, LogCategory,
             $"Match uploads not configured (UploadUrl/UploadApiKey unset); falling back to JSON files in {matchesDir}.");
         return new JsonFileMatchUploader(matchesDir, _log);
+    }
+
+    /// <summary>
+    /// Picks the gametype-registration sink based on config. With both <c>UploadUrl</c> and
+    /// <c>UploadApiKey</c> set, derives the gametype URL from the match-upload URL (replacing
+    /// <c>/matches</c> with <c>/gametypes</c>) and returns an HTTP registrar against it.
+    /// Without an <c>UploadUrl</c> the policy is fail-closed: every gametype is reported
+    /// <see cref="RegistrationStatus.Unreachable"/> and dropped, since there's no stats server
+    /// to validate against. (The match-upload path keeps its own JSON-file fallback for
+    /// operators who still want local match envelopes.)
+    /// </summary>
+    private IGameTypeRegistrar BuildGameTypeRegistrar()
+    {
+        var url = _config.GetStr(_config.Global, "ClashEngine", "UploadUrl");
+        var apiKey = _config.GetStr(_config.Global, "ClashEngine", "UploadApiKey");
+        var registrationUrl = HttpGameTypeRegistrar.DeriveRegistrationUrl(url);
+        if (!string.IsNullOrWhiteSpace(registrationUrl) && !string.IsNullOrWhiteSpace(apiKey))
+        {
+            _log.LogM(LogLevel.Info, LogCategory,
+                $"Gametype registration enabled -> POST {registrationUrl}");
+            return new HttpGameTypeRegistrar(registrationUrl, apiKey, _log);
+        }
+        return new NoStatsServerGameTypeRegistrar(_log);
     }
 }

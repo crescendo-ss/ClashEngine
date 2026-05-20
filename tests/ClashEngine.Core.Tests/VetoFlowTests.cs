@@ -35,7 +35,7 @@ public class VetoFlowTests
                 "4v4",
                 new MatchShape(2, 4),
                 new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-                new GameTypeId(1),
+                "gt1",
                 () => new KillCountEndPolicy(3),
                 () => new TeamkillThresholdHeuristic(teamkillThreshold),
                 vetoesRequired,

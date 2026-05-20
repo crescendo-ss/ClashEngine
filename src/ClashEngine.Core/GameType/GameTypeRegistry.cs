@@ -10,20 +10,27 @@ namespace ClashEngine.Core.GameType;
 /// contribution when the arena is detached.
 /// </summary>
 /// <remarks>
-/// <para>Collision rules ("force globally unique names" policy):</para>
+/// <para>Identity is the gametype <see cref="GameTypeDef.Name"/> string -- the same identifier
+/// the stats server accepts via the <c>gametype</c> POST and the <c>match.gameType</c> field
+/// on the v5 match-upload schema. There is no separate numeric id.</para>
+///
+/// <para>Collision rules:</para>
 /// <list type="bullet">
-///   <item>Two contributions with the same name AND same byte <c>Id</c> AND same source: idempotent (no-op).</item>
-///   <item>Two contributions with the same name but different byte <c>Id</c>: rejected.</item>
-///   <item>Two contributions with the same byte <c>Id</c> but different names: rejected.</item>
-///   <item>A reload that attempts to change an existing entry's byte <c>Id</c> is rejected, because
-///         the <c>Id</c> is persisted as a key in the ratings store -- silently renumbering would
-///         orphan historical rating rows.</item>
+///   <item>Two contributions with the same name from the same source: idempotent (no-op).</item>
+///   <item>Two contributions with the same name from different sources: rejected with an
+///         error -- the first contribution wins, the loser must rename.</item>
+///   <item>An incoming set with duplicate names within itself: rejected.</item>
 /// </list>
 ///
-/// <para>All mutations go through <see cref="ReplaceArenaContribution"/>, which performs validation
-/// against the projected post-swap state (excluding the source's existing contribution) and either
-/// commits atomically or leaves the registry unchanged with a returned error list. This means a
-/// failed hot reload never leaves the registry in a torn state.</para>
+/// <para>The "id change rejection" rule that used to live here is gone with <c>GameTypeId</c>:
+/// stats persistence is now keyed by the name string, and the stats server is the source of
+/// truth for versioning. A rename in conf is treated the same way as a new gametype on the
+/// server side -- the operator must POST it with its original arena to keep its rating rows.</para>
+///
+/// <para>All mutations go through <see cref="ReplaceArenaContribution"/>, which performs
+/// validation against the projected post-swap state (excluding the source's existing
+/// contribution) and either commits atomically or leaves the registry unchanged with a
+/// returned error list. A failed hot reload never leaves the registry in a torn state.</para>
 /// </remarks>
 public sealed class GameTypeRegistry
 {
@@ -76,71 +83,30 @@ public sealed class GameTypeRegistry
 
         var errorList = new List<string>();
 
-        // 1. Internal consistency: no duplicate names or duplicate IDs within the incoming set.
+        // 1. Internal consistency: no duplicate names within the incoming set.
         var byNameIncoming = new Dictionary<string, GameTypeDef>(StringComparer.OrdinalIgnoreCase);
-        var byIdIncoming = new Dictionary<uint, GameTypeDef>();
         for (int i = 0; i < newDefs.Count; i++)
         {
             var d = newDefs[i];
-            if (byNameIncoming.TryGetValue(d.Name, out var dupName))
+            if (byNameIncoming.ContainsKey(d.Name))
             {
-                if (dupName.Id != d.Id)
-                    errorList.Add($"GameType '{d.Name}' appears twice in {SourceLabel(sourceArena)} with different IDs ({dupName.Id} vs {d.Id}).");
+                errorList.Add($"GameType '{d.Name}' appears twice in {SourceLabel(sourceArena)}.");
                 continue;
             }
             byNameIncoming[d.Name] = d;
-            if (byIdIncoming.TryGetValue(d.Id, out var dupId))
-            {
-                errorList.Add($"GameType Id={d.Id} used by both '{dupId.Name}' and '{d.Name}' in {SourceLabel(sourceArena)}.");
-                continue;
-            }
-            byIdIncoming[d.Id] = d;
         }
 
-        // 2. Validate against entries owned by OTHER sources (this source's existing entries are
-        //    about to be replaced, so they don't conflict with themselves).
-        foreach (var existing in _byName)
-        {
-            string existingSource = _sourceByName.TryGetValue(existing.Key, out var s) ? (s ?? string.Empty) : string.Empty;
-            bool isOurs = NullableStringEquals(s: existingSource == string.Empty ? null : existingSource, t: sourceArena);
-            if (isOurs) continue;
-
-            // Name collision: another source owns this name. Whatever Id we propose, this is rejected.
-            if (byNameIncoming.TryGetValue(existing.Key, out var incomingForName))
-            {
-                errorList.Add(
-                    $"GameType '{existing.Value.Name}' is already defined by {SourceLabel(existing.Value, _sourceByName[existing.Key])}; " +
-                    $"{SourceLabel(sourceArena)} attempted to redefine it (Id={incomingForName.Id}).");
-            }
-        }
-        // Id collisions against entries owned by other sources.
+        // 2. Name collision against entries owned by OTHER sources. This source's own existing
+        //    entries are about to be replaced, so they don't conflict with themselves.
         foreach (var existing in _byName)
         {
             string? existingSource = _sourceByName.TryGetValue(existing.Key, out var s) ? s : null;
-            bool isOurs = NullableStringEquals(existingSource, sourceArena);
-            if (isOurs) continue;
-            if (byIdIncoming.TryGetValue(existing.Value.Id, out var incomingForId)
-                && !string.Equals(incomingForId.Name, existing.Value.Name, StringComparison.OrdinalIgnoreCase))
+            if (NullableStringEquals(existingSource, sourceArena)) continue;
+            if (byNameIncoming.ContainsKey(existing.Key))
             {
                 errorList.Add(
-                    $"GameType Id={existing.Value.Id} is already used by '{existing.Value.Name}' (owned by {SourceLabel(existing.Value, existingSource)}); " +
-                    $"{SourceLabel(sourceArena)} attempted to assign it to '{incomingForId.Name}'.");
-            }
-        }
-
-        // 3. Persistence safety: an entry owned by THIS source that survives the replace must keep
-        //    its byte Id. If the operator renamed an Id under the same game-type name, reject --
-        //    PersistRatingStore keys by Id, so silently renumbering would orphan rating rows.
-        foreach (var kvp in _byName)
-        {
-            string? existingSource = _sourceByName.TryGetValue(kvp.Key, out var s) ? s : null;
-            if (!NullableStringEquals(existingSource, sourceArena)) continue;
-            if (byNameIncoming.TryGetValue(kvp.Key, out var incoming) && incoming.Id != kvp.Value.Id)
-            {
-                errorList.Add(
-                    $"GameType '{kvp.Value.Name}' Id change rejected: was {kvp.Value.Id}, would become {incoming.Id}. " +
-                    $"Rating data is keyed by Id; changing it would orphan historical rows. " +
-                    $"To re-number safely, rename the game type as well.");
+                    $"GameType '{existing.Value.Name}' is already defined by {SourceLabel(existingSource)}; " +
+                    $"{SourceLabel(sourceArena)} attempted to redefine it.");
             }
         }
 
@@ -150,7 +116,7 @@ public sealed class GameTypeRegistry
             return false;
         }
 
-        // 4. Commit: remove this source's previous entries, then add the new ones.
+        // 3. Commit: remove this source's previous entries, then add the new ones.
         var toRemove = new List<string>();
         foreach (var kvp in _sourceByName)
             if (NullableStringEquals(kvp.Value, sourceArena)) toRemove.Add(kvp.Key);
@@ -196,6 +162,4 @@ public sealed class GameTypeRegistry
 
     private static string SourceLabel(string? sourceArena) =>
         sourceArena is null ? "global.conf [ClashEngine] (zone-wide)" : $"arena '{sourceArena}' [ClashEngine]";
-
-    private static string SourceLabel(GameTypeDef def, string? sourceArena) => SourceLabel(sourceArena);
 }

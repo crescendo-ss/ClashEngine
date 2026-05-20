@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clashengine.dev/schema/rating.schema.json",
+  "title": "Rating",
+  "description": "Request body for PUT /api/players/{name}/rating?gameType={gameType}. Used by the game server to push a single (player, gameType) rating back to the stats server — the backup channel for when the primary path (match envelopes) is missed or delayed. The consumer's stats server is eventually-consistent: it stores match envelopes when received, accepts pushes when received, and uses `updatedAt` to discard out-of-order writes (an older push never clobbers a newer match-ingest result).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mu", "sigma", "gamesPlayed", "updatedAt"],
+  "properties": {
+    "mu": {
+      "type": "number",
+      "description": "OpenSkill mean estimate at updatedAt."
+    },
+    "sigma": {
+      "type": "number",
+      "minimum": 0,
+      "description": "OpenSkill standard deviation at updatedAt."
+    },
+    "gamesPlayed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of games played in this gameType through updatedAt."
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Game-server-local timestamp when this rating was last updated. The consumer compares against its stored row and only writes when this is newer; older pushes return 200 with accepted=false."
+    }
+  }
+}

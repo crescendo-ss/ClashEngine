@@ -18,8 +18,8 @@
   "properties": {
     "schemaVersion": {
       "type": "integer",
-      "const": 4,
-      "description": "Wire format version. Increment on any breaking change. v4 added life.shipAtEnd."
+      "const": 5,
+      "description": "Wire format version. Increment on any breaking change. v5 made gameType a registry-name string (was integer) and added participant.ratingAtEnd."
     },
     "matchId": {
       "type": "string",
@@ -35,9 +35,11 @@
       "description": "Operator-chosen pretty string for display (e.g. \"4v4 (Casual)\"). Falls back to the BaseName portion of queueName when no Label is set in clash.conf."
     },
     "gameType": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Game-type identifier from the queue definition."
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "GameType identifier (registry name). The consumer resolves the name to a specific GameType version at ingest time and stamps the resolved version on the stored match record."
     },
     "arena": {
       "type": ["string", "null"],
@@ -160,6 +162,10 @@
         "ratingAtStart": {
           "anyOf": [{ "$ref": "#/$defs/rating" }, { "type": "null" }],
           "description": "Player's rating at the moment the match started, frozen here so the upload reflects pre-match skill (the live store updates on outcome)."
+        },
+        "ratingAtEnd": {
+          "anyOf": [{ "$ref": "#/$defs/rating" }, { "type": "null" }],
+          "description": "Player's rating after the match was finalized. The receiving store uses this as the canonical post-match value (no μ/σ derivation on the consumer side). Null when either pre-match or post-match rating is unavailable (e.g. cancelled match, unranked participant, or a participant the engine never tracked)."
         },
         "ratingChange": {
           "type": ["number", "null"],

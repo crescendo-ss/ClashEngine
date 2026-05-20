@@ -10,6 +10,7 @@ public class ScoreboardFormatterTests
         var beacon = new PlayerStatsPayload(
             Name: "Beacon", TeamIndex: 0,
             RatingAtStart: new RatingPayload(Mu: 25.0, Sigma: 8.333, GamesPlayed: 10),
+            RatingAtEnd: null,
             RatingChange: null,
             Kills: 8, Deaths: 3, Knockouts: 2, Assists: 3, Teamkills: 0,
             DamageDealt: 6357, DamageTaken: 17836, SelfDamage: 0,
@@ -30,6 +31,7 @@ public class ScoreboardFormatterTests
         var jolt = new PlayerStatsPayload(
             Name: "Jolt", TeamIndex: 0,
             RatingAtStart: new RatingPayload(Mu: 22.0, Sigma: 7.0, GamesPlayed: 5),
+            RatingAtEnd: null,
             RatingChange: null,
             Kills: 12, Deaths: 4, Knockouts: 1, Assists: 0, Teamkills: 1,
             DamageDealt: 7655, DamageTaken: 15643,
@@ -52,7 +54,7 @@ public class ScoreboardFormatterTests
         };
 
         return new MatchPayload(
-            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: 1,
+            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: "gt1",
             Arena: "test", StartedAt: System.DateTimeOffset.UtcNow,
             EndedAt: System.DateTimeOffset.UtcNow,
             FinalState: "Completed", Teams: teams,
@@ -109,7 +111,7 @@ public class ScoreboardFormatterTests
         var alpha = MakeStub("Alpha");
         var bravo = MakeStub("Bravo");
         var payload = new MatchPayload(
-            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: 1,
+            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: "gt1",
             Arena: "test", StartedAt: System.DateTimeOffset.UtcNow,
             EndedAt: System.DateTimeOffset.UtcNow,
             FinalState: "Completed", Teams: new[] { team1, team2 },
@@ -142,7 +144,7 @@ public class ScoreboardFormatterTests
         var team3 = new RankedTeamPayload(Rank: 3, Score: 2, Players: new[] { "Cobra" });
 
         var payload = new MatchPayload(
-            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: 1,
+            SchemaVersion: MatchExporter.CurrentSchemaVersion, MatchId: System.Guid.NewGuid(), QueueName: "test", QueueLabel: null, GameType: "gt1",
             Arena: "test", StartedAt: System.DateTimeOffset.UtcNow,
             EndedAt: System.DateTimeOffset.UtcNow,
             FinalState: "Completed", Teams: new[] { team1, team2, team3 },
@@ -160,7 +162,7 @@ public class ScoreboardFormatterTests
 
     private static PlayerStatsPayload MakeStub(string name) => new(
         Name: name, TeamIndex: 0,
-        RatingAtStart: null, RatingChange: null,
+        RatingAtStart: null, RatingAtEnd: null, RatingChange: null,
         Kills: 0, Deaths: 0, Knockouts: 0, Assists: 0, Teamkills: 0,
         DamageDealt: 0, DamageTaken: 0, SelfDamage: 0,
         TeamDamageDealt: 0, TeamDamageTaken: 0,

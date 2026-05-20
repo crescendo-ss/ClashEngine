@@ -12,7 +12,7 @@ public class EarlyExitHeuristicTests
     private static ActiveMatch BuildAndStart(int lives, DateTimeOffset startedAt)
     {
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },
@@ -35,7 +35,7 @@ public class EarlyExitHeuristicTests
     public void No_lives_configured_means_no_flags()
     {
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },
@@ -117,7 +117,7 @@ public class EarlyExitHeuristicTests
         // KillCountEndPolicy(100) is too high; just kill 100 times for D... actually let's use a low end policy.
         // We can build a separate match here for the fractional check.
         var m2 = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },

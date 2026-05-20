@@ -56,14 +56,13 @@ internal static class GameTypeParser
             return null;
         }
 
-        int rawId = config.GetInt(handle, ConfigConstants.Section, p + "Id", index);
-        if (rawId < 0)
-        {
-            log?.Warn(ConfigConstants.LogCategory,
-                $"{p}Id={rawId} must be non-negative; skipping game type '{name}'.");
-            return null;
-        }
-        uint id = (uint)rawId;
+        // Label/Description ride along on the stats-server registration POST and are stored
+        // version-frozen by the consumer. We default Label to Name so an operator who never
+        // sets one still gets a sane display string; Description is nullable per the schema.
+        var label = config.GetStr(handle, ConfigConstants.Section, p + "Label");
+        if (string.IsNullOrWhiteSpace(label)) label = name;
+        var description = config.GetStr(handle, ConfigConstants.Section, p + "Description");
+        if (string.IsNullOrWhiteSpace(description)) description = null;
 
         int teamCount = config.GetInt(handle, ConfigConstants.Section, p + "TeamCount", 2);
         if (teamCount < 2)
@@ -117,8 +116,16 @@ internal static class GameTypeParser
 
         var shipBySlot = ShipBySlotParser.Read(config, handle, p, teamCount, perTeam, log);
 
+        // Auto-derive the metadata blob from the resolved shape. The stats server stores this
+        // verbatim with the gametype version; downstream consumers (scoreboards, dashboards)
+        // read teamCount / teamSizes / livesPerPlayer from here. Operators don't see a
+        // GameType<i>Metadata conf key -- if asymmetric teams ever land, this is where they
+        // would lift the uniform assumption.
+        var metadata = GameTypeMetadata.Uniform(teamCount, perTeam, lives);
+
         return new GameTypeDef(
-            name, id, teamCount, perTeam, killTarget, lives, timeLimit,
+            name, label!, description, metadata,
+            teamCount, perTeam, killTarget, lives, timeLimit,
             spawnSetByTeam, maxDrift, warpOnSpawn,
             stagingDuration, countdownDuration, knockoutSpecDelay,
             teamCollapseGrace, shipBySlot, shipChangeGracePeriod,
@@ -176,7 +183,7 @@ internal static class GameTypeParser
             : string.Join(", ", ShipBySlotParser.Describe(def.ShipBySlot));
 
         log.Debug(ConfigConstants.LogCategory,
-            $"GameType '{def.Name}' parsed: Id={def.Id}, TeamCount={def.TeamCount}, PlayersPerTeam={def.PlayersPerTeam}, " +
+            $"GameType '{def.Name}' parsed: Label='{def.Label}', TeamCount={def.TeamCount}, PlayersPerTeam={def.PlayersPerTeam}, " +
             $"KillTarget={(def.KillTarget > 0 ? def.KillTarget.ToString() : "0 (unset)")}, " +
             $"TimeLimit={(def.TimeLimit is { } tl ? tl.ToString() : "(unset)")}, " +
             $"Lives={(def.Lives > 0 ? def.Lives.ToString() : "0 (unlimited)")}, " +

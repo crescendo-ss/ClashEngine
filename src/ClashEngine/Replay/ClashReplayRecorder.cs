@@ -217,7 +217,7 @@ public sealed class ClashReplayRecorder : IMatchmakingTelemetry, IMatchChatRecor
         // creation off the mainloop and log on failure -- no syscall here.
 
         string filePath = Path.Combine(_recordingDir, $"{match.MatchId:N}.replay");
-        string comments = $"ClashEngine match {match.MatchId:N}; queue={queue.UniqueId}; gameType={match.GameType.Value}; arena={arenaName}";
+        string comments = $"ClashEngine match {match.MatchId:N}; queue={queue.UniqueId}; gameType={match.GameType}; arena={arenaName}";
 
         var session = _recorder.StartRecording(arena, filePath, comments, recorder: null);
         if (session is null)

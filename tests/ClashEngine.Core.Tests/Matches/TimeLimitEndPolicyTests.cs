@@ -11,7 +11,7 @@ public class TimeLimitEndPolicyTests
     private static ActiveMatch StartedMatch(IMatchEndPolicy policy)
     {
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },
@@ -116,7 +116,7 @@ public class TimeLimitEndPolicyTests
         // Build a match but don't transition any player to Active -- StartedAt is null.
         var policy = new TimeLimitEndPolicy(TimeSpan.FromMinutes(20));
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A") },

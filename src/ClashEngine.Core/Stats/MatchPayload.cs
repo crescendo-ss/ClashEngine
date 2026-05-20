@@ -10,15 +10,17 @@ namespace ClashEngine.Core.Stats;
 /// <see cref="IMatchUploader"/>.
 /// </summary>
 /// <remarks>
-/// <see cref="SchemaVersion"/> identifies the wire format (currently 1). Increment on any
-/// breaking change to the schema document under <c>schema/match.schema.json</c>.
+/// <see cref="SchemaVersion"/> identifies the wire format (currently 5). v5 made
+/// <see cref="GameType"/> a registry-name string (was integer) and added
+/// <see cref="PlayerStatsPayload.RatingAtEnd"/>. Increment on any breaking change to the
+/// schema document under <c>schema/match.schema.json</c>.
 /// </remarks>
 public sealed record MatchPayload(
     int SchemaVersion,
     Guid MatchId,
     string? QueueName,
     string? QueueLabel,
-    uint GameType,
+    string GameType,
     string? Arena,
     DateTimeOffset? StartedAt,
     DateTimeOffset EndedAt,
@@ -34,6 +36,7 @@ public sealed record PlayerStatsPayload(
     string Name,
     int TeamIndex,
     RatingPayload? RatingAtStart,
+    RatingPayload? RatingAtEnd,
     double? RatingChange,
     int Kills,
     int Deaths,

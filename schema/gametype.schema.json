@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clashengine.dev/schema/gametype.schema.json",
+  "title": "GameType",
+  "description": "Request body for the consumer's POST /api/gametypes endpoint. Zone modules call this to register or update a GameType in the persistent stats store. First POST for a name creates a v1 record and locks in `originArena` permanently; subsequent POSTs append a new version (label/description/metadata are frozen per-version) but must repeat the same originArena or the consumer rejects them with 403. The consumer stamps a server-assigned version (1, 2, 3…) on each accepted POST; clients do not pick the version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "label", "originArena"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Registry identifier. Same character class as match.gameType. Stable across versions of the same logical gametype."
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Human-readable display name (e.g. \"4v4 (Competitive)\"). Frozen on the version it is posted with; matches keep showing the label of the version they were played under."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "maxLength": 1000,
+      "description": "Optional long-form description. Frozen per-version."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Free-form per-version metadata. Conventional shape: { teamCount: integer, teamSizes: integer[], livesPerPlayer: integer[][]|null }, but the consumer stores the blob verbatim without enforcing its inner structure.",
+      "additionalProperties": true
+    },
+    "originArena": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Arena this POST originates from. For a new name, becomes the immutable origin recorded against the gametype. For existing names, must equal the recorded origin or the request is rejected. The consumer trusts this declaration the same way it trusts match.arena in the match envelope (shared X-Api-Key auth)."
+    }
+  }
+}

@@ -41,7 +41,12 @@ internal sealed class ClashMatchConfiguration : IMatchConfiguration
         _boxes = new IMatchBoxConfiguration[] { new ClashMatchBoxConfiguration() };
     }
 
-    public long? GameTypeId => _match.GameType.Value;
+    // SS.Matchmaking's IMatchConfiguration.GameTypeId is a long? key used by its rating /
+    // history modules; ClashEngine's gametype identifier is a registry-name string with no
+    // stable integer mapping, and the MatchLvz / MatchFocus consumption graph never reads
+    // this property. Returning null surfaces "unset" rather than fabricating an id collision
+    // against another module's space.
+    public long? GameTypeId => null;
     public int NumTeams => _queue.Shape.TeamCount;
     public int PlayersPerTeam => _queue.Shape.PlayersPerTeam;
     public int LivesPerPlayer => _match.LivesPerPlayer ?? 0;

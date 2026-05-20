@@ -7,7 +7,7 @@ namespace ClashEngine.Core.Tests.Ratings;
 public class RatingUpdaterTests
 {
     private static PlayerKey K(string n) => new(n);
-    private static readonly GameTypeId G = new(1);
+    private const string G = "gt1";
     private static readonly DateTimeOffset T0 = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
@@ -163,7 +163,7 @@ public class RatingUpdaterTests
     public void Different_game_types_are_isolated()
     {
         var store = new InMemoryRatingStore();
-        var g2 = new GameTypeId(2);
+        const string g2 = "gt2";
         store.Set(K("A"), G, new Rating(25, 8.33, 0, default));
         store.Set(K("A"), g2, new Rating(40, 1.0, 100, default));  // unrelated
         store.Set(K("B"), G, Rating.Default);

@@ -23,7 +23,7 @@ public class ActiveMatchTests
         };
         return new ActiveMatch(
             Guid.NewGuid(),
-            new GameTypeId(1),
+            "gt1",
             teams,
             endPolicy ?? new KillCountEndPolicy(targetKills: 5),
             joinTimeout ?? TimeSpan.FromMinutes(1),

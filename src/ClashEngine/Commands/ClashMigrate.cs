@@ -15,8 +15,10 @@ namespace ClashEngine.Commands;
 ///   <item>Each <c>Queue&lt;N&gt;MatchArena</c> becomes a separate
 ///         <c>arenas/{MatchArena}/clash.conf</c> block.</item>
 /// </list>
-/// Queue <c>Id</c> bytes are preserved exactly so the on-disk ratings store (keyed by
-/// <c>GameTypeId</c>) is not invalidated by the move.
+/// The legacy <c>GameType&lt;i&gt;Id</c> bytes are intentionally NOT emitted -- as of the
+/// gametype-registration handoff to the stats server the local engine no longer has a
+/// numeric id concept; identity is the gametype name string, and the stats server is the
+/// source of truth for versioning.
 /// </summary>
 /// <remarks>
 /// Deliberately print-only: the operator pastes the output into the target files themselves.
@@ -30,7 +32,8 @@ internal static class ClashMigrate
     /// they appear in the output block, so it matches the documented schema.</summary>
     private static readonly string[] GameTypeKeys = new[]
     {
-        "Name", "Id", "TeamCount", "PlayersPerTeam", "KillTarget", "TimeLimit", "Lives",
+        "Name", "Label", "Description",
+        "TeamCount", "PlayersPerTeam", "KillTarget", "TimeLimit", "Lives",
         "WarpOnSpawn",
         "Team1Spawns", "Team2Spawns", "Team3Spawns", "Team4Spawns",
         "Team1Ships", "Team2Ships", "Team3Ships", "Team4Ships",

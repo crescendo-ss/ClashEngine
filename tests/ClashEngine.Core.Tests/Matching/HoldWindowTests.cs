@@ -29,7 +29,7 @@ public class HoldWindowTests
                 "2v2",
                 new MatchShape(2, 2),
                 new PartitionQualityPolicy(0.4, 0.1, TimeSpan.FromSeconds(60)),
-                new GameTypeId(1),
+                "gt1",
                 lookAheadWindow: lookAhead,
                 holdWindow: holdWindow,
                 qualityCeiling: qualityCeiling);

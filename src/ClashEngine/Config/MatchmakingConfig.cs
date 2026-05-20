@@ -10,16 +10,23 @@ namespace ClashEngine.Config;
 
 /// <summary>
 /// Parses the <c>[ClashEngine]</c> section from a SubspaceServer config document (either an
-/// arena.conf or global.conf, plus everything <c>#include</c>'d from it) and produces a
-/// <see cref="ClashContribution"/> that <see cref="ClashModule"/> can commit to the engine
-/// registries. The actual file the section sits in is irrelevant -- the host resolves keys
-/// across the whole document, so operators can split <c>[ClashEngine]</c> across includes.
+/// arena.conf or global.conf, plus everything <c>#include</c>'d from it) and produces
+/// gametype + queue definitions that <see cref="ClashModule"/> can commit to the engine
+/// registries.
 /// </summary>
 /// <remarks>
 /// <para>This file is the orchestrator -- it reads <c>QueueCount</c>, delegates game-type
 /// parsing to <see cref="GameTypeParser"/>, and parses each queue via
-/// <see cref="QueueParser"/>. The actual parsing logic, the <see cref="GameTypeDef"/> record,
-/// and the per-key validation live in the sibling files in this directory.</para>
+/// <see cref="QueueParser"/>. The actual parsing logic, the <see cref="GameTypeDef"/>
+/// record, and the per-key validation live in the sibling files in this directory.</para>
+///
+/// <para>The two-phase split (game types first, then queues against an accepted set) exists
+/// so <see cref="ClashModule"/> can POST each parsed gametype to the stats server via
+/// <see cref="IGameTypeRegistrar"/> before committing anything to the engine. The stats
+/// server's accept/reject decision is the gate: only accepted gametypes appear in the local
+/// <see cref="GameTypeRegistry"/>, and only queues whose gametype was accepted appear in
+/// <see cref="QueueRegistry"/>. Queues that reference a rejected (or unreachable) gametype
+/// are dropped with a warn rather than registered against a phantom dependency.</para>
 ///
 /// <para>Validation: every value is sanity-checked. Bad values (negative lives, unknown
 /// preset, missing game-type reference, etc.) are logged at Warn and either skipped or
@@ -31,7 +38,8 @@ namespace ClashEngine.Config;
 /// [ClashEngine]
 /// GameTypeCount = 1
 /// GameType1Name           = elimination_3v3
-/// GameType1Id             = 1
+/// GameType1Label          = 3v3 Elimination
+/// GameType1Description    = First team to 30 kills or last team standing.
 /// GameType1TeamCount      = 2
 /// GameType1PlayersPerTeam = 3
 /// GameType1KillTarget     = 30
@@ -60,53 +68,50 @@ namespace ClashEngine.Config;
 public static class MatchmakingConfig
 {
     /// <summary>
-    /// Parses an arena's <c>[ClashEngine]</c> contribution from its arena.conf document handle
-    /// (which transparently resolves keys across any <c>#include</c>'d files). Both the game
-    /// types and the queues are owned by <paramref name="ownerArenaName"/>; queues' canonical
-    /// <see cref="QueueDefinition.UniqueId"/> is qualified with the owner so two arenas can
-    /// each declare a queue named e.g. "3v3comp" without collision. Returns an empty
-    /// contribution if the section declares no game types or no queues.
+    /// Sentinel <c>originArena</c> used when posting a zone-wide gametype (one declared in
+    /// global.conf rather than per-arena). The stats server still records an origin string;
+    /// every zone-wide POST uses this constant so subsequent reloads address the same
+    /// gametype-origin tuple.
     /// </summary>
-    public static ClashContribution ParseArenaContribution(
+    public const string ZoneOriginArena = "(zone)";
+
+    /// <summary>
+    /// Reads the <c>GameType&lt;i&gt;</c> blocks from <paramref name="handle"/> (arena or
+    /// zone scope) and returns the parsed defs as a name-keyed dictionary. No engine state
+    /// is touched; the caller is responsible for registering each def with the stats server
+    /// and then committing the accepted subset.
+    /// </summary>
+    public static Dictionary<string, GameTypeDef> ParseGameTypes(
+        IConfigManager config, ConfigHandle handle, ClashLog? log) =>
+        GameTypeParser.ReadAll(config, handle, log);
+
+    /// <summary>
+    /// Reads the <c>Queue&lt;i&gt;</c> blocks from an arena's <paramref name="handle"/> and
+    /// builds the queue list. Queues whose <c>Queue&lt;i&gt;GameType</c> is not present in
+    /// <paramref name="acceptedGameTypes"/> are dropped with a warn -- the gametype either
+    /// failed parsing, failed stats-server registration, or was rejected. <paramref name="acceptedGameTypes"/>
+    /// is the post-registration filtered dictionary, NOT the raw parse output.
+    /// </summary>
+    public static IReadOnlyList<QueueDefinition> ParseArenaQueues(
         IConfigManager config,
         ConfigHandle handle,
         string ownerArenaName,
+        IReadOnlyDictionary<string, GameTypeDef> acceptedGameTypes,
         ClashLog? log)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(handle);
         ArgumentException.ThrowIfNullOrEmpty(ownerArenaName);
-
-        var gameTypes = GameTypeParser.ReadAll(config, handle, log);
+        ArgumentNullException.ThrowIfNull(acceptedGameTypes);
 
         int queueCount = config.GetInt(handle, ConfigConstants.Section, "QueueCount", 0);
         var queues = new List<QueueDefinition>();
         for (int i = 1; i <= queueCount; i++)
         {
-            if (QueueParser.ParseOne(config, handle, i, ownerArenaName, gameTypes, log) is { } def)
+            if (QueueParser.ParseOne(config, handle, i, ownerArenaName, acceptedGameTypes, log) is { } def)
                 queues.Add(def);
         }
-
-        return new ClashContribution(ownerArenaName, gameTypes.Values, queues);
-    }
-
-    /// <summary>
-    /// Parses the zone-wide <c>[ClashEngine]</c> section from global.conf (or anything
-    /// <c>#include</c>'d from it). Only game types are read at zone scope -- queues without an
-    /// owning arena have no addressable home under the per-arena model.
-    /// </summary>
-    public static IReadOnlyList<GameTypeDef> ParseZoneGameTypes(
-        IConfigManager config,
-        ConfigHandle handle,
-        ClashLog? log)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(handle);
-
-        var dict = GameTypeParser.ReadAll(config, handle, log);
-        var list = new List<GameTypeDef>(dict.Count);
-        foreach (var v in dict.Values) list.Add(v);
-        return list;
+        return queues;
     }
 
     /// <summary>
@@ -121,12 +126,3 @@ public static class MatchmakingConfig
         return config.GetStr(arenaConf, ConfigConstants.Section, "DefaultQueue");
     }
 }
-
-/// <summary>
-/// Bundle of definitions parsed from one arena's <c>[ClashEngine]</c> section. Passed to
-/// <see cref="ClashModule"/> for atomic commit into the engine registries.
-/// </summary>
-public sealed record ClashContribution(
-    string OwnerArenaName,
-    IEnumerable<GameTypeDef> GameTypes,
-    IReadOnlyList<QueueDefinition> Queues);

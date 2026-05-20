@@ -38,7 +38,7 @@ public sealed class ActiveMatch
 
     public ActiveMatch(
         Guid matchId,
-        GameTypeId gameType,
+        string gameType,
         IReadOnlyList<IReadOnlyList<PlayerKey>> teams,
         IMatchEndPolicy endPolicy,
         TimeSpan joinTimeout,
@@ -47,6 +47,7 @@ public sealed class ActiveMatch
         int? livesPerPlayer = null,
         TimeSpan? teamCollapseGrace = null)
     {
+        ArgumentException.ThrowIfNullOrEmpty(gameType);
         ArgumentNullException.ThrowIfNull(teams);
         ArgumentNullException.ThrowIfNull(endPolicy);
         if (teams.Count < 2)
@@ -92,7 +93,13 @@ public sealed class ActiveMatch
     }
 
     public Guid MatchId { get; }
-    public GameTypeId GameType { get; }
+
+    /// <summary>
+    /// Registry name of the game type (matches <see cref="GameTypeDef.Name"/>). Threaded
+    /// through to <see cref="MatchOutcome.GameType"/> and the v5 upload envelope's
+    /// <c>match.gameType</c> string.
+    /// </summary>
+    public string GameType { get; }
     public IReadOnlyList<IReadOnlyList<PlayerKey>> Teams { get; }
     public MatchState State { get; private set; }
     public DateTimeOffset ProposedAt { get; }

@@ -41,7 +41,7 @@ public class EliminationCooldownTests
                 "2v2",
                 new MatchShape(2, 2),
                 new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-                new GameTypeId(1),
+                "gt1",
                 () => new KillCountEndPolicy(1000),     // never end on kills alone
                 vetoesRequired: 1);
 
@@ -49,7 +49,7 @@ public class EliminationCooldownTests
                 "duel",
                 new MatchShape(2, 1),
                 new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-                new GameTypeId(2),
+                "gt2",
                 () => new KillCountEndPolicy(1));
         }
 
@@ -162,7 +162,7 @@ public class EliminationCooldownTests
             "2v2-lives",
             new MatchShape(2, 2),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(7),
+            "gt7",
             // Set the kill threshold high so the first elimination doesn't end the match on
             // the score side -- we want both kills to flow through engine.OnKill while the
             // match is still Live.
@@ -230,7 +230,7 @@ public class EliminationCooldownTests
             "1v1-lives",
             new MatchShape(2, 1),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(7),
+            "gt7",
             () => new KillCountEndPolicy(1000),
             vetoesRequired: 1,
             livesPerPlayer: 1);

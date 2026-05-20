@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Penalties;
@@ -18,7 +17,7 @@ public sealed class QueueDefinition
         string uniqueId,
         MatchShape shape,
         PartitionQualityPolicy qualityPolicy,
-        GameTypeId gameType = default,
+        string gameType = "",
         Func<IMatchEndPolicy>? endPolicyFactory = null,
         Func<IGriefingHeuristic>? griefingHeuristicFactory = null,
         int vetoesRequired = 2,
@@ -113,7 +112,7 @@ public sealed class QueueDefinition
         UniqueId = uniqueId;
         Shape = shape;
         QualityPolicy = qualityPolicy;
-        GameType = gameType;
+        GameType = gameType ?? string.Empty;
         EndPolicyFactory = endPolicyFactory ?? (() => new KillCountEndPolicy(15));
         GriefingHeuristicFactory = griefingHeuristicFactory ?? (() => NoGriefingHeuristic.Instance);
         VetoesRequired = vetoesRequired;
@@ -193,7 +192,16 @@ public sealed class QueueDefinition
     public string UniqueId { get; }
     public MatchShape Shape { get; }
     public PartitionQualityPolicy QualityPolicy { get; }
-    public GameTypeId GameType { get; }
+
+    /// <summary>
+    /// Registry name of the game type this queue forms matches under. Looked up against the
+    /// engine's <see cref="ClashEngine.Core.GameType.GameTypeRegistry"/>; only queues whose
+    /// gametype has been accepted by the stats server appear in the live registry. Carried
+    /// through to <see cref="ActiveMatch.GameType"/> and the v5 match-upload envelope's
+    /// <c>match.gameType</c> string. Defaults to <see cref="string.Empty"/> for legacy / test
+    /// fixtures that don't care about a specific game type.
+    /// </summary>
+    public string GameType { get; }
     public Func<IMatchEndPolicy> EndPolicyFactory { get; }
     public Func<IGriefingHeuristic> GriefingHeuristicFactory { get; }
     public int VetoesRequired { get; }

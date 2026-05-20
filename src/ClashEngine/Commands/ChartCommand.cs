@@ -80,7 +80,7 @@ public sealed class ChartCommand
             matchId: match.MatchId,
             queueName: qUniqueId,
             queueLabel: qLabel,
-            gameType: match.GameType.Value,
+            gameType: match.GameType,
             arena: player.Arena?.Name,
             teams: match.Teams,
             startedAt: match.StartedAt,
@@ -103,7 +103,8 @@ public sealed class ChartCommand
     private (string UniqueId, string Label) QueueIdentForMatch(ActiveMatch match)
     {
         foreach (var def in _engine.Queues.Definitions)
-            if (def.GameType == match.GameType) return (def.UniqueId, def.Label);
+            if (string.Equals(def.GameType, match.GameType, StringComparison.OrdinalIgnoreCase))
+                return (def.UniqueId, def.Label);
         return (string.Empty, string.Empty);
     }
 }

@@ -6,8 +6,8 @@ namespace ClashEngine.Core.Tests.Ratings;
 public class InMemoryRatingStoreTests
 {
     private static PlayerKey K(string name) => new(name);
-    private static readonly GameTypeId G1 = new(1);
-    private static readonly GameTypeId G2 = new(2);
+    private const string G1 = "gt1";
+    private const string G2 = "gt2";
 
     [Fact]
     public void Get_returns_Default_for_unknown_player()

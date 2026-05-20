@@ -165,7 +165,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
         _matchInfoById[match.MatchId] = new MatchInfo(
             QueueName: queue.UniqueId,
             QueueLabel: queue.Label,
-            GameType: match.GameType.Value,
+            GameType: match.GameType,
             Arena: queue.MatchArenaName,
             Teams: match.Teams,
             StartedAt: match.StartedAt,
@@ -201,15 +201,17 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
             // store here gives the new rating; pre-match is in info.RatingsAtStart.
             var postOrdinalByName = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             var postOrdinalByKey = new Dictionary<PlayerKey, double>();
+            var ratingsAtEnd = new Dictionary<PlayerKey, RatingPayload>();
             foreach (var team in info.Teams)
             {
                 for (int j = 0; j < team.Count; j++)
                 {
                     var key = team[j];
-                    if (_engine.Ratings.TryGet(key, new Core.Identity.GameTypeId(info.GameType), out var r))
+                    if (_engine.Ratings.TryGet(key, info.GameType, out var r))
                     {
                         postOrdinalByName[key.Name] = r.Ordinal;
                         postOrdinalByKey[key] = r.Ordinal;
+                        ratingsAtEnd[key] = new RatingPayload(r.Mu, r.Sigma, r.GamesPlayed);
                     }
                 }
             }
@@ -229,6 +231,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
                     recorder: recorder,
                     outcome: outcome,
                     ratingsAtStart: info.RatingsAtStart,
+                    ratingsAtEnd: ratingsAtEnd,
                     postOrdinalByPlayer: postOrdinalByKey,
                     recordingPath: recordingPath);
                 _uploader.Upload(payload);
@@ -351,7 +354,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
     private readonly record struct MatchInfo(
         string QueueName,
         string QueueLabel,
-        uint GameType,
+        string GameType,
         string? Arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> Teams,
         DateTimeOffset? StartedAt,

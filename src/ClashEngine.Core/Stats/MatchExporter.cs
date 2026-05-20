@@ -10,22 +10,24 @@ namespace ClashEngine.Core.Stats;
 /// </summary>
 public static class MatchExporter
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     public static MatchPayload Build(
         Guid matchId,
         string? queueName,
         string? queueLabel,
-        uint gameType,
+        string gameType,
         string? arena,
         IReadOnlyList<IReadOnlyList<PlayerKey>> teams,
         DateTimeOffset? startedAt,
         StatsRecorder recorder,
         MatchOutcome outcome,
         IReadOnlyDictionary<PlayerKey, RatingPayload>? ratingsAtStart = null,
+        IReadOnlyDictionary<PlayerKey, RatingPayload>? ratingsAtEnd = null,
         IReadOnlyDictionary<PlayerKey, double>? postOrdinalByPlayer = null,
         string? recordingPath = null)
     {
+        ArgumentNullException.ThrowIfNull(gameType);
         ArgumentNullException.ThrowIfNull(teams);
         ArgumentNullException.ThrowIfNull(recorder);
         ArgumentNullException.ThrowIfNull(outcome);
@@ -104,6 +106,10 @@ public static class MatchExporter
             if (ratingsAtStart is not null && ratingsAtStart.TryGetValue(key, out var snap))
                 rating = snap;
 
+            RatingPayload? ratingEnd = null;
+            if (ratingsAtEnd is not null && ratingsAtEnd.TryGetValue(key, out var snapEnd))
+                ratingEnd = snapEnd;
+
             // Rating delta in displayed-ordinal units: (post − pre) × 10. Same scale the
             // scoreboard uses; only emitted when both halves are known.
             double? ratingChange = null;
@@ -119,6 +125,7 @@ public static class MatchExporter
                 Name: key.Name,
                 TeamIndex: tIndex,
                 RatingAtStart: rating,
+                RatingAtEnd: ratingEnd,
                 RatingChange: ratingChange,
                 Kills: ps.Kills,
                 Deaths: ps.Deaths,

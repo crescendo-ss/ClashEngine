@@ -36,7 +36,7 @@ public class GroupMatchmakingTests
                 "2v2",
                 new MatchShape(2, 2),
                 new PartitionQualityPolicy(qStart, qFloor, TimeSpan.FromSeconds(90)),
-                new GameTypeId(1));
+                "gt1");
         }
 
         public void Connect(params string[] names)
@@ -46,7 +46,7 @@ public class GroupMatchmakingTests
 
         public void SetRating(string name, double mu)
         {
-            Ratings.Set(K(name), new GameTypeId(1), new Rating(mu, 0, 0, default));
+            Ratings.Set(K(name), "gt1", new Rating(mu, 0, 0, default));
         }
     }
 
@@ -147,7 +147,7 @@ public class GroupMatchmakingTests
             "duel",
             new MatchShape(2, 1),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2));
+            "gt2");
 
         h.Connect("A", "B");
         Assert.Equal(EnqueueResult.Ok,
@@ -204,7 +204,7 @@ public class GroupMatchmakingTests
             "4v4",
             new MatchShape(2, 4),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2));
+            "gt2");
 
         h.Connect("A", "B");
         h.Engine.TryEnqueueGroup(new[] { K("A"), K("B") }, "2v2", T0, out var groupId);
@@ -238,7 +238,7 @@ public class GroupMatchmakingTests
             "4v4",
             new MatchShape(2, 4),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2));
+            "gt2");
 
         h.Connect("A", "B");
         h.Engine.InviteToGroup(K("A"), K("B"), T0);
@@ -265,7 +265,7 @@ public class GroupMatchmakingTests
             "4v4",
             new MatchShape(2, 4),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2));
+            "gt2");
 
         h.Connect("A", "B", "C");
         h.Engine.InviteToGroup(K("A"), K("B"), T0);
@@ -340,7 +340,7 @@ public class GroupMatchmakingTests
             "4v4",
             new MatchShape(2, 4),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2));
+            "gt2");
 
         h.Connect("A", "B", "C");
         h.Engine.InviteToGroup(K("A"), K("B"), T0);

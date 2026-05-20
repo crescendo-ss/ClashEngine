@@ -4,10 +4,12 @@ namespace ClashEngine.Core.Tests.GameType;
 
 public class GameTypeRegistryTests
 {
-    private static GameTypeDef Def(string name, uint id, int teamCount = 2, int perTeam = 3) =>
+    private static GameTypeDef Def(string name, int teamCount = 2, int perTeam = 3) =>
         new GameTypeDef(
             Name: name,
-            Id: id,
+            Label: name,
+            Description: null,
+            Metadata: GameTypeMetadata.Uniform(teamCount, perTeam, lives: 0),
             TeamCount: teamCount,
             PlayersPerTeam: perTeam,
             KillTarget: 30,
@@ -29,54 +31,29 @@ public class GameTypeRegistryTests
     {
         var r = new GameTypeRegistry();
         var ok = r.ReplaceArenaContribution("lobby",
-            new[] { Def("elim_3v3", 1), Def("elim_4v4", 2) }, out var errors);
+            new[] { Def("elim_3v3"), Def("elim_4v4") }, out var errors);
 
         Assert.True(ok);
         Assert.Empty(errors);
         Assert.Equal(2, r.Count);
         Assert.True(r.TryGet("elim_3v3", out var got));
-        Assert.Equal(1u, got.Id);
-    }
-
-    [Fact]
-    public void ReplaceArenaContribution_rejects_id_collision_across_sources()
-    {
-        var r = new GameTypeRegistry();
-        Assert.True(r.ReplaceArenaContribution("lobby", new[] { Def("elim_3v3", 1) }, out _));
-
-        // Arena 'other' tries to define a different name with the same Id -- should fail.
-        var ok = r.ReplaceArenaContribution("other", new[] { Def("ctf_3v3", 1) }, out var errors);
-        Assert.False(ok);
-        Assert.NotEmpty(errors);
-        Assert.Equal(1, r.Count);   // first contribution preserved
+        Assert.Equal("elim_3v3", got.Name);
     }
 
     [Fact]
     public void ReplaceArenaContribution_rejects_name_collision_across_sources()
     {
         var r = new GameTypeRegistry();
-        Assert.True(r.ReplaceArenaContribution("lobby", new[] { Def("elim_3v3", 1) }, out _));
+        Assert.True(r.ReplaceArenaContribution("lobby", new[] { Def("elim_3v3") }, out _));
 
-        var ok = r.ReplaceArenaContribution("other", new[] { Def("elim_3v3", 2) }, out var errors);
+        // Arena 'other' tries to define a gametype with the same name -- another source can't
+        // grab a name that's already taken.
+        var ok = r.ReplaceArenaContribution("other", new[] { Def("elim_3v3", perTeam: 4) }, out var errors);
         Assert.False(ok);
         Assert.NotEmpty(errors);
+        Assert.Equal(1, r.Count);   // first contribution preserved
         Assert.True(r.TryGet("elim_3v3", out var got));
-        Assert.Equal(1u, got.Id);   // original Id preserved
-    }
-
-    [Fact]
-    public void ReplaceArenaContribution_rejects_id_change_for_existing_name()
-    {
-        var r = new GameTypeRegistry();
-        Assert.True(r.ReplaceArenaContribution("lobby", new[] { Def("elim_3v3", 1) }, out _));
-
-        // Hot-reload that renumbers a game type's Id is rejected because PersistRatingStore
-        // keys by Id; silent renumbering would orphan rating rows.
-        var ok = r.ReplaceArenaContribution("lobby", new[] { Def("elim_3v3", 5) }, out var errors);
-        Assert.False(ok);
-        Assert.Contains(errors, e => e.Contains("Id change rejected"));
-        Assert.True(r.TryGet("elim_3v3", out var got));
-        Assert.Equal(1u, got.Id);
+        Assert.Equal(3, got.PlayersPerTeam);   // original preserved
     }
 
     [Fact]
@@ -84,11 +61,11 @@ public class GameTypeRegistryTests
     {
         var r = new GameTypeRegistry();
         Assert.True(r.ReplaceArenaContribution("lobby",
-            new[] { Def("elim_3v3", 1), Def("elim_4v4", 2) }, out _));
+            new[] { Def("elim_3v3"), Def("elim_4v4") }, out _));
 
         // Same source replaces its set: drops elim_4v4, keeps elim_3v3, adds ctf.
         var ok = r.ReplaceArenaContribution("lobby",
-            new[] { Def("elim_3v3", 1), Def("ctf_3v3", 3) }, out _);
+            new[] { Def("elim_3v3"), Def("ctf_3v3") }, out _);
         Assert.True(ok);
         Assert.Equal(2, r.Count);
         Assert.True(r.TryGet("elim_3v3", out _));
@@ -97,11 +74,11 @@ public class GameTypeRegistryTests
     }
 
     [Fact]
-    public void ReplaceArenaContribution_rejects_internal_duplicate_id()
+    public void ReplaceArenaContribution_rejects_internal_duplicate_name()
     {
         var r = new GameTypeRegistry();
         var ok = r.ReplaceArenaContribution("lobby",
-            new[] { Def("a", 1), Def("b", 1) }, out var errors);
+            new[] { Def("a"), Def("a", perTeam: 4) }, out var errors);
         Assert.False(ok);
         Assert.NotEmpty(errors);
         Assert.Equal(0, r.Count);
@@ -111,8 +88,8 @@ public class GameTypeRegistryTests
     public void Remove_drops_only_targeted_source()
     {
         var r = new GameTypeRegistry();
-        Assert.True(r.ReplaceArenaContribution("lobby", new[] { Def("a", 1) }, out _));
-        Assert.True(r.ReplaceArenaContribution("matcharena", new[] { Def("b", 2) }, out _));
+        Assert.True(r.ReplaceArenaContribution("lobby", new[] { Def("a") }, out _));
+        Assert.True(r.ReplaceArenaContribution("matcharena", new[] { Def("b") }, out _));
 
         var removed = r.Remove("lobby");
         Assert.Contains("a", removed);
@@ -125,7 +102,7 @@ public class GameTypeRegistryTests
     public void ZoneWide_contribution_uses_null_source_arena()
     {
         var r = new GameTypeRegistry();
-        Assert.True(r.ReplaceArenaContribution(sourceArena: null, new[] { Def("shared", 10) }, out _));
+        Assert.True(r.ReplaceArenaContribution(sourceArena: null, new[] { Def("shared") }, out _));
         Assert.True(r.TryGetSource("shared", out var src));
         Assert.Null(src);
     }

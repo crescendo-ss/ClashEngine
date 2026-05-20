@@ -11,7 +11,7 @@ public class KillCountEndPolicyTests
     private static ActiveMatch StartedMatch(KillCountEndPolicy policy)
     {
         var m = new ActiveMatch(
-            Guid.NewGuid(), new GameTypeId(1),
+            Guid.NewGuid(), "gt1",
             new IReadOnlyList<PlayerKey>[]
             {
                 new[] { K("A"), K("B") },

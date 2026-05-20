@@ -34,7 +34,7 @@ public class KothModeTests
                 "koth2v2",
                 new MatchShape(2, 2),
                 new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-                new GameTypeId(1),
+                "gt1",
                 () => new KillCountEndPolicy(killTarget),
                 vetoesRequired: 1,
                 promoteWinnersToFront: true,
@@ -347,7 +347,7 @@ public class KothModeTests
             "regular2v2",
             new MatchShape(2, 2),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
-            new GameTypeId(2),
+            "gt2",
             () => new KillCountEndPolicy(1));
 
         h.ConnectAll("A", "B", "C", "D");
