@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using ClashEngine.Adapter;
 using ClashEngine.Config;
 using ClashEngine.Core;
@@ -12,6 +13,7 @@ using ClashEngine.Core.Matches;
 using ClashEngine.Core.Penalties;
 using ClashEngine.Core.Queue;
 using ClashEngine.Orchestration;
+using ClashEngine.Stats;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
 
@@ -33,6 +35,8 @@ public sealed class MatchmakingCommands
     private readonly IConfigManager _config;
     private readonly ClashLog _log;
     private readonly MatchOrchestratorRegistry _orchestrators;
+    private readonly RatingSyncCoordinator _ratingSync;
+    private readonly IMainloop _mainloop;
 
     private static readonly string[] Tiers = { "competitive", "casual" };
 
@@ -44,7 +48,9 @@ public sealed class MatchmakingCommands
         PlayerKeyResolver resolver,
         IConfigManager config,
         ClashLog log,
-        MatchOrchestratorRegistry orchestrators)
+        MatchOrchestratorRegistry orchestrators,
+        RatingSyncCoordinator ratingSync,
+        IMainloop mainloop)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _commands = commands ?? throw new ArgumentNullException(nameof(commands));
@@ -54,6 +60,8 @@ public sealed class MatchmakingCommands
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _orchestrators = orchestrators ?? throw new ArgumentNullException(nameof(orchestrators));
+        _ratingSync = ratingSync ?? throw new ArgumentNullException(nameof(ratingSync));
+        _mainloop = mainloop ?? throw new ArgumentNullException(nameof(mainloop));
     }
 
     /// <summary>
@@ -197,33 +205,95 @@ public sealed class MatchmakingCommands
         }
 
         var qualified = QueueRegistry.QualifyName(arena.BaseName, requestedBaseName);
-        if (!_engine.Queues.Contains(qualified))
+        if (!_engine.Queues.TryGet(qualified, out var def))
         {
             _chat.SendMessage(player, $"Queue '{requestedBaseName}' is not defined for this arena. Type ?queue to see what's available here.");
             return;
         }
-        var resolvedName = qualified;
+        string resolvedName = qualified;
+        string gameTypeName = def.GameType;
 
-        var now = _clock.UtcNow;
+        // Resolve the member set up front so we know which (player, gameType) pulls to await.
+        // A solo queue only seeds the issuer; a group seeds every member so the matcher
+        // sees fresh ratings for the whole party when it forms a match.
         var groupId = _engine.Groups.GroupOf(k);
-        EnqueueResult result;
         IReadOnlyList<PlayerKey>? partyMembers = null;
+        PlayerKey[] membersToSeed;
         if (groupId is GroupId g)
         {
-            var members = new System.Collections.Generic.List<PlayerKey>();
+            var members = new List<PlayerKey>();
             foreach (var m in _engine.Groups.MembersOf(g)) members.Add(m);
             partyMembers = members;
-            result = _engine.TryEnqueueGroup(members, resolvedName, now, out _, existingGroup: g, initiator: k);
+            membersToSeed = members.ToArray();
         }
         else
         {
-            result = _engine.TryEnqueue(k, resolvedName, now);
+            membersToSeed = new[] { k };
         }
-        if (_log.IsDebug)
-            _log.Debug(LogCategory, $"?play {k.Name} -> queue '{resolvedName}' result={result}" +
-                (groupId is GroupId gg ? $" (group {gg})" : ""));
-        ReplyForEnqueue(player, k, resolvedName, result, partyMembers);
+
+        // Defer the enqueue: await each member's rating pull (no-op if local already has a
+        // row, awaits the connect-time task if one's in flight, fires a fresh pull if neither),
+        // then bounce the enqueue + reply back onto the mainloop. The handler returns
+        // immediately; queueing chat-replies just arrive a couple of pull-roundtrips later.
+        var dispatch = new EnqueueDispatch(player, k, resolvedName, groupId, partyMembers);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (membersToSeed.Length == 1)
+                {
+                    await _ratingSync.EnsurePulledAsync(membersToSeed[0], gameTypeName).ConfigureAwait(false);
+                }
+                else
+                {
+                    var awaits = new Task[membersToSeed.Length];
+                    for (int i = 0; i < membersToSeed.Length; i++)
+                        awaits[i] = _ratingSync.EnsurePulledAsync(membersToSeed[i], gameTypeName);
+                    await Task.WhenAll(awaits).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // EnsurePulledAsync is contracted not to throw, but if a future impl regresses
+                // we still want the enqueue to run -- the matcher will just use whatever
+                // values are currently in the cache, which is the prior-to-this-feature
+                // behavior.
+            }
+            _mainloop.QueueMainWorkItem(DispatchEnqueue, dispatch);
+        });
     }
+
+    /// <summary>
+    /// Mainloop-side resumption of <see cref="Next"/> after the pull await finished. Runs
+    /// the actual <see cref="MatchmakingEngine.TryEnqueue"/> call, logs, and replies. Reads
+    /// <see cref="_engine"/> through a local null-check so a dispatch that fires after the
+    /// module unloaded doesn't NRE in the work-item queue.
+    /// </summary>
+    private void DispatchEnqueue(EnqueueDispatch s)
+    {
+        var now = _clock.UtcNow;
+        EnqueueResult result;
+        if (s.GroupId is GroupId g)
+            result = _engine.TryEnqueueGroup(s.PartyMembers!, s.ResolvedName, now, out _, existingGroup: g, initiator: s.Key);
+        else
+            result = _engine.TryEnqueue(s.Key, s.ResolvedName, now);
+
+        if (_log.IsDebug)
+            _log.Debug(LogCategory, $"?play {s.Key.Name} -> queue '{s.ResolvedName}' result={result}" +
+                (s.GroupId is GroupId gg ? $" (group {gg})" : ""));
+        ReplyForEnqueue(s.Player, s.Key, s.ResolvedName, result, s.PartyMembers);
+    }
+
+    /// <summary>
+    /// Captures everything <see cref="DispatchEnqueue"/> needs from <see cref="Next"/>'s
+    /// validation phase. Passed verbatim through the mainloop work-item queue.
+    /// </summary>
+    private sealed record EnqueueDispatch(
+        Player Player,
+        PlayerKey Key,
+        string ResolvedName,
+        GroupId? GroupId,
+        IReadOnlyList<PlayerKey>? PartyMembers);
 
     private void ReplyForEnqueue(
         Player player,

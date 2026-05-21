@@ -443,7 +443,9 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // Only ?play and ?queue are zone-wide so a player can opt into matchmaking from any
         // arena (lobby, public, etc.). The remaining 11 matchmaking commands register
         // per-arena in AttachModuleAsync.
-        _commandHandlers = new MatchmakingCommands(_engine, _commands, _chat, _clock, _resolver, _config, _clashLog, _orchestrators);
+        _commandHandlers = new MatchmakingCommands(
+            _engine, _commands, _chat, _clock, _resolver, _config, _clashLog, _orchestrators,
+            _ratingSyncCoordinator, _mainloop);
         _commandHandlers.RegisterGlobal();
         _unregisterActions.Add(_commandHandlers.UnregisterGlobal);
 
