@@ -21,9 +21,10 @@ internal sealed class NoStatsServerRatingSync : IRatingSync
 
     public NoStatsServerRatingSync(ILogManager log)
     {
-        log?.LogM(LogLevel.Warn, LogCategory,
-            "No [ClashEngine] UploadUrl configured; rating pull-on-first-connect is inert. " +
-            "New players will start at the engine default rating; cross-zone reconciliation is disabled.");
+        log?.LogM(LogLevel.Info, LogCategory,
+            "No [ClashEngine] UploadUrl configured; rating pull-on-connect is inert. " +
+            "Ratings persist locally via PersistRatingStore and update as matches finish -- " +
+            "the only thing missing is cross-zone reconciliation.");
     }
 
     public Task<Rating?> TryPullAsync(string playerName, string gameType, CancellationToken ct = default) =>
