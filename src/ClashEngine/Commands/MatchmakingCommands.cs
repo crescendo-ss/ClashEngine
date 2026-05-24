@@ -35,7 +35,7 @@ public sealed class MatchmakingCommands
     private readonly IConfigManager _config;
     private readonly ClashLog _log;
     private readonly MatchOrchestratorRegistry _orchestrators;
-    private readonly RatingSyncCoordinator _ratingSync;
+    private readonly RatingsCoordinator _ratingsCoordinator;
     private readonly IMainloop _mainloop;
 
     private static readonly string[] Tiers = { "competitive", "casual" };
@@ -49,7 +49,7 @@ public sealed class MatchmakingCommands
         IConfigManager config,
         ClashLog log,
         MatchOrchestratorRegistry orchestrators,
-        RatingSyncCoordinator ratingSync,
+        RatingsCoordinator ratingsCoordinator,
         IMainloop mainloop)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
@@ -60,7 +60,7 @@ public sealed class MatchmakingCommands
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _orchestrators = orchestrators ?? throw new ArgumentNullException(nameof(orchestrators));
-        _ratingSync = ratingSync ?? throw new ArgumentNullException(nameof(ratingSync));
+        _ratingsCoordinator = ratingsCoordinator ?? throw new ArgumentNullException(nameof(ratingsCoordinator));
         _mainloop = mainloop ?? throw new ArgumentNullException(nameof(mainloop));
     }
 
@@ -242,13 +242,13 @@ public sealed class MatchmakingCommands
             {
                 if (membersToSeed.Length == 1)
                 {
-                    await _ratingSync.EnsurePulledAsync(membersToSeed[0], gameTypeName).ConfigureAwait(false);
+                    await _ratingsCoordinator.EnsurePulledAsync(membersToSeed[0], gameTypeName).ConfigureAwait(false);
                 }
                 else
                 {
                     var awaits = new Task[membersToSeed.Length];
                     for (int i = 0; i < membersToSeed.Length; i++)
-                        awaits[i] = _ratingSync.EnsurePulledAsync(membersToSeed[i], gameTypeName);
+                        awaits[i] = _ratingsCoordinator.EnsurePulledAsync(membersToSeed[i], gameTypeName);
                     await Task.WhenAll(awaits).ConfigureAwait(false);
                 }
             }

@@ -6,20 +6,20 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Stats;
 
 /// <summary>
-/// Fallback <see cref="IRatingSync"/> used when no <c>[ClashEngine] UploadUrl</c> is
+/// Fallback <see cref="IRatingsProvider"/> used when no <c>[ClashEngine] UploadUrl</c> is
 /// configured. Pull returns <see langword="null"/>, so the coordinator leaves a never-seen
 /// player on <see cref="Rating.Default"/> until they play their first match.
 /// </summary>
 /// <remarks>
-/// Construction logs a one-time WARN. Operators running without a stats server still get a
+/// Construction logs a one-time INFO. Operators running without a stats server still get a
 /// functional engine -- matches form, ratings persist locally via
 /// <see cref="Persistence.PersistRatingStore"/>, and new players start at default.
 /// </remarks>
-internal sealed class NoStatsServerRatingSync : IRatingSync
+internal sealed class NoStatsServerRatingsProvider : IRatingsProvider
 {
-    private const string LogCategory = nameof(NoStatsServerRatingSync);
+    private const string LogCategory = nameof(NoStatsServerRatingsProvider);
 
-    public NoStatsServerRatingSync(ILogManager log)
+    public NoStatsServerRatingsProvider(ILogManager log)
     {
         log?.LogM(LogLevel.Info, LogCategory,
             "No [ClashEngine] UploadUrl configured; rating pull-on-connect is inert. " +

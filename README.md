@@ -10,8 +10,9 @@ A skill-based matchmaking engine for [SubspaceServer .NET](https://github.com/gi
 |---|---|
 | `src/ClashEngine.Core/` | Pure-logic library: queues, matcher, team balancer, end-policies, FSMs, rating math, stats accounting. **No SubspaceServer dependencies.** |
 | `src/ClashEngine/` | The SubspaceServer plug-in: adapters that wire the engine to `IGame`, `IChat`, `IPersist`, `IArenaManager`, MatchFocus / MatchLvz callbacks, etc. |
-| `tests/ClashEngine.Core.Tests/` | xUnit test suite for the core library (≈550 tests). |
-| `schema/match.schema.json` | JSON schema for the end-of-match upload envelope. |
+| `tests/ClashEngine.Core.Tests/` | xUnit test suite for the core library (≈650 tests). |
+| `schema/` | JSON schemas for the engine's wire formats — `match.schema.json` (outgoing match envelopes), `gametype.schema.json` (outgoing gametype registrations), `rating.schema.json` (incoming rating pulls). |
+| `docs/INTEGRATION.md` | How to plug a custom backend (visualizer, dashboard, alternate stats server) into ClashEngine — the three Core interfaces and their wire formats. |
 
 The plug-in is loaded as a SubspaceServer module; the core library is the engine. Pure logic lives where it can be tested in isolation; everything that needs SS APIs lives in the plug-in.
 

@@ -48,11 +48,11 @@ namespace ClashEngine.Stats;
 /// <see cref="ConcurrentDictionary{TKey, TValue}"/> so the mainloop and the pull continuations
 /// can both touch it without explicit locks.</para>
 /// </remarks>
-public sealed class RatingSyncCoordinator : IDisposable
+public sealed class RatingsCoordinator : IDisposable
 {
-    private const string LogCategory = nameof(RatingSyncCoordinator);
+    private const string LogCategory = nameof(RatingsCoordinator);
 
-    private readonly IRatingSync _sync;
+    private readonly IRatingsProvider _provider;
     private readonly IRatingStore _ratings;
     private readonly GameTypeRegistry _gameTypes;
     private readonly ILogManager _log;
@@ -64,13 +64,13 @@ public sealed class RatingSyncCoordinator : IDisposable
     private readonly ConcurrentDictionary<(PlayerKey, string), Task<Rating?>> _inFlight =
         new(InFlightKeyComparer.Instance);
 
-    public RatingSyncCoordinator(
-        IRatingSync sync,
+    public RatingsCoordinator(
+        IRatingsProvider provider,
         IRatingStore ratings,
         GameTypeRegistry gameTypes,
         ILogManager log)
     {
-        _sync = sync ?? throw new ArgumentNullException(nameof(sync));
+        _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _ratings = ratings ?? throw new ArgumentNullException(nameof(ratings));
         _gameTypes = gameTypes ?? throw new ArgumentNullException(nameof(gameTypes));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -142,15 +142,15 @@ public sealed class RatingSyncCoordinator : IDisposable
         {
             try
             {
-                Rating? remote = await _sync.TryPullAsync(key.Name, gameType, token).ConfigureAwait(false);
+                Rating? remote = await _provider.TryPullAsync(key.Name, gameType, token).ConfigureAwait(false);
                 ApplyPullResult(key, gameType, remote);
                 return remote;
             }
             catch (OperationCanceledException) { return null; }
             catch (Exception ex)
             {
-                // Defensive: IRatingSync impls aren't supposed to throw, but if one does we
-                // surface it as null (the "transport failure" semantic) rather than letting
+                // Defensive: IRatingsProvider impls aren't supposed to throw, but if one does
+                // we surface it as null (the "transport failure" semantic) rather than letting
                 // it tear down the connect handler's fire-and-forget Task.
                 _log.LogM(LogLevel.Warn, LogCategory,
                     $"Pull threw for '{key.Name}' gameType='{gameType}': {ex.Message}");

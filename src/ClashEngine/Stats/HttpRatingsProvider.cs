@@ -11,9 +11,9 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Stats;
 
 /// <summary>
-/// HTTP-backed <see cref="IRatingSync"/>. Pulls one <c>(player, gameType)</c> rating from
-/// the stats server's <c>GET /api/players/{name}/rating?gameType=X</c> endpoint. Used by
-/// <see cref="RatingSyncCoordinator"/> to seed the local cache the first time a player
+/// HTTP-backed <see cref="IRatingsProvider"/>. Pulls one <c>(player, gameType)</c> rating
+/// from the stats server's <c>GET /api/players/{name}/rating?gameType=X</c> endpoint. Used
+/// by <see cref="RatingsCoordinator"/> to seed the local cache the first time a player
 /// connects to a zone that has no persisted rating for them.
 /// </summary>
 /// <remarks>
@@ -31,11 +31,11 @@ namespace ClashEngine.Stats;
 /// first match (which then drives the rating via the match-envelope channel).</para>
 ///
 /// <para>There is no push method here; ratings flow BACK to the server via the
-/// match-upload envelope. See the <see cref="IRatingSync"/> remarks for the design rationale.</para>
+/// match-upload envelope. See the <see cref="IRatingsProvider"/> remarks for the design rationale.</para>
 /// </remarks>
-public sealed class HttpRatingSync : IRatingSync, IDisposable
+public sealed class HttpRatingsProvider : IRatingsProvider, IDisposable
 {
-    private const string LogCategory = nameof(HttpRatingSync);
+    private const string LogCategory = nameof(HttpRatingsProvider);
 
     // CamelCase to match the rating.schema.json field names.
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -53,7 +53,7 @@ public sealed class HttpRatingSync : IRatingSync, IDisposable
     private readonly bool _ownsHttpClient;
     private readonly TimeSpan _requestTimeout;
 
-    public HttpRatingSync(
+    public HttpRatingsProvider(
         string statsApiBase,
         string apiKey,
         ILogManager log,

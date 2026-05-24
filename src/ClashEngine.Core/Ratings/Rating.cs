@@ -24,7 +24,7 @@ public readonly record struct Rating(double Mu, double Sigma, uint GamesPlayed, 
     /// </summary>
     /// <remarks>
     /// Not persisted across process restarts (the on-disk blob doesn't carry the flag).
-    /// After a restart, <see cref="RatingSyncCoordinator"/>'s next connect-pull re-establishes
+    /// After a restart, <see cref="RatingsCoordinator"/>'s next connect-pull re-establishes
     /// the marker if the server is still empty.
     /// </remarks>
     public bool IsNew { get; init; }

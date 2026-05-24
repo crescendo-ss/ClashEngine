@@ -39,11 +39,24 @@ public readonly record struct RegistrationResult(RegistrationStatus Status, stri
 }
 
 /// <summary>
-/// Sink for gametype registration POSTs. <see cref="ClashEngine.ClashModule"/> invokes this
-/// once per parsed <see cref="GameTypeDef"/> before committing the gametype to
-/// <see cref="GameTypeRegistry"/>. Queue parsing is gated on the results so a queue cannot
-/// reference an unregistered (or rejected) gametype.
+/// Integration surface for outgoing gametype registrations. Implement this interface to
+/// plug a custom backend (visualizer, dashboard, alternate stats server) into ClashEngine.
+/// The Core DTOs (<see cref="GameTypeRegistration"/>) match <c>schema/gametype.schema.json</c>
+/// 1:1 -- a consumer who references <c>ClashEngine.Core</c> and reads that schema has
+/// everything needed to write an alternate implementation without forking the host project.
 /// </summary>
+/// <remarks>
+/// <para>See also <see cref="ClashEngine.Core.Ratings.IRatingsProvider"/> (incoming
+/// rating pulls, <c>schema/rating.schema.json</c>) and
+/// <see cref="ClashEngine.Core.Stats.IMatchUploader"/> (outgoing match envelopes,
+/// <c>schema/match.schema.json</c>) for the other halves of the integration surface.</para>
+///
+/// <para><see cref="ClashEngine.ClashModule"/> invokes <see cref="TryRegisterAsync"/> once
+/// per parsed <see cref="GameTypeDef"/> before committing the gametype to
+/// <see cref="GameTypeRegistry"/>. Queue parsing is gated on the results so a queue cannot
+/// reference an unregistered (or rejected) gametype -- see the "fail-closed" policy on
+/// <see cref="RegistrationStatus"/> above.</para>
+/// </remarks>
 public interface IGameTypeRegistrar
 {
     Task<RegistrationResult> TryRegisterAsync(GameTypeRegistration registration, CancellationToken ct = default);

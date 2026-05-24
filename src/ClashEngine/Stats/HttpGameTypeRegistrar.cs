@@ -141,7 +141,7 @@ public sealed class HttpGameTypeRegistrar : IGameTypeRegistrar, IDisposable
     /// <summary>
     /// Convenience passthrough to <see cref="Core.Stats.StatsApiPaths.DeriveGameTypeRegistrationUrl"/>
     /// so existing callers in this project keep the same entry point. The actual convention
-    /// lives in Core (it's the same one <see cref="HttpRatingSync"/> uses).
+    /// lives in Core (it's the same one <see cref="HttpRatingsProvider"/> uses).
     /// </summary>
     public static string? DeriveRegistrationUrl(string? uploadUrl) =>
         Core.Stats.StatsApiPaths.DeriveGameTypeRegistrationUrl(uploadUrl);
