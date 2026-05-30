@@ -551,48 +551,72 @@ public sealed class MatchOrchestrator
         // naturally via the engine's join-timeout if we couldn't transition.
         try
         {
-            var afk = _idleTracker.GetStillIdle();
+            var notReady = _idleTracker.GetStillIdle();
 
-            if (afk.Count > 0)
+            if (notReady.Count > 0)
             {
-                string afkNames = string.Join(", ", afk.Select(k => k.Name));
-                // The AFK-specific line is a personal "you were flagged" notice, so we send it
-                // directly to the affected participants only -- spectators don't need it.
+                // Split the no-shows by *why* they failed staging. A participant sitting in SPEC
+                // (dropped to, or never left, spectator) made a deliberate departure -- categorically
+                // different from an AFK no-show who is in their ship but never moved. The idle tracker
+                // can't tell them apart (a spec'd ship reports no movement either way), so we
+                // partition on the player's current ship and give each group its own reason. A
+                // resolve failure (disconnected) counts as departed -- they're gone, not idle.
+                var departed = new List<PlayerKey>();
+                var afk = new List<PlayerKey>();
+                for (int i = 0; i < notReady.Count; i++)
+                {
+                    var k = notReady[i];
+                    bool inShip = _resolver.Resolve(k) is { } pp && pp.Ship != ShipType.Spec;
+                    (inShip ? afk : departed).Add(k);
+                }
+
+                // Personal notice to each cancellation-causer, tailored to why -- sent directly to
+                // the affected participants only (spectators don't need it).
+                for (int i = 0; i < departed.Count; i++)
+                    if (_resolver.Resolve(departed[i]) is { } p)
+                        _chat.SendMessage(p, "You left during staging, so the match was cancelled.");
                 for (int i = 0; i < afk.Count; i++)
                     if (_resolver.Resolve(afk[i]) is { } p)
                         _chat.SendMessage(p, "You were flagged as AFK and the match was cancelled.");
 
                 // Match-cancellation announcement for everyone else (participants and watching
-                // spectators), excluding the AFK players who already got their own version.
-                var notAfkParticipants = new List<Player>();
+                // spectators), excluding the no-show players who already got their own version. The
+                // reason names each group: "<X> left" for deliberate specs, "<Y> did not ready" for
+                // AFKs, joined when both occurred.
+                var stillHere = new List<Player>();
                 for (int t = 0; t < _proposal.Teams.Count; t++)
                     for (int j = 0; j < _proposal.Teams[t].Count; j++)
                     {
                         var k = _proposal.Teams[t][j];
-                        if (afk.Contains(k)) continue;
-                        if (_resolver.Resolve(k) is { } p) notAfkParticipants.Add(p);
+                        if (notReady.Contains(k)) continue;
+                        if (_resolver.Resolve(k) is { } p) stillHere.Add(p);
                     }
+                var reasons = new List<string>(2);
+                if (departed.Count > 0)
+                    reasons.Add($"{string.Join(", ", departed.Select(k => k.Name))} left");
+                if (afk.Count > 0)
+                    reasons.Add($"{string.Join(", ", afk.Select(k => k.Name))} did not ready");
                 string cancelMessage =
-                    $"Match cancelled. {afkNames} did not ready. " +
+                    $"Match cancelled. {string.Join("; ", reasons)}. " +
                     "You've been moved to the front of the queue.";
                 if (_audience is not null)
-                    _audience.Broadcast(_matchId, _queue.MatchArenaName, notAfkParticipants, cancelMessage);
+                    _audience.Broadcast(_matchId, _queue.MatchArenaName, stillHere, cancelMessage);
                 else
-                    foreach (var p in notAfkParticipants) _chat.SendMessage(p, cancelMessage);
+                    foreach (var p in stillHere) _chat.SendMessage(p, cancelMessage);
 
-                // Drive non-AFK participants to Active before cancelling. PlayerStateObserver only
+                // Drive still-here participants to Active before cancelling. PlayerStateObserver only
                 // fires OnPlayerJoinedArena on a spec->active ship change, so a participant who was
                 // already in a non-spec ship at placement time stays Pending in the engine. Without
                 // this, FinalizeCancellation's "Pending = no-show" sweep marks them as abandoners
-                // alongside the genuine AFKs.
+                // alongside the genuine no-shows.
                 for (int t = 0; t < _proposal.Teams.Count; t++)
                     for (int j = 0; j < _proposal.Teams[t].Count; j++)
                     {
                         var k = _proposal.Teams[t][j];
-                        if (afk.Contains(k)) continue;
+                        if (notReady.Contains(k)) continue;
                         _engine.OnPlayerJoinedArena(k, _clock.UtcNow);
                     }
-                _engine.CancelMatchAsAfk(_matchId, afk, _clock.UtcNow);
+                _engine.CancelMatchAsAfk(_matchId, notReady, _clock.UtcNow);
                 // Cleanup is invoked by the registry's OnMatchEnded handler.
                 return false;
             }

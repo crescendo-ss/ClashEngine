@@ -122,9 +122,10 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
             if (ReferenceEquals(kvp.Value, orchestrator)) toRemove.Add(kvp.Key);
         foreach (var k in toRemove) _stagingPlayers.Remove(k);
 
-        // Cancelled state currently only comes from the AFK staging path, which has already
-        // broadcast a tailored "Match cancelled. {names} did not ready..." line in OnStagingEnd.
-        // Pass null here so Cleanup doesn't follow it with a redundant generic "Match cancelled."
+        // Cancelled state currently only comes from the staging no-show path, which has already
+        // broadcast a tailored "Match cancelled. {names} left / did not ready..." line in
+        // OnStagingEnd. Pass null here so Cleanup doesn't follow it with a redundant generic
+        // "Match cancelled."
         var summary = outcome.FinalState switch
         {
             MatchState.Completed when outcome.RankedTeams.Count > 0 =>
