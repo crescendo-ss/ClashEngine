@@ -1,0 +1,386 @@
+{
+  "$comment": "Hand-maintained reference of the [ClashEngine] INI configuration knobs operators set in SubspaceServer's global.conf / arena.conf. This is documentation, NOT a consumed schema: the source of truth is the parsers under src/ClashEngine/Config/ (and ClashModule.cs for the plug-in-tuning keys). When you add or change a knob there, update the matching entry here and the table in README.md. Each knob lists the exact code site it is read from so the three can be diffed.",
+  "section": "ClashEngine",
+  "scopeLegend": {
+    "zone": "Read from global.conf only (_config.Global). Zone-wide. Only the plug-in-tuning keys live here.",
+    "arena": "Read from the arena's arena.conf (plus #includes). Per-arena. Game types and queues are arena-scoped only; a GameType/Queue block in global.conf is ignored (ClashEngine warns if it finds one)."
+  },
+  "typeLegend": {
+    "duration": "Bare integer = seconds, or HH:MM:SS. Parsed by ConfigReadHelpers.TryReadTimeSpan.",
+    "bool": "0 / 1 (any non-zero is true).",
+    "enum": "One of the listed literals, case-insensitive.",
+    "indexedBlock": "Repeated <i> from 1..Count, where Count is the companion '*Count' key."
+  },
+  "groups": [
+    {
+      "id": "plugin-tuning",
+      "title": "Plug-in tuning",
+      "scope": "zone",
+      "appliesTo": "plugin",
+      "note": "Read once at module load from global.conf. LogVerbosity is also runtime-mutable via ?clashlog.",
+      "knobs": [
+        {
+          "key": "LogVerbosity",
+          "type": "enum",
+          "values": ["Off", "Normal", "Verbose", "Trace"],
+          "default": "Normal",
+          "description": "Log detail level. Verbose adds command/event/orchestrator debug; Trace adds every wire event. Runtime-mutable via ?clashlog.",
+          "source": "src/ClashEngine/ClashModule.cs:214"
+        },
+        {
+          "key": "UploadUrl",
+          "type": "url",
+          "default": null,
+          "description": "Stats-upload endpoint receiving the multipart/form-data match POST (metadata JSON + replay). Both UploadUrl and UploadApiKey must be set, or ClashEngine writes match envelopes as JSON files under <BaseDirectory>/matches instead.",
+          "source": "src/ClashEngine/ClashModule.cs:872"
+        },
+        {
+          "key": "UploadApiKey",
+          "type": "string",
+          "default": null,
+          "description": "Sent as the X-Api-Key header on the upload POST. Required (with UploadUrl) for HTTP upload.",
+          "source": "src/ClashEngine/ClashModule.cs:873"
+        },
+        {
+          "key": "StatsViewUrl",
+          "type": "urlTemplate",
+          "default": null,
+          "description": "Per-match viewer URL broadcast after the scoreboard. May contain a literal {matchId} token (replaced with the dashed GUID); without one the id is appended. Unset suppresses the line.",
+          "source": "src/ClashEngine/Stats/ClashStatsTelemetry.cs:272"
+        },
+        {
+          "key": "RecordReplays",
+          "type": "bool",
+          "default": 1,
+          "description": "Record every started match with the in-plug-in MatchRecorder.",
+          "source": "src/ClashEngine/ClashModule.cs:278"
+        },
+        {
+          "key": "ReplayRecordingDir",
+          "type": "path",
+          "default": "<AppContext.BaseDirectory>/clash-replays",
+          "description": "Where in-flight .replay files land. Files are deleted after a successful upload.",
+          "source": "src/ClashEngine/ClashModule.cs:300"
+        },
+        {
+          "key": "DistanceSampleHz",
+          "type": "int",
+          "constraint": "1..50 (0 disables)",
+          "default": 5,
+          "description": "Sampling frequency of the distance-to-nearest-enemy sampler feeding the scoreboard's dE column. 0 disables.",
+          "source": "src/ClashEngine/ClashModule.cs:346"
+        }
+      ]
+    },
+    {
+      "id": "gametype",
+      "title": "Game types",
+      "scope": "arena",
+      "appliesTo": "gametype",
+      "countKey": "GameTypeCount",
+      "indexed": true,
+      "note": "GameTypeCount = N -> reads GameType1..GameTypeN from arena.conf. A game type is the rules of one match shape; many queues can reference one game type by name. Arena-scoped only: a GameType block in global.conf is ignored (ClashEngine warns if GameTypeCount/QueueCount appear there). Game-type NAMES form a single zone-wide namespace and are globally referenceable: declare a name once in any arena.conf and any arena's Queue<i>GameType can reference it (resolution is attach-order-independent). Declare each name once -- a second arena declaring the same name is rejected (first definer wins); do NOT #include the same GameType block into multiple arenas (that collides). Game types are sticky: once registered they persist for the process lifetime even after the declaring arena detaches. A duplicate name within one arena (case-insensitive) is skipped with a Warn. A slot that fails a required-field or constraint check is skipped entirely.",
+      "knobs": [
+        {
+          "key": "GameType<i>Name",
+          "type": "string",
+          "required": true,
+          "description": "Registry identifier referenced by Queue<j>GameType. Case-insensitive. Missing -> the slot is skipped.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:52"
+        },
+        {
+          "key": "GameType<i>Label",
+          "type": "string",
+          "default": "(value of Name)",
+          "description": "Display string used in chat output and the stats-server registration POST.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:62"
+        },
+        {
+          "key": "GameType<i>Description",
+          "type": "string",
+          "default": null,
+          "description": "Optional long-form description carried on the stats-server registration POST.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:64"
+        },
+        {
+          "key": "GameType<i>TeamCount",
+          "type": "int",
+          "constraint": ">= 2",
+          "default": 2,
+          "description": "Number of teams. Below 2 -> the game type is skipped.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:67"
+        },
+        {
+          "key": "GameType<i>PlayersPerTeam",
+          "type": "int",
+          "constraint": ">= 1",
+          "default": 4,
+          "description": "Players per team. Below 1 -> the game type is skipped.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:74"
+        },
+        {
+          "key": "GameType<i>KillTarget",
+          "type": "int",
+          "constraint": ">= 0",
+          "default": 0,
+          "description": "Per-team kills required to win. 0 = unset. If neither KillTarget nor TimeLimit is set, the end policy falls back to first-to-30 kills. Negative -> coerced to 0.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:82"
+        },
+        {
+          "key": "GameType<i>TimeLimit",
+          "type": "duration",
+          "constraint": "> 0",
+          "default": null,
+          "description": "Leader at this elapsed time wins; a tie triggers sudden-death overtime. May coexist with KillTarget (whichever fires first ends the match). <= 0 -> ignored.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:94"
+        },
+        {
+          "key": "GameType<i>Lives",
+          "type": "int",
+          "constraint": ">= 0",
+          "default": 0,
+          "description": "Elimination matches: total lives per player counting the initial spawn (0 = unlimited). Negative -> coerced to 0.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:88"
+        },
+        {
+          "key": "GameType<i>WarpOnSpawn",
+          "type": "bool",
+          "default": 0,
+          "description": "Master switch for deterministic spawn warping. Off -> all Team<t>Spawns / MaxSpawnDrift coordinates are silently ignored and arena defaults apply.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:108"
+        },
+        {
+          "key": "GameType<i>Team<t>Spawns",
+          "type": "spawnSet",
+          "format": "x,y; x,y; ...",
+          "default": null,
+          "description": "Per-team candidate spawn coordinates in pixels for t in 1..TeamCount. The orchestrator picks one entry uniformly at random per match and warps the whole team there. Gated by WarpOnSpawn.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:101 (SpawnSetParser.Read)"
+        },
+        {
+          "key": "GameType<i>MaxSpawnDrift",
+          "type": "int",
+          "constraint": ">= 0 (tiles; 1 tile = 16px)",
+          "default": null,
+          "description": "Max drift from the chosen spawn during Staging/Countdown before a player is warped back. null or 0 disables drift enforcement. Negative -> ignored.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:102"
+        },
+        {
+          "key": "GameType<i>Team<t>Ships",
+          "type": "shipList",
+          "format": "comma-separated ship names or 0..7 indices",
+          "default": "(all Warbird)",
+          "description": "Per-team ship per slot, t in 1..TeamCount. Names case-insensitive: warbird, javelin, spider, leviathan/lev, terrier/terr, weasel, lancaster/lanc, shark. Each team's count must equal PlayersPerTeam; any mismatch (or one team set while another isn't) reverts all teams to Warbird.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:117 (ShipBySlotParser.Read)"
+        },
+        {
+          "key": "GameType<i>StagingDuration",
+          "type": "duration",
+          "constraint": "> 0",
+          "default": "10s (engine default)",
+          "description": "Upper bound on the warmup window between formation and countdown. Ends early once every participant flips non-idle; a still-idle player at the limit cancels the match. <= 0 -> dropped to engine default.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:110"
+        },
+        {
+          "key": "GameType<i>CountdownDuration",
+          "type": "duration",
+          "constraint": "> 0 (engine enforces min 5s)",
+          "default": "10s (engine default)",
+          "description": "Length of the pre-GO countdown. Ships lock 5s before GO. <= 0 -> dropped to engine default.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:111"
+        },
+        {
+          "key": "GameType<i>KnockoutSpecDelay",
+          "type": "duration",
+          "constraint": ">= 0",
+          "default": "0",
+          "description": "Grace between a player's last-life death and the forced spec, so residual mines/bombs can land. Only meaningful for elimination matches (Lives > 0). Negative -> dropped to default.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:112"
+        },
+        {
+          "key": "GameType<i>TeamCollapseGrace",
+          "type": "duration",
+          "constraint": ">= 0",
+          "default": "10s (engine default)",
+          "description": "How long a whole team can have no Active or Pending players before forfeiting. Negative -> dropped to default.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:113"
+        },
+        {
+          "key": "GameType<i>ShipChangeGracePeriod",
+          "type": "duration",
+          "constraint": ">= 0",
+          "default": "10s (engine default)",
+          "description": "After a non-fatal death, the window in which a player may change ships before being re-locked to their current ship for the rest of the life. 0 forbids every in-match ship change. Negative -> dropped to default.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:114"
+        },
+        {
+          "key": "GameType<i>ReturnItemsAction",
+          "type": "enum",
+          "values": ["full", "restore", "burn"],
+          "default": "full",
+          "description": "Inventory policy on ?return after self-spec. full keeps the fresh loadout; restore deducts back to what the player had at spec (closes the burst/repel reload loophole); burn zeros the loadout. Unrecognized -> Full.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:115"
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "title": "Queues",
+      "scope": "arena",
+      "appliesTo": "queue",
+      "countKey": "QueueCount",
+      "indexed": true,
+      "note": "QueueCount = N -> reads Queue1..QueueN from arena.conf. Each queue is one matchmaking pool producing matches under a referenced game type. A queue whose GameType is missing/unknown (not in the accepted set) is dropped with a Warn. Many policy knobs have two defaults: a standard one and a more lenient one applied by Preset=casual; an explicit Queue<i><Key> always overrides the preset.",
+      "knobs": [
+        {
+          "key": "Queue<i>Name",
+          "type": "string",
+          "required": true,
+          "description": "Lookup identifier. Players type it with ?play <name>; multiple space-separated tokens join with '_' (so ?play casual 4v4 -> casual_4v4). Case-insensitive. Missing -> the slot is skipped.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:40"
+        },
+        {
+          "key": "Queue<i>GameType",
+          "type": "string",
+          "required": true,
+          "description": "Must match a GameType<j>Name in the accepted set. Many queues can share one game type. Missing or unknown -> the queue is skipped.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:48"
+        },
+        {
+          "key": "Queue<i>Label",
+          "type": "string",
+          "default": "(value of Name)",
+          "description": "Pretty display string for chat output and the JSON match-stats payload. Decouples display from the lookup name.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:64"
+        },
+        {
+          "key": "Queue<i>Preset",
+          "type": "enum",
+          "values": ["casual"],
+          "default": null,
+          "description": "Opt-in lenient bundle: qStart/qFloor 0.4/0.10 (vs 0.6/0.30), no MaxLiabilityGap cap, RelaxTime 45s, RatingWeight 0.5, griefing teamkill threshold 3 (vs 2). Each knob is still individually overridable. Unrecognized -> ignored (standard defaults apply).",
+          "source": "src/ClashEngine/Config/QueueParser.cs:159 (ReadPreset)"
+        },
+        {
+          "key": "Queue<i>MatchArena",
+          "type": "string",
+          "default": null,
+          "description": "Arena players are sent to for the match. Recommended: a dedicated arena listed in PermanentArenas.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:63"
+        },
+        {
+          "key": "Queue<i>LookAhead",
+          "type": "int",
+          "constraint": ">= 0",
+          "default": 0,
+          "description": "Extra candidates above the minimum (TotalPlayers) the matcher considers for the best partition. 0 = strict FIFO. Negative -> coerced to 0. The engine's pool size is TotalPlayers + this.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:175 (ReadLookAhead)"
+        },
+        {
+          "key": "Queue<i>RelaxTime",
+          "type": "duration",
+          "constraint": "> 0",
+          "default": "120s standard / 45s with Preset=casual",
+          "description": "How fast the quality threshold decays from qStart to qFloor. Longer = stricter early; shorter = accepts weaker matches sooner. <= 0 -> dropped to default.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:189 (ReadRelaxTime)"
+        },
+        {
+          "key": "Queue<i>HoldWindow",
+          "type": "duration",
+          "constraint": ">= 0",
+          "default": "10s",
+          "description": "Once a viable partition is found, how long the matcher waits for a better one. 0 pops immediately. Negative -> dropped to default.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:200 (ReadHoldWindow)"
+        },
+        {
+          "key": "Queue<i>QualityCeiling",
+          "type": "float",
+          "constraint": "[0, 1]",
+          "default": 0.9,
+          "description": "If a held candidate's quality reaches this, pop without waiting out the hold window. Out of range -> dropped to default.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:211 (ReadQualityCeiling)"
+        },
+        {
+          "key": "Queue<i>VetoesRequired",
+          "type": "int",
+          "constraint": ">= 1",
+          "default": 2,
+          "description": "Distinct match participants who must ?forgive a pending griefing penalty within VetoWindow to rescind it. Below 1 -> dropped to default.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:222 (ReadVetoesRequired)"
+        },
+        {
+          "key": "Queue<i>VetoWindow",
+          "type": "duration",
+          "constraint": "> 0",
+          "default": "60s (engine default)",
+          "description": "Open period for vetos after a griefing flag fires; the penalty becomes final at the end if the threshold wasn't reached. <= 0 -> dropped to default.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:233 (ReadVetoWindow)"
+        },
+        {
+          "key": "Queue<i>PromoteWinners",
+          "type": "bool",
+          "default": 0,
+          "description": "KOTH mode: the winning team auto-re-enqueues at the head of this queue after a Completed match.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:247 (ReadKoth)"
+        },
+        {
+          "key": "Queue<i>MaxConsecutiveDefenses",
+          "type": "int",
+          "constraint": ">= 1",
+          "default": 3,
+          "description": "Max consecutive wins a champion can defend before going to the back of the queue. Only meaningful with PromoteWinners=1. Below 1 -> dropped to default.",
+          "source": "src/ClashEngine/Config/QueueParser.cs:247 (ReadKoth)"
+        }
+      ]
+    },
+    {
+      "id": "arena-default",
+      "title": "Per-arena default queue",
+      "scope": "arena",
+      "appliesTo": "arena",
+      "indexed": false,
+      "knobs": [
+        {
+          "key": "DefaultQueue",
+          "type": "string",
+          "default": null,
+          "description": "Base queue name ?play resolves to when issued from this arena without an explicit queue. Read from arena scope only. Unset -> ?play requires a named queue.",
+          "source": "src/ClashEngine/Config/MatchmakingConfig.cs:122 (DefaultQueueForArena)"
+        }
+      ]
+    }
+  ],
+  "derivedKnobs": {
+    "$comment": "Settings an operator does NOT set directly via a conf key, but which are derived from the knobs above and surface in behavior / the stats payload. Listed so the registry documents the full effective surface.",
+    "items": [
+      {
+        "name": "RatingWeight",
+        "derivedFrom": "Queue<i>Preset",
+        "value": "1.0 standard / 0.5 with Preset=casual",
+        "description": "Match importance toward rating updates. No standalone conf key.",
+        "source": "src/ClashEngine/Config/QueueParser.cs:102"
+      },
+      {
+        "name": "MatchShape.MaxLiabilityGap",
+        "derivedFrom": "Queue<i>Preset",
+        "value": "8.0 standard / none with Preset=casual",
+        "description": "Cap on the rating gap of the weakest player. No standalone conf key.",
+        "source": "src/ClashEngine/Config/QueueParser.cs:83"
+      },
+      {
+        "name": "GriefingHeuristic",
+        "derivedFrom": "GameType<i>Lives and Queue<i>Preset",
+        "value": "Lives>0 -> EarlyExitHeuristic (2-min min duration); else TeamkillThresholdHeuristic (threshold 3 casual / 2 standard)",
+        "description": "Griefing detector selected from the game type and preset. No standalone conf key.",
+        "source": "src/ClashEngine/Config/QueueParser.cs:86"
+      },
+      {
+        "name": "GameTypeMetadata",
+        "derivedFrom": "GameType<i>TeamCount, PlayersPerTeam, Lives",
+        "value": "GameTypeMetadata.Uniform(teamCount, perTeam, lives)",
+        "description": "Auto-derived stats-server metadata blob (teamCount/teamSizes/livesPerPlayer). There is intentionally no GameType<i>Metadata conf key.",
+        "source": "src/ClashEngine/Config/GameTypeParser.cs:124"
+      }
+    ]
+  }
+}

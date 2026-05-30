@@ -8,11 +8,11 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Config;
 
 /// <summary>
-/// Parses the <c>GameType&lt;i&gt;</c> blocks under <c>[ClashEngine]</c> in a given
-/// <see cref="ConfigHandle"/> -- arena scope (arena.conf, plus anything <c>#include</c>'d) or
-/// zone scope (global.conf, plus its includes). Each game type describes one match's rules
-/// (team shape, win condition, lives, spawn / ship layout); a queue references one game type
-/// by name, and many queues can share a game type.
+/// Parses the <c>GameType&lt;i&gt;</c> blocks under <c>[ClashEngine]</c> in an arena's
+/// <see cref="ConfigHandle"/> (arena.conf, plus anything <c>#include</c>'d from it). Game types
+/// are arena-scoped only -- they are not read from global.conf. Each game type describes one
+/// match's rules (team shape, win condition, lives, spawn / ship layout); a queue references one
+/// game type by name, and many queues can share a game type.
 /// </summary>
 internal static class GameTypeParser
 {

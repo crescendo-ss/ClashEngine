@@ -54,8 +54,14 @@ internal static class QueueParser
         }
         if (!gameTypes.TryGetValue(gtName, out var gt))
         {
-            log?.Warn(ConfigConstants.LogCategory,
-                $"{p}GameType='{gtName}' for queue '{baseName}' references an unknown game type -- skipping.");
+            // Game types are globally referenceable and arenas attach in arbitrary order, so a
+            // reference to a not-yet-registered game type is normal during startup -- log at Info,
+            // not Warn. The queue is left unloaded and resolves on a later reconcile once that game
+            // type is declared by some arena. (A genuine typo also lands here; it just never
+            // resolves -- the Info line names the game type so it's still diagnosable.)
+            log?.Info(ConfigConstants.LogCategory,
+                $"{p}GameType='{gtName}' for queue '{baseName}' is not registered (yet) -- queue not loaded; " +
+                "will resolve if/when that game type is declared in any arena.");
             return null;
         }
 

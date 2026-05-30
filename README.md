@@ -143,14 +143,18 @@ cmd_chart
 
 ### Game types
 
-`GameTypeCount = N` → ClashEngine reads `GameType1` … `GameTypeN`. A game type is the rules of one match shape; multiple queues can reference one game type.
+`GameTypeCount = N` → ClashEngine reads `GameType1` … `GameTypeN`. A game type is the rules of one match shape; multiple queues can reference one game type. Read from **arena scope only** (arena.conf plus its `#include`s) — a `GameType` block in global.conf is ignored (ClashEngine logs a warning if it finds one).
+
+Game-type **names are a single, zone-wide namespace** and are **globally referenceable**: declare a game type once in *any* arena.conf, and a `Queue<i>GameType` in *any* arena can reference it by that name (resolution is order-independent — a queue whose game type hasn't loaded yet resolves as soon as some arena declares it). Two consequences:
+
+- **Declare each name once.** If two arenas both declare the same game-type name, the second is rejected (the first definer wins). Don't `#include` the same `GameType` block into multiple arenas — that's a collision, not sharing. To share, declare it in one arena and reference the name from the others. A dedicated "definitions" arena (a permanent arena with `GameType` blocks and no queues) is a clean place to host shared game types.
+- **Game types are sticky.** Once registered, a game type stays for the server's lifetime even if its declaring arena detaches — so queues elsewhere that reference it keep working, and its name stays owned by the first definer (no other arena can re-claim it until restart). Re-attaching the declaring arena re-commits (and can update) its own game types.
 
 #### Rules
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `GameType<i>Name` | string | required | Referenced by `Queue<j>GameType`. Case-insensitive. |
-| `GameType<i>Id` | int ≥ 0 | `i` | Bucket the rating store keys ratings under. **Two queues with different rules but the same Id share ratings** — set distinct Ids for distinct rulesets. |
 | `GameType<i>TeamCount` | int ≥ 2 | 2 | Number of teams. |
 | `GameType<i>PlayersPerTeam` | int ≥ 1 | 4 | Players per team. |
 | `GameType<i>KillTarget` | int ≥ 0 | 30 (when nothing else set) | Per-team kills required to win. `0` = unset (use `TimeLimit` instead). |
@@ -221,38 +225,21 @@ Sets the queue `?play` resolves to when the player issues the command without an
 
 The 1v1 elimination setup bundled with the SubspaceServer test zone (under `SubspaceServer/Zone/conf/global.conf` and `SubspaceServer/Zone/arenas/1v1comp/`) is the canonical reference for what these keys look like in production. Reproduced here so README and zone stay in sync.
 
-`global.conf` — plug-in tuning plus a shared game type:
+`global.conf` — plug-in tuning only. Game types and queues are **not** read at zone scope:
 
 ```ini
 [ClashEngine]
 
-; --- 1. Plug-in tuning ---
+; --- Plug-in tuning (zone-wide) ---
 LogVerbosity        = Verbose
 UploadUrl           = http://localhost:8080/api/matches
 UploadApiKey        = <secret>
 RecordReplays       = 1
 ReplayRecordingDir  = clash-replays
 DistanceSampleHz    = 5
-
-; --- 2. Game type (zone-wide; any arena's queues can reference it) ---
-GameTypeCount = 1
-
-GameType1Name           = elimination_1v1
-GameType1Id             = 1
-GameType1TeamCount      = 2
-GameType1PlayersPerTeam = 1
-GameType1KillTarget     = 3
-;GameType1TimeLimit     = 0:10:00          ; uncomment to add a time cap
-GameType1Lives          = 0
-GameType1WarpOnSpawn       = 1
-GameType1Team1Spawns       = 7680,4096; 7680,4112; 7680,4128
-GameType1Team2Spawns       = 8704,4096; 8704,4112; 8704,4128
-GameType1MaxSpawnDrift     = 6             ; tiles
-GameType1StagingDuration   = 8             ; seconds, upper bound (default 10)
-GameType1CountdownDuration = 10            ; seconds (min 5, default 10; ships lock 5s before GO)
 ```
 
-`Zone/arenas/1v1comp/arena.conf` — the standard arena conf plus the two queues owned by this arena:
+`Zone/arenas/1v1comp/arena.conf` — the standard arena conf plus the game type and the two queues owned by this arena:
 
 ```ini
 [ Modules ]
@@ -268,6 +255,25 @@ FilterKillPackets = 1
 
 [ClashEngine]
 DefaultQueue = 1v1
+
+; --- Game type (arena-scoped, but its NAME is globally referenceable). Declare
+;     it once here; queues in other arenas may reference "elimination_1v1" by name. ---
+GameTypeCount = 1
+
+GameType1Name           = elimination_1v1
+GameType1TeamCount      = 2
+GameType1PlayersPerTeam = 1
+GameType1KillTarget     = 3
+;GameType1TimeLimit     = 0:10:00          ; uncomment to add a time cap
+GameType1Lives          = 0
+GameType1WarpOnSpawn       = 1
+GameType1Team1Spawns       = 7680,4096; 7680,4112; 7680,4128
+GameType1Team2Spawns       = 8704,4096; 8704,4112; 8704,4128
+GameType1MaxSpawnDrift     = 6             ; tiles
+GameType1StagingDuration   = 8             ; seconds, upper bound (default 10)
+GameType1CountdownDuration = 10            ; seconds (min 5, default 10; ships lock 5s before GO)
+
+; --- Queues owned by this arena ---
 QueueCount   = 2
 
 ; Standard (stricter) queue: small look-ahead, hold-window for late better arrivals.
@@ -295,8 +301,8 @@ Queue2QualityCeiling = 0.70
 
 This shows off:
 
-- **Multiple queues sharing a game type.** Both `1v1` and `casual_1v1` run under `elimination_1v1`, so they share the same rules (and rating bucket via `Id = 1`). They differ only in matchmaking strictness, which `Preset = casual` packages as a one-line opt-in for the lenient bundle.
-- **Zone vs arena scope.** The game type sits in `global.conf` so a hypothetical second 1v1 arena could reuse it without redefining the rules; the queues sit in `arena.conf` because every queue is owned by an arena. If you'd rather keep everything together, the game type can move into `arena.conf` (or you can `#include` a shared file from either end) — the parser doesn't care which file the keys come from.
+- **Multiple queues sharing a game type.** Both `1v1` and `casual_1v1` run under `elimination_1v1`, so they share the same rules (and rating bucket, keyed by the game type). They differ only in matchmaking strictness, which `Preset = casual` packages as a one-line opt-in for the lenient bundle.
+- **Arena scope, global names.** Both the game type and the queues live in `arena.conf` — game types and queues are not parsed from `global.conf` (only plug-in tuning is). A hypothetical second 1v1 arena that wants the same rules does **not** redeclare `elimination_1v1` (that would collide) — it just references the name from its own queues, since game-type names are globally referenceable and sticky. Only the plug-in-tuning keys belong in `global.conf`.
 - **Lookup name vs display label.** `Queue<i>Name` is what `?play` resolves against; `Queue<i>Label` is the pretty string shown in chat and the JSON payload. Decoupling them means you can rename one without disturbing the other.
 - **Per-team spawn pools.** Three candidate spawn points per team — the orchestrator picks one at random for each match, so consecutive games don't always start in identical positions.
 - **Drift enforcement.** `MaxSpawnDrift = 6` warps anyone who wanders more than 6 tiles from the chosen spawn back during Staging and Countdown.

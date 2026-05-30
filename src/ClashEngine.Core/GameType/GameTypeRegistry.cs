@@ -4,12 +4,18 @@ using System.Collections.Generic;
 namespace ClashEngine.Core.GameType;
 
 /// <summary>
-/// Flat, globally-scoped registry of game-type definitions. Each entry is tagged with the
-/// arena whose <c>[ClashEngine]</c> section contributed it (or <see langword="null"/> for
-/// zone-wide contributions from global.conf) so the lifecycle wiring can remove that arena's
-/// contribution when the arena is detached.
+/// Flat, globally-scoped registry of game-type definitions. Each entry is tagged with the arena
+/// whose <c>[ClashEngine]</c> section contributed it, so a re-attach of that arena re-commits its
+/// own entries (same-source replace) and so collisions name the responsible arena.
 /// </summary>
 /// <remarks>
+/// <para><b>Stickiness.</b> The registry itself supports <see cref="Remove"/>, but the host treats
+/// game types as <i>process-lifetime sticky</i>: it does NOT remove them when an arena detaches.
+/// Game types are globally referenceable (a queue in any arena may name a game type declared in
+/// any other), so keeping them registered after the declaring arena detaches means dependent
+/// queues elsewhere keep resolving, and the name stays owned by its first definer (a later arena
+/// cannot redefine it). <see cref="Remove"/> remains for explicit teardown / tests.</para>
+///
 /// <para>Identity is the gametype <see cref="GameTypeDef.Name"/> string -- the same identifier
 /// the stats server accepts via the <c>gametype</c> POST and the <c>match.gameType</c> field
 /// on the v5 match-upload schema. There is no separate numeric id.</para>
@@ -36,8 +42,9 @@ public sealed class GameTypeRegistry
 {
     private readonly Dictionary<string, GameTypeDef> _byName = new(StringComparer.OrdinalIgnoreCase);
 
-    // Track source arena per entry so detach can remove only that contribution. null key represents
-    // the zone-wide contribution (global.conf [ClashEngine]).
+    // Track source arena per entry. Used to scope same-source replace on re-attach and to name the
+    // responsible arena in collision errors. (A null value is the legacy not-tied-to-an-arena tag;
+    // the host no longer contributes one.)
     private readonly Dictionary<string, string?> _sourceByName = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

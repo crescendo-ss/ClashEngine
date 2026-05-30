@@ -9,10 +9,10 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Config;
 
 /// <summary>
-/// Parses the <c>[ClashEngine]</c> section from a SubspaceServer config document (either an
-/// arena.conf or global.conf, plus everything <c>#include</c>'d from it) and produces
-/// gametype + queue definitions that <see cref="ClashModule"/> can commit to the engine
-/// registries.
+/// Parses the <c>[ClashEngine]</c> section from an arena's config document (arena.conf, plus
+/// everything <c>#include</c>'d from it) and produces gametype + queue definitions that
+/// <see cref="ClashModule"/> can commit to the engine registries. Game types and queues are
+/// arena-scoped only -- they are not read from global.conf.
 /// </summary>
 /// <remarks>
 /// <para>This file is the orchestrator -- it reads <c>QueueCount</c>, delegates game-type
@@ -68,18 +68,10 @@ namespace ClashEngine.Config;
 public static class MatchmakingConfig
 {
     /// <summary>
-    /// Sentinel <c>originArena</c> used when posting a zone-wide gametype (one declared in
-    /// global.conf rather than per-arena). The stats server still records an origin string;
-    /// every zone-wide POST uses this constant so subsequent reloads address the same
-    /// gametype-origin tuple.
-    /// </summary>
-    public const string ZoneOriginArena = "(zone)";
-
-    /// <summary>
-    /// Reads the <c>GameType&lt;i&gt;</c> blocks from <paramref name="handle"/> (arena or
-    /// zone scope) and returns the parsed defs as a name-keyed dictionary. No engine state
-    /// is touched; the caller is responsible for registering each def with the stats server
-    /// and then committing the accepted subset.
+    /// Reads the <c>GameType&lt;i&gt;</c> blocks from an arena's <paramref name="handle"/> and
+    /// returns the parsed defs as a name-keyed dictionary. No engine state is touched; the
+    /// caller is responsible for registering each def with the stats server and then committing
+    /// the accepted subset.
     /// </summary>
     public static Dictionary<string, GameTypeDef> ParseGameTypes(
         IConfigManager config, ConfigHandle handle, ClashLog? log) =>

@@ -128,10 +128,6 @@ public sealed class MatchmakingCommands
             "?clashreset <player> [--keep-rating] -- Operator: wipe a player's matchmaking state " +
             "(penalties, queues, party, active match, pending griefing votes, and rating). " +
             "Pass --keep-rating to preserve their rating rows.");
-        _commands.AddCommand("clashmigrate", ClashMigrateCmd, arena, helpText:
-            "?clashmigrate -- Operator: print the per-file [ClashEngine] blocks that would " +
-            "replace the legacy queue/game-type entries currently in global.conf. Print-only -- " +
-            "the operator pastes the output into conf/clash.conf and arenas/{arena}/clash.conf.");
         _commands.AddCommand("helpclash", HelpClash, arena, helpText:
             "?helpclash -- List ClashEngine player commands and what they do.");
     }
@@ -149,7 +145,6 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("forgive", Veto, arena);
         _commands.RemoveCommand("clashlog", ClashLogCmd, arena);
         _commands.RemoveCommand("clashreset", ClashReset, arena);
-        _commands.RemoveCommand("clashmigrate", ClashMigrateCmd, arena);
         _commands.RemoveCommand("helpclash", HelpClash, arena);
     }
 
@@ -905,17 +900,6 @@ public sealed class MatchmakingCommands
             _chat.SendMessage(player, $"?clashreset {targetKey.Name}: no persistent data found{suffix}.");
         else
             _chat.SendMessage(player, $"?clashreset {targetKey.Name}: {string.Join(", ", parts)}{suffix}.");
-    }
-
-    // ---- ?clashmigrate
-
-    private void ClashMigrateCmd(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
-    {
-        LogCommand("clashmigrate", player, parameters);
-        var lines = ClashMigrate.BuildReport(_config);
-        for (int i = 0; i < lines.Count; i++) _chat.SendMessage(player, lines[i]);
-        // Audit log so operators leave a paper trail of when migration was previewed.
-        _log.Info(LogCategory, $"?clashmigrate invoked by {player.Name ?? "(no-name)"}");
     }
 
     // ---- ?clashlog [off|normal|verbose|trace]
