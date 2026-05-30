@@ -80,12 +80,17 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("queue", Queue, helpText:
             "?queue [name] -- List all queues defined for this arena, or inspect a single queue's " +
             "waiting players. Multi-word lookup joins with '_' (e.g. ?queue casual 4v4).");
+        _commands.AddCommand("connect", Connect, helpText:
+            "?connect discord <alias> -- Link your in-game name to a Discord alias so the Discord " +
+            "bot can DM you about queues and matches. The alias is relayed to the bot service, " +
+            "which performs the actual link -- ClashEngine itself stores nothing.");
     }
 
     public void UnregisterGlobal()
     {
         _commands.RemoveCommand("play", Next);
         _commands.RemoveCommand("queue", Queue);
+        _commands.RemoveCommand("connect", Connect);
     }
 
     /// <summary>
@@ -506,6 +511,47 @@ public sealed class MatchmakingCommands
         if (_log.IsDebug)
             _log.Debug(LogCategory, $"?cancel {k.Name} removed from {removed.Count} queue(s): [{string.Join(",", removed)}]");
         if (removed.Count == 0) _chat.SendMessage(player, "You weren't in any queue.");
+    }
+
+    // ---- ?connect discord <alias>
+
+    /// <summary>
+    /// Relays a Discord-account-link request to the external event-stream consumer. ClashEngine is
+    /// identity-agnostic: it neither stores nor validates the alias -- it just emits a
+    /// <c>player.discord_link_requested</c> event (via the engine telemetry) so the Discord bot
+    /// service can perform the link and opt-in. The success ack is sent by
+    /// <see cref="EngineEventListener.OnDiscordLinkRequested"/>; this handler only replies on
+    /// usage errors.
+    /// </summary>
+    private void Connect(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("connect", player, parameters);
+        if (_resolver.KeyOf(player) is not PlayerKey k) return;
+
+        const string Usage = "Usage: ?connect discord <your Discord alias>";
+
+        var rest = parameters.Trim();
+        // First token selects the service ("discord"); the remainder is the alias, which may
+        // contain spaces (Discord display names do).
+        int sp = rest.IndexOf(' ');
+        ReadOnlySpan<char> service = sp < 0 ? rest : rest[..sp];
+        ReadOnlySpan<char> alias = sp < 0 ? ReadOnlySpan<char>.Empty : rest[(sp + 1)..].Trim();
+
+        if (!service.Equals("discord", StringComparison.OrdinalIgnoreCase) || alias.IsEmpty)
+        {
+            _chat.SendMessage(player, Usage);
+            return;
+        }
+
+        const int MaxAliasLength = 64;
+        if (alias.Length > MaxAliasLength)
+        {
+            _chat.SendMessage(player, $"That Discord alias is too long (max {MaxAliasLength} characters).");
+            return;
+        }
+
+        if (!_engine.RequestDiscordLink(k, alias.ToString(), _clock.UtcNow))
+            _chat.SendMessage(player, Usage);
     }
 
     // ---- ?return
@@ -955,6 +1001,7 @@ public sealed class MatchmakingCommands
             ("?return",                      "Rejoin the match you were specced from."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
+            ("?connect discord <alias>",     "Relay a request to link your name to a Discord alias (the bot confirms)."),
             ("?chart",                       "Show the live scoreboard for your match (or one you're spectating)."),
             ("?party",                       "List your current party's members (leader marked if closed)."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),

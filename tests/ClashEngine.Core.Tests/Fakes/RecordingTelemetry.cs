@@ -10,7 +10,9 @@ namespace ClashEngine.Core.Tests.Fakes;
 public sealed class RecordingTelemetry : IMatchmakingTelemetry
 {
     public List<(PlayerKey Player, string Queue, PlayerKey? Initiator)> QueueAdds { get; } = new();
-    public List<(PlayerKey, string)> QueueRemovals { get; } = new();
+    public List<(PlayerKey Player, string Queue, QueueRemovalReason Reason)> QueueRemovals { get; } = new();
+    public List<(PlayerKey Player, string Queue, TimeSpan Dwell)> DwellWarnings { get; } = new();
+    public List<(PlayerKey Player, string DiscordAlias)> DiscordLinkRequests { get; } = new();
     public List<(PlayerKey Player, string Queue, int DefensesUsed, int MaxDefenses, bool SentToBack)> WinnerPromotions { get; } = new();
     public List<MatchProposal> Proposed { get; } = new();
     public List<ActiveMatch> Started { get; } = new();
@@ -29,8 +31,13 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
 
     public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) =>
         QueueAdds.Add((player, queueName, initiator));
-    public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) =>
-        QueueRemovals.Add((player, queueName));
+    public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.Cancel) =>
+        QueueRemovals.Add((player, queueName, reason));
+    public void OnQueueDwellWarning(PlayerKey player, string queueName, DateTimeOffset at, TimeSpan dwell) =>
+        DwellWarnings.Add((player, queueName, dwell));
+    public void OnDiscordLinkRequested(PlayerKey player, string discordAlias, DateTimeOffset at) =>
+        DiscordLinkRequests.Add((player, discordAlias));
     public void OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,
         int defensesUsed, int maxDefenses, bool sentToBack) =>
         WinnerPromotions.Add((player, queueName, defensesUsed, maxDefenses, sentToBack));

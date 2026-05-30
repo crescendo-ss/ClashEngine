@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clashengine.dev/schema/event.schema.json",
+  "title": "Event",
+  "description": "One event in ClashEngine's outbound event stream: a fire-and-forget POST to the consumer's EventStreamUrl as a single application/json body, authenticated with X-Api-Key. A consumer (e.g. a Discord bot) uses these to advertise live queue state and notify players. Events are keyed by in-game player name; any Discord account link / opt-in lives in the consumer. Exactly one of `queue` / `match` / `player` is present, selected by `type`. No delivery guarantee: drops on backend overflow, so consumers should tolerate gaps (a queue board self-heals from the next event). The `match.teams_locked` event has no `matchId`; correlate it to `match.started` by roster, and `match.started` to `match.ended` by `matchId`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "type", "occurredAt"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire format version, independent of the match-upload schema. Increment on any breaking change to the envelope or payloads."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "queue.joined",
+        "queue.left",
+        "queue.near_full",
+        "queue.dwell_warning",
+        "match.teams_locked",
+        "match.started",
+        "match.ended",
+        "player.discord_link_requested"
+      ],
+      "description": "Discriminator selecting which payload object is present: queue.* -> `queue`, match.* -> `match`, player.* -> `player`."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event was emitted (engine clock)."
+    },
+    "queue": { "$ref": "#/$defs/queuePayload" },
+    "match": { "$ref": "#/$defs/matchPayload" },
+    "player": { "$ref": "#/$defs/playerPayload" }
+  },
+  "$defs": {
+    "queuePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Present on queue.* events. Carries enough state to render or edit a live queue board from a single event. `count` always reflects the queue's occupancy AFTER the change this event describes.",
+      "required": ["queueName", "queueLabel", "count", "capacity"],
+      "properties": {
+        "queueName": {
+          "type": "string",
+          "description": "Globally-unique registry id for the queue: \"{ownerArena}/{baseName}\" (e.g. \"lobby/casual_4v4\"). Stable across Label renames."
+        },
+        "queueLabel": {
+          "type": "string",
+          "description": "Operator-chosen display string (e.g. \"4v4 (Casual)\"), falling back to the queue's base name."
+        },
+        "gameType": {
+          "type": ["string", "null"],
+          "description": "Registry name of the game type this queue forms matches under. Null for legacy/test queues with no game type."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of players in the queue after this change."
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total players the queue's match shape needs (TeamCount * PlayersPerTeam)."
+        },
+        "player": {
+          "type": ["string", "null"],
+          "description": "In-game name of the player this event is about. Set on queue.joined / queue.left / queue.dwell_warning; null on queue.near_full."
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "enum": ["cancel", "disconnect", "matched", "afk_cull", "group_change", "reset", null],
+          "description": "On queue.left, why the player left. Null on other queue events."
+        },
+        "waiting": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "On queue.near_full, the in-game names of waiting players in queue order. Null on other queue events."
+        },
+        "dwellSeconds": {
+          "type": ["number", "null"],
+          "description": "On queue.dwell_warning, how long the player has waited in the queue. Null on other queue events."
+        }
+      }
+    },
+    "matchPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Present on match.* events.",
+      "required": ["gameType"],
+      "properties": {
+        "matchId": {
+          "type": ["string", "null"],
+          "format": "uuid",
+          "description": "Match identifier (lowercase, hyphenated UUID). Absent on match.teams_locked (no id exists at proposal time); present on match.started / match.ended."
+        },
+        "gameType": {
+          "type": "string",
+          "description": "Registry name of the game type."
+        },
+        "queueName": {
+          "type": ["string", "null"],
+          "description": "Source queue's registry id. Present on match.teams_locked; null on started/ended (correlate by matchId/roster)."
+        },
+        "queueLabel": { "type": ["string", "null"], "description": "Source queue's display label, when known." },
+        "arena": { "type": ["string", "null"], "description": "Arena the match is played in, when known." },
+        "teams": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/$defs/rankedTeam" },
+          "description": "Team rosters. On teams_locked/started, rank is the team index +1 and score is 0 (no result yet); on ended, rank/score are the final placement."
+        },
+        "finalState": {
+          "type": ["string", "null"],
+          "enum": ["Completed", "Abandoned", "Cancelled", null],
+          "description": "On match.ended, the terminal match state. Null otherwise."
+        },
+        "startedAt": { "type": ["string", "null"], "format": "date-time", "description": "On match.started, when the match went live." },
+        "endedAt": { "type": ["string", "null"], "format": "date-time", "description": "On match.ended, when the match finalized." },
+        "durationSeconds": { "type": ["number", "null"], "description": "On match.ended, live duration in seconds, when known." },
+        "abandonedBy": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "On match.ended, in-game names of players who abandoned."
+        }
+      }
+    },
+    "rankedTeam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rank", "score", "players"],
+      "properties": {
+        "rank": { "type": "integer", "minimum": 1, "description": "1-based placement (1 = winner)." },
+        "score": { "type": "integer", "description": "Team score (0 before a result is known)." },
+        "players": { "type": "array", "items": { "type": "string" }, "description": "In-game names on the team." }
+      }
+    },
+    "playerPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Present on player.* events.",
+      "required": ["player"],
+      "properties": {
+        "player": { "type": "string", "description": "In-game player name." },
+        "discordAlias": {
+          "type": ["string", "null"],
+          "description": "On player.discord_link_requested, the Discord alias the player asked (via ?connect discord) to be linked with. ClashEngine neither stores nor validates it; the consumer performs the link."
+        }
+      }
+    }
+  }
+}

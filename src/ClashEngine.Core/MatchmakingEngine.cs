@@ -53,6 +53,12 @@ public sealed class MatchmakingEngine
     /// <summary>Minimum match shape (in total players) eligible for near-full chat notifications.</summary>
     private const int NearFullMinShape = 4;
 
+    // (player, queueName) -> the QueueEntry.EnqueuedAt we last fired an AFK dwell-warning for.
+    // Keying on the enqueue epoch means a leave-and-re-queue (which stamps a fresh EnqueuedAt)
+    // re-arms the warning even if no sweep observed the gap. Stale pairs (player no longer in the
+    // queue) are pruned at the top of SweepAfkDwell to bound memory.
+    private readonly Dictionary<(PlayerKey Player, string Queue), DateTimeOffset> _dwellWarned = new();
+
     public MatchmakingEngine(
         IRatingStore ratings,
         IClock clock,
@@ -120,7 +126,9 @@ public sealed class MatchmakingEngine
     public void OnPlayerDisconnected(PlayerKey player, DateTimeOffset at)
     {
         _connected.Remove(player);
-        _matcher.DequeueEverywhere(player);
+        var removedQueues = _matcher.DequeueEverywhere(player);
+        for (int i = 0; i < removedQueues.Count; i++)
+            _telemetry.OnQueueRemoved(player, removedQueues[i], at, QueueRemovalReason.Disconnect);
         // SubspaceServer cannot reliably distinguish a clean quit from a network drop at this
         // layer, so every departure is funneled through the same OnPlayerLeft path. The grace
         // window doubles as the "return window"; failure to return there is what flags abandonment.
@@ -353,13 +361,14 @@ public sealed class MatchmakingEngine
 
     /// <summary>Sweep every player in <paramref name="players"/> out of every queue, firing
     /// <see cref="IMatchmakingTelemetry.OnQueueRemoved"/> for each (player, queue) pair.</summary>
-    private void DequeueAllMembers(IEnumerable<PlayerKey> players, DateTimeOffset at)
+    private void DequeueAllMembers(IEnumerable<PlayerKey> players, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.GroupChange)
     {
         foreach (var p in players)
         {
             var queues = _matcher.DequeueEverywhere(p);
             for (int i = 0; i < queues.Count; i++)
-                _telemetry.OnQueueRemoved(p, queues[i], at);
+                _telemetry.OnQueueRemoved(p, queues[i], at, reason);
         }
     }
 
@@ -483,19 +492,35 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>Removes a player from <paramref name="queueName"/> if they were enqueued.</summary>
-    public bool Dequeue(PlayerKey player, string queueName, DateTimeOffset at)
+    public bool Dequeue(PlayerKey player, string queueName, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.Cancel)
     {
         if (!_matcher.Dequeue(player, queueName)) return false;
-        _telemetry.OnQueueRemoved(player, queueName, at);
+        _telemetry.OnQueueRemoved(player, queueName, at, reason);
+        return true;
+    }
+
+    /// <summary>
+    /// Relays a player's request (via <c>?connect discord</c>) to link their in-game name to a
+    /// Discord alias. The engine is identity-agnostic: it stores nothing and only fires
+    /// <see cref="IMatchmakingTelemetry.OnDiscordLinkRequested"/> so the event-stream adapter can
+    /// forward the request to the external service that owns account linking and opt-in. Trims
+    /// the alias and returns <see langword="false"/> (emitting nothing) when it's blank.
+    /// </summary>
+    public bool RequestDiscordLink(PlayerKey player, string discordAlias, DateTimeOffset at)
+    {
+        if (string.IsNullOrWhiteSpace(discordAlias)) return false;
+        _telemetry.OnDiscordLinkRequested(player, discordAlias.Trim(), at);
         return true;
     }
 
     /// <summary>Removes a player from every queue they are searching in.</summary>
-    public IReadOnlyList<string> DequeueEverywhere(PlayerKey player, DateTimeOffset at)
+    public IReadOnlyList<string> DequeueEverywhere(PlayerKey player, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.Cancel)
     {
         var names = _matcher.DequeueEverywhere(player);
         for (int i = 0; i < names.Count; i++)
-            _telemetry.OnQueueRemoved(player, names[i], at);
+            _telemetry.OnQueueRemoved(player, names[i], at, reason);
         return names;
     }
 
@@ -552,7 +577,7 @@ public sealed class MatchmakingEngine
         // party members, but the target themselves is already gone after this call.
         var queueNames = _matcher.DequeueEverywhere(player);
         for (int i = 0; i < queueNames.Count; i++)
-            _telemetry.OnQueueRemoved(player, queueNames[i], at);
+            _telemetry.OnQueueRemoved(player, queueNames[i], at, QueueRemovalReason.Reset);
         int removedFromQueues = queueNames.Count;
 
         bool leftGroup = LeaveGroup(player, at);
@@ -660,6 +685,78 @@ public sealed class MatchmakingEngine
         // Run after proposal popping so a queue whose 7+1 just got formed into a match doesn't
         // briefly trip the near-full event on its way back to empty.
         SweepNearFullThresholds();
+
+        // Likewise run the AFK dwell sweep after proposal popping so a player who was just matched
+        // this tick (already dequeued above) is never warned or culled on their way into a match.
+        SweepAfkDwell(at);
+    }
+
+    /// <summary>
+    /// Warns once and then auto-culls players who have sat in a queue past its configured AFK
+    /// dwell thresholds (<see cref="QueueDefinition.AfkDwellWarning"/> /
+    /// <see cref="QueueDefinition.AfkDwellCull"/>). Re-queuing resets the timer (a fresh
+    /// <see cref="Queue.QueueEntry.EnqueuedAt"/>, which the warned-set keys on, re-arms the
+    /// warning). No-op for queues with warning disabled (null / non-positive).
+    /// </summary>
+    private void SweepAfkDwell(DateTimeOffset at)
+    {
+        // Prune the warned-set of players who are no longer in their queue (culled, cancelled,
+        // disconnected, matched, ...) to bound memory. Correctness of re-warning comes from the
+        // EnqueuedAt epoch comparison below, not from this prune.
+        if (_dwellWarned.Count > 0)
+        {
+            List<(PlayerKey, string)>? stale = null;
+            foreach (var kvp in _dwellWarned)
+            {
+                var key = kvp.Key;
+                if (_queues.TryGet(key.Queue, out var d) && d.Queue.Contains(key.Player)) continue;
+                (stale ??= new List<(PlayerKey, string)>()).Add(key);
+            }
+            if (stale is not null)
+                foreach (var key in stale) _dwellWarned.Remove(key);
+        }
+
+        List<(PlayerKey Player, string Queue)>? toCull = null;
+        foreach (var def in _queues.Definitions)
+        {
+            var warn = def.AfkDwellWarning;
+            if (warn is not { } warnSpan || warnSpan <= TimeSpan.Zero) continue;  // disabled
+            var cull = def.AfkDwellCull;
+
+            var snapshot = def.Queue.Snapshot();
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                var entry = snapshot[i];
+                var dwell = at - entry.EnqueuedAt;
+
+                if (cull is { } cullSpan && cullSpan > TimeSpan.Zero && dwell >= cullSpan)
+                {
+                    (toCull ??= new List<(PlayerKey, string)>()).Add((entry.Player, def.UniqueId));
+                    continue;
+                }
+
+                if (dwell >= warnSpan)
+                {
+                    var key = (entry.Player, def.UniqueId);
+                    // Fire once per (player, enqueue-epoch): a fresh EnqueuedAt re-warns.
+                    if (!_dwellWarned.TryGetValue(key, out var warnedFor) || warnedFor != entry.EnqueuedAt)
+                    {
+                        _dwellWarned[key] = entry.EnqueuedAt;
+                        _telemetry.OnQueueDwellWarning(entry.Player, def.UniqueId, at, dwell);
+                    }
+                }
+            }
+        }
+
+        if (toCull is not null)
+        {
+            foreach (var (player, queueName) in toCull)
+            {
+                if (_matcher.Dequeue(player, queueName))
+                    _telemetry.OnQueueRemoved(player, queueName, at, QueueRemovalReason.AfkCull);
+                _dwellWarned.Remove((player, queueName));
+            }
+        }
     }
 
     /// <summary>
@@ -768,9 +865,17 @@ public sealed class MatchmakingEngine
         _matches[matchId] = match;
         _matchQueue[matchId] = def;
 
+        // The matcher already dequeued these players from every queue they were searching; surface
+        // a removal (reason=Matched) for the queue this match formed from so the event stream's
+        // queue board reflects the drop. Removals from any *other* queues they were searching are
+        // not surfaced in v1 (the next join/leave/near-full on that queue corrects its count).
         for (int t = 0; t < proposal.Teams.Count; t++)
             for (int j = 0; j < proposal.Teams[t].Count; j++)
-                _matchOf[proposal.Teams[t][j]] = matchId;
+            {
+                var p = proposal.Teams[t][j];
+                _matchOf[p] = matchId;
+                _telemetry.OnQueueRemoved(p, proposal.QueueName, at, QueueRemovalReason.Matched);
+            }
 
         _telemetry.OnMatchProposed(proposal);
     }

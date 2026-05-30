@@ -24,9 +24,18 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnQueueAdded(p, q, at, initiator);
     }
-    public void OnQueueRemoved(PlayerKey p, string q, DateTimeOffset at)
+    public void OnQueueRemoved(PlayerKey p, string q, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.Cancel)
     {
-        foreach (var l in _listeners) l.OnQueueRemoved(p, q, at);
+        foreach (var l in _listeners) l.OnQueueRemoved(p, q, at, reason);
+    }
+    public void OnQueueDwellWarning(PlayerKey p, string q, DateTimeOffset at, TimeSpan dwell)
+    {
+        foreach (var l in _listeners) l.OnQueueDwellWarning(p, q, at, dwell);
+    }
+    public void OnDiscordLinkRequested(PlayerKey p, string discordAlias, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnDiscordLinkRequested(p, discordAlias, at);
     }
     public void OnWinnerPromoted(PlayerKey p, string q, DateTimeOffset at, int defensesUsed, int maxDefenses, bool sentToBack)
     {

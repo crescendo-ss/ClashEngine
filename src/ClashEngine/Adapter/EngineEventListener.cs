@@ -135,11 +135,41 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             : $"Queued for {descriptor}{countSuffix}.";
     }
 
-    public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at)
+    public void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.Cancel)
     {
-        if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"QueueRemoved: {player.Name} <- {queueName}");
+        if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"QueueRemoved: {player.Name} <- {queueName} ({reason})");
+
+        // Disconnect: the player is gone -- nothing to DM. Matched: the orchestrator owns the
+        // "match found" messaging, so a "Left queue" line here would be noise. Both are removals
+        // that did not surface to this listener before the reason param existed; keep them silent.
+        if (reason is QueueRemovalReason.Disconnect or QueueRemovalReason.Matched) return;
+
+        if (_resolver.Resolve(player) is not { } p) return;
+        var descriptor = FormatQueueDescriptor(queueName);
+        var message = reason == QueueRemovalReason.AfkCull
+            ? $"Removed from {descriptor} after sitting idle in queue. Use ?play to rejoin."
+            : $"Left {descriptor} queue.";
+        _chat.SendMessage(p, message);
+    }
+
+    public void OnQueueDwellWarning(PlayerKey player, string queueName, DateTimeOffset at, TimeSpan dwell)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"QueueDwellWarning: {player.Name} in {queueName} for {Format(dwell)}");
         if (_resolver.Resolve(player) is { } p)
-            _chat.SendMessage(p, $"Left {FormatQueueDescriptor(queueName)} queue.");
+            _chat.SendMessage(p,
+                $"You've been in {FormatQueueDescriptor(queueName)} for {Format(dwell)} -- still around? " +
+                "Use ?play again to refresh, or you'll be removed for inactivity.");
+    }
+
+    public void OnDiscordLinkRequested(PlayerKey player, string discordAlias, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"DiscordLinkRequested: {player.Name} -> {discordAlias}");
+        if (_resolver.Resolve(player) is { } p)
+            _chat.SendMessage(p,
+                $"Sent a link request for Discord alias '{discordAlias}'. Check the Discord bot to confirm.");
     }
 
     public void OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,

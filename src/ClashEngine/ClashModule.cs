@@ -8,6 +8,7 @@ using ClashEngine.Adapter;
 using ClashEngine.Commands;
 using ClashEngine.Config;
 using ClashEngine.Core;
+using ClashEngine.Core.Events;
 using ClashEngine.Core.GameType;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Penalties;
@@ -82,6 +83,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private IMatchUploader? _matchUploader;
     private IGameTypeRegistrar? _gameTypeRegistrar;
     private IRatingsProvider? _ratingsProvider;
+    private IEventSink? _eventSink;
     private RatingsCoordinator? _ratingsCoordinator;
     private ClashReplayRecorder? _replayRecorder;
 
@@ -321,6 +323,14 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _gameTypeRegistrar = BuildGameTypeRegistrar();
         _ratingsProvider = BuildRatingsProvider();
 
+        // Outbound event-stream edge: a pure Core mapper translates telemetry into normalized
+        // JSON envelopes handed to the sink (HTTP when configured, no-op otherwise). The sink owns
+        // a background worker, so register its disposal LIFO like every other Register() callsite.
+        _eventSink = BuildEventSink();
+        if (_eventSink is IDisposable disposableEventSink)
+            _unregisterActions.Add(disposableEventSink.Dispose);
+        var eventStreamTelemetry = new EventStreamTelemetry(_eventSink, _engine.Queues, _clock);
+
         Func<Guid, string?>? recordingPathLookup = _replayRecorder is not null
             ? (Func<Guid, string?>)(id => _replayRecorder.GetRecordingPath(id))
             : null;
@@ -382,7 +392,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // promotion) during FinalizeMatch and drains them in OnMatchEnded, which must come after
         // ClashStatsTelemetry has broadcast the scoreboard. The other events EngineEventListener
         // handles are independent of the listeners that come before it here.
-        var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { _orchestrators };
+        // EventStreamTelemetry leads: it's a pure observer (emits to the sink, never broadcasts
+        // chat or mutates engine state), so it has no ordering dependency and reads the same state
+        // the other listeners see. It must NOT go after _listener, which stays last for its
+        // post-match DM drain.
+        var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { eventStreamTelemetry, _orchestrators };
         if (_replayRecorder is not null) listeners.Add(_replayRecorder);
         listeners.Add(_matchStatsTelemetry);
         listeners.Add(_listener);
@@ -617,6 +631,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _matchUploader = null;
         _gameTypeRegistrar = null;
         _ratingsProvider = null;
+        _eventSink = null;
         _ratingsCoordinator = null;
         _replayRecorder = null;
 
@@ -1005,5 +1020,31 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             return new HttpRatingsProvider(apiBase, apiKey, _log);
         }
         return new NoStatsServerRatingsProvider(_log);
+    }
+
+    /// <summary>
+    /// Picks the outbound event-stream sink based on config. With <c>EventStreamUrl</c> set (plus
+    /// an API key -- a dedicated <c>EventStreamApiKey</c>, falling back to <c>UploadApiKey</c> so a
+    /// single gateway needs no extra config), returns an <see cref="HttpEventSink"/> that POSTs
+    /// normalized queue/match/player events as JSON. Otherwise the no-op sink, so event emission
+    /// is simply suppressed. The URL is always dedicated -- never derived from <c>UploadUrl</c>,
+    /// since the event consumer (e.g. a Discord bot) is a distinct service.
+    /// </summary>
+    private IEventSink BuildEventSink()
+    {
+        var url = _config.GetStr(_config.Global, "ClashEngine", "EventStreamUrl");
+        var apiKey = _config.GetStr(_config.Global, "ClashEngine", "EventStreamApiKey");
+        if (string.IsNullOrWhiteSpace(apiKey))
+            apiKey = _config.GetStr(_config.Global, "ClashEngine", "UploadApiKey");
+
+        if (!string.IsNullOrWhiteSpace(url) && !string.IsNullOrWhiteSpace(apiKey))
+        {
+            _log.LogM(LogLevel.Info, LogCategory, $"Event stream enabled -> POST {url}");
+            return new HttpEventSink(url, apiKey, _log);
+        }
+
+        _log.LogM(LogLevel.Info, LogCategory,
+            "Event stream not configured (EventStreamUrl unset); queue/match event emission disabled.");
+        return NoOpEventSink.Instance;
     }
 }

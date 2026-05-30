@@ -1,12 +1,12 @@
 # ClashEngine integration surface
 
 ClashEngine's data shapes are stable wire contracts. If you want to build a
-visualizer, dashboard, or alternate stats backend, you don't need to fork the
-host project — implement the three Core interfaces below against your own
-transport, and the engine will talk to your code instead of (or alongside)
-the bundled HTTP implementations.
+visualizer, dashboard, alternate stats backend, or a live notifier (e.g. a
+Discord bot), you don't need to fork the host project — implement the four Core
+interfaces below against your own transport, and the engine will talk to your
+code instead of (or alongside) the bundled HTTP implementations.
 
-All three interfaces live in the `ClashEngine.Core` assembly. The DTOs they
+All four interfaces live in the `ClashEngine.Core` assembly. The DTOs they
 shuttle match the schema files in [`schema/`](../schema/) 1:1. Read the schemas
 for the wire format; read the interfaces for the engine-facing API.
 
@@ -17,6 +17,7 @@ for the wire format; read the interfaces for the engine-facing API.
 | [`schema/match.schema.json`](../schema/match.schema.json) | Outgoing | One finalized match envelope per game: metadata, ranked teams, every participant's stats, optional replay pointer. |
 | [`schema/gametype.schema.json`](../schema/gametype.schema.json) | Outgoing | One gametype registration per parsed `[ClashEngine]` block: name, label, description, shape metadata, origin arena. |
 | [`schema/rating.schema.json`](../schema/rating.schema.json) | Incoming | One `(player, gameType)` rating row: μ, σ, gamesPlayed, updatedAt. |
+| [`schema/event.schema.json`](../schema/event.schema.json) | Outgoing | A normalized stream of queue-membership, match-lifecycle, and player events for live advertising/notification (e.g. a Discord bot). Keyed by in-game player name. |
 
 ## Engine integration interfaces
 
@@ -25,14 +26,32 @@ for the wire format; read the interfaces for the engine-facing API.
 | [`IMatchUploader`](../src/ClashEngine.Core/Stats/IMatchUploader.cs) | `ClashEngine.Core.Stats` | Push (fire-and-forget) | Every finalized match. |
 | [`IGameTypeRegistrar`](../src/ClashEngine.Core/GameType/IGameTypeRegistrar.cs) | `ClashEngine.Core.GameType` | Push (with accept/reject) | Once per parsed gametype on every config load / hot reload. |
 | [`IRatingsProvider`](../src/ClashEngine.Core/Ratings/IRatingsProvider.cs) | `ClashEngine.Core.Ratings` | Pull (per gametype) | Per registered gametype on every player connect (deduplicated). |
+| [`IEventSink`](../src/ClashEngine.Core/Events/IEventSink.cs) | `ClashEngine.Core.Events` | Push (fire-and-forget) | Queue join/leave (with reason), near-full, AFK dwell warnings, match teams-locked/started/ended, and `?connect discord` link requests. |
 
-The bundled host implementations live under `src/ClashEngine/Stats/` and serve
-as worked examples:
+The bundled host implementations live under `src/ClashEngine/Stats/` and
+`src/ClashEngine/Events/` and serve as worked examples:
 
 - `HttpMatchUploader` + `JsonFileMatchUploader` (push to HTTP or write to disk)
 - `HttpGameTypeRegistrar` + `NoStatsServerGameTypeRegistrar` (HTTP POST or
   local-only fail-open)
 - `HttpRatingsProvider` + `NoStatsServerRatingsProvider` (HTTP GET or no-op)
+- `HttpEventSink` (push to HTTP) + `NoOpEventSink` (drop; the default when no
+  `EventStreamUrl` is configured)
+
+The event stream is the only edge whose mapping logic is itself in Core and
+unit-tested: `EventStreamTelemetry` (an `IMatchmakingTelemetry`) translates
+engine telemetry into `EventEnvelope`s for the sink. The engine is
+identity-agnostic — events carry in-game player names, and any Discord-account
+link and per-player opt-in live entirely in the consuming service. The
+`?connect discord <alias>` command is a pure relay: it emits a
+`player.discord_link_requested` event and stores nothing.
+
+**Future extensions (not in v1):** the stream does not yet emit queue
+created/removed (hot-reload) lifecycle events, periodic full-state snapshots,
+or social/penalty events (group invites, abandonment, griefing, KOTH winner
+promotion, team-collapse). Those telemetry events exist and could be mapped
+later; the v1 stream covers queue membership, match lifecycle, and the Discord
+link relay.
 
 Replay files (`.replay`) are emitted alongside the match envelope. They are
 captured by the host's `ClashReplayRecorder` and referenced by

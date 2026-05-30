@@ -76,6 +76,7 @@ internal static class QueueParser
         var (effectiveVetoes, vetoesDefaulted) = ReadVetoesRequired(config, handle, p, log);
         var (vetoWindow, vetoWindowDefaulted) = ReadVetoWindow(config, handle, p, log);
         var (promoteWinners, effectiveMaxDef, maxDefDefaulted) = ReadKoth(config, handle, p, log);
+        var (afkWarn, afkCull) = ReadAfkDwell(config, handle, p, log);
 
         // Preset defaults (only used when the corresponding explicit key wasn't set). Each row
         // is overridable -- explicit Queue<i><Key> always wins.
@@ -124,7 +125,9 @@ internal static class QueueParser
                 timeLimit: gt.TimeLimit,
                 returnItemsAction: gt.ReturnItemsAction,
                 ownerArenaName: ownerArenaName,
-                label: label);
+                label: label,
+                afkDwellWarning: afkWarn,
+                afkDwellCull: afkCull);
         }
         catch (Exception ex)
         {
@@ -149,6 +152,7 @@ internal static class QueueParser
                 $"VetoWindow={(vetoWindow is { } vwd ? vwd.ToString() : "(default 60s)")}{Note(vetoWindowDefaulted)}, " +
                 $"PromoteWinners={(promoteWinners ? "yes" : "no")}, " +
                 $"MaxConsecutiveDefenses={effectiveMaxDef}{Note(maxDefDefaulted)}, " +
+                $"AfkWarn={DescribeAfk(afkWarn)}, AfkCull={DescribeAfk(afkCull)}, " +
                 $"EndPolicy=[{endPolicyDesc}].");
         }
         return def;
@@ -262,6 +266,37 @@ internal static class QueueParser
         }
         return (promote, raw ?? 3, MaxDefDefaulted: raw is null);
     }
+
+    /// <summary>
+    /// Reads the in-queue AFK dwell thresholds. <c>Queue&lt;i&gt;AfkWarn</c> fires a one-time
+    /// "still there?" warning after a player has waited that long; <c>Queue&lt;i&gt;AfkCull</c>
+    /// auto-dequeues them after that long. Both accept seconds or <c>HH:MM:SS</c>. When a key is
+    /// unset it defaults to 15 min (warn) / 20 min (cull); an explicit <c>0</c> disables that
+    /// stage (<c>AfkWarn=0</c> disables warning AND culling for the queue; <c>AfkCull=0</c> keeps
+    /// the warning but never culls). A cull below the warn is raised to the warn (with a notice)
+    /// rather than dropping the queue.
+    /// </summary>
+    private static (TimeSpan Warn, TimeSpan Cull) ReadAfkDwell(
+        IConfigManager config, ConfigHandle handle, string p, ClashLog? log)
+    {
+        var warn = ConfigReadHelpers.TryReadTimeSpan(config, handle, p + "AfkWarn", log, p)
+            ?? TimeSpan.FromMinutes(15);
+        var cull = ConfigReadHelpers.TryReadTimeSpan(config, handle, p + "AfkCull", log, p)
+            ?? TimeSpan.FromMinutes(20);
+
+        if (warn < TimeSpan.Zero) warn = TimeSpan.Zero;
+        if (cull < TimeSpan.Zero) cull = TimeSpan.Zero;
+
+        if (warn > TimeSpan.Zero && cull > TimeSpan.Zero && cull < warn)
+        {
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{p}AfkCull ({cull}) is below {p}AfkWarn ({warn}); raising cull to the warn threshold.");
+            cull = warn;
+        }
+        return (warn, cull);
+    }
+
+    private static string DescribeAfk(TimeSpan ts) => ts <= TimeSpan.Zero ? "off" : ts.ToString();
 
     /// <summary>
     /// End policy: <c>KillTarget</c> and <c>TimeLimit</c> can both be set, in which case

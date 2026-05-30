@@ -41,7 +41,9 @@ public sealed class QueueDefinition
         TimeSpan? timeLimit = null,
         ItemsAction returnItemsAction = ItemsAction.Full,
         string? ownerArenaName = null,
-        string? label = null)
+        string? label = null,
+        TimeSpan? afkDwellWarning = null,
+        TimeSpan? afkDwellCull = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -66,6 +68,15 @@ public sealed class QueueDefinition
             throw new ArgumentOutOfRangeException(nameof(shipChangeGracePeriod), "Must be non-negative.");
         if (timeLimit is { } tl && tl <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeLimit), "Must be positive when set.");
+        if (afkDwellWarning is { } adw && adw < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(afkDwellWarning), "Must be non-negative.");
+        if (afkDwellCull is { } adc && adc < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(afkDwellCull), "Must be non-negative.");
+        if (afkDwellWarning is { } warnPositive && warnPositive > TimeSpan.Zero
+            && afkDwellCull is { } cullPositive && cullPositive > TimeSpan.Zero
+            && cullPositive < warnPositive)
+            throw new ArgumentOutOfRangeException(nameof(afkDwellCull),
+                "Must be >= afkDwellWarning when both are positive.");
 
         if (spawnSetByTeam is not null)
         {
@@ -119,6 +130,8 @@ public sealed class QueueDefinition
         ShipChangeGracePeriod = shipChangeGracePeriod ?? TimeSpan.FromSeconds(10);
         TimeLimit = timeLimit;
         ReturnItemsAction = returnItemsAction;
+        AfkDwellWarning = afkDwellWarning;
+        AfkDwellCull = afkDwellCull;
         OwnerArenaName = ownerArenaName;
 
         // BaseName is the structural part of UniqueId without the arena prefix. Used as the
@@ -315,6 +328,23 @@ public sealed class QueueDefinition
     /// free-reload loophole). <see cref="ItemsAction.Burn"/> zeros their loadout entirely.
     /// </summary>
     public ItemsAction ReturnItemsAction { get; }
+
+    /// <summary>
+    /// How long a player may sit in this queue before the engine fires
+    /// <see cref="ClashEngine.Core.Adapter.IMatchmakingTelemetry.OnQueueDwellWarning"/> (once per
+    /// dwell-cycle). <see langword="null"/> or <see cref="TimeSpan.Zero"/> disables both the
+    /// warning and the cull for this queue. Re-queuing resets the timer.
+    /// </summary>
+    public TimeSpan? AfkDwellWarning { get; }
+
+    /// <summary>
+    /// How long a player may sit in this queue before the engine auto-dequeues them (firing
+    /// <see cref="ClashEngine.Core.Adapter.IMatchmakingTelemetry.OnQueueRemoved"/> with
+    /// <see cref="ClashEngine.Core.Adapter.QueueRemovalReason.AfkCull"/>). <see langword="null"/>
+    /// or <see cref="TimeSpan.Zero"/> disables culling while leaving any warning intact. Must be
+    /// >= <see cref="AfkDwellWarning"/> when both are positive.
+    /// </summary>
+    public TimeSpan? AfkDwellCull { get; }
 
     /// <summary>Conventional team-index -> freq number (100, 200, 300, ...).</summary>
     public static short FreqOf(int teamIndex) => (short)(100 * (teamIndex + 1));

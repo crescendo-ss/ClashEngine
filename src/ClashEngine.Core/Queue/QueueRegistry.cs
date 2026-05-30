@@ -54,7 +54,9 @@ public sealed class QueueRegistry
         TimeSpan? timeLimit = null,
         ItemsAction returnItemsAction = ItemsAction.Full,
         string? ownerArenaName = null,
-        string? label = null)
+        string? label = null,
+        TimeSpan? afkDwellWarning = null,
+        TimeSpan? afkDwellCull = null)
     {
         if (_byName.ContainsKey(name))
             throw new ArgumentException($"Queue '{name}' already registered.", nameof(name));
@@ -68,7 +70,8 @@ public sealed class QueueRegistry
             lookAheadWindow, promoteWinnersToFront, maxConsecutiveDefenses,
             holdWindow, qualityCeiling, knockoutSpecDelay,
             livesPerPlayer, teamCollapseGrace, shipChangeGracePeriod,
-            timeLimit, returnItemsAction, ownerArenaName, label);
+            timeLimit, returnItemsAction, ownerArenaName, label,
+            afkDwellWarning, afkDwellCull);
         _byName[name] = def;
         return def;
     }
@@ -308,6 +311,8 @@ public sealed class QueueRegistry
         if (a.ReturnItemsAction != b.ReturnItemsAction) return false;
         if (a.WarpOnSpawn != b.WarpOnSpawn) return false;
         if (a.MaxSpawnDriftTiles != b.MaxSpawnDriftTiles) return false;
+        if (a.AfkDwellWarning != b.AfkDwellWarning) return false;
+        if (a.AfkDwellCull != b.AfkDwellCull) return false;
         return true;
     }
 }

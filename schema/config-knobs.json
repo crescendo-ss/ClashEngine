@@ -69,6 +69,20 @@
           "default": 5,
           "description": "Sampling frequency of the distance-to-nearest-enemy sampler feeding the scoreboard's dE column. 0 disables.",
           "source": "src/ClashEngine/ClashModule.cs:346"
+        },
+        {
+          "key": "EventStreamUrl",
+          "type": "url",
+          "default": null,
+          "description": "Outbound event-stream endpoint receiving normalized queue/match/player JSON events (one application/json POST per event, X-Api-Key auth) for live advertising/notification, e.g. a Discord bot. Unset (the default) disables event emission. Always dedicated -- never derived from UploadUrl, since the consumer is a distinct service.",
+          "source": "src/ClashEngine/ClashModule.cs:BuildEventSink"
+        },
+        {
+          "key": "EventStreamApiKey",
+          "type": "string",
+          "default": null,
+          "description": "Sent as the X-Api-Key header on event POSTs. Falls back to UploadApiKey when unset, so a single gateway terminating both needs no extra config.",
+          "source": "src/ClashEngine/ClashModule.cs:BuildEventSink"
         }
       ]
     },
@@ -322,6 +336,20 @@
           "default": 3,
           "description": "Max consecutive wins a champion can defend before going to the back of the queue. Only meaningful with PromoteWinners=1. Below 1 -> dropped to default.",
           "source": "src/ClashEngine/Config/QueueParser.cs:247 (ReadKoth)"
+        },
+        {
+          "key": "Queue<i>AfkWarn",
+          "type": "duration",
+          "default": 900,
+          "description": "In-queue dwell time (seconds or HH:MM:SS) before a one-time 'still there?' AFK warning fires (queue.dwell_warning event + in-game DM). 0 disables both the warning AND the cull for this queue. Re-queuing resets the timer.",
+          "source": "src/ClashEngine/Config/QueueParser.cs (ReadAfkDwell)"
+        },
+        {
+          "key": "Queue<i>AfkCull",
+          "type": "duration",
+          "default": 1200,
+          "description": "In-queue dwell time (seconds or HH:MM:SS) before the player is auto-dequeued (queue.left reason=afk_cull). 0 keeps the warning but never culls. A value below AfkWarn is raised to AfkWarn.",
+          "source": "src/ClashEngine/Config/QueueParser.cs (ReadAfkDwell)"
         }
       ]
     },

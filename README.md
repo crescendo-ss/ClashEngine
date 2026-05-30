@@ -140,6 +140,8 @@ cmd_chart
 | `RecordReplays` | 0/1 | 1 | Record every started match using the in-plug-in `MatchRecorder`. |
 | `ReplayRecordingDir` | path | `<AppContext.BaseDirectory>/clash-replays` | Where in-flight `.replay` files land. Files are deleted after a successful upload. |
 | `DistanceSampleHz` | int (1–50) | 5 | Frequency of the periodic distance-to-nearest-enemy sampler used for the scoreboard's `dE` column. Set to `0` to disable. |
+| `EventStreamUrl` | URL | (unset) | Outbound [event stream](#event-stream) endpoint. Receives one `application/json` POST per queue/match/player event for live advertising/notification (e.g. a Discord bot). Unset disables event emission. Never derived from `UploadUrl` — point it at the consuming service. |
+| `EventStreamApiKey` | string | (unset) | Sent as `X-Api-Key` on event POSTs. Falls back to `UploadApiKey` when unset, so a single gateway terminating both needs no extra config. |
 
 ### Game types
 
@@ -205,6 +207,8 @@ These keys move the match's pre-GO physical setup off the arena's default spawn 
 | `Queue<i>VetoWindow` | `HH:MM:SS` | `0:01:00` | Open period for vetos after a griefing flag fires. Penalty becomes final at the end of the window if the threshold wasn't reached. |
 | `Queue<i>PromoteWinners` | 0/1 | `0` | KOTH ("king of the hill") mode: the winning team's players are auto-re-enqueued at the head of this queue after a Completed match. Off by default. |
 | `Queue<i>MaxConsecutiveDefenses` | int ≥ 1 | `3` | Max consecutive wins a champion can defend before being sent to the back of the queue to give challengers a clean shot. Only meaningful with `PromoteWinners = 1`. |
+| `Queue<i>AfkWarn` | `HH:MM:SS` or seconds | `0:15:00` | In-queue dwell time before a one-time "still there?" AFK warning fires (a `queue.dwell_warning` [event](#event-stream) plus an in-game DM). `0` disables both the warning **and** the cull for this queue. Re-queuing resets the timer. |
+| `Queue<i>AfkCull` | `HH:MM:SS` or seconds | `0:20:00` | In-queue dwell time before the player is auto-dequeued for inactivity (a `queue.left` event with `reason = afk_cull`). `0` keeps the warning but never culls. A value below `AfkWarn` is raised to `AfkWarn`. |
 
 ### Per-arena `DefaultQueue`
 
@@ -332,6 +336,24 @@ The same payload structure is used to render the in-game scoreboard at match end
 
 ---
 
+## Event stream
+
+ClashEngine can push a normalized stream of queue- and match-state events to an HTTP endpoint so an **external service** — a Discord bot, a dashboard, a webhook relay — can advertise live queue state (e.g. by editing a "queue board" message) and notify players. Set `EventStreamUrl` (+ `EventStreamApiKey`, or it reuses `UploadApiKey`) under `[ClashEngine]` in global.conf to enable it; unset, emission is simply off.
+
+The wire format is `schema/event.schema.json`; the integration contract (the `IEventSink` edge) is documented in [`docs/INTEGRATION.md`](docs/INTEGRATION.md). Each event is one fire-and-forget `application/json` POST with an `X-Api-Key` header; delivery is best-effort (drops on backend overflow), so a consumer should tolerate gaps — every queue event carries the queue's current `count`/`capacity`, so a board self-heals from the next event.
+
+v1 emits:
+
+- **Queue membership** — `queue.joined`, `queue.left` (with a `reason`: `cancel` / `disconnect` / `matched` / `afk_cull` / `group_change` / `reset`), `queue.near_full`, and `queue.dwell_warning`.
+- **Match lifecycle** — `match.teams_locked` (proposal), `match.started` (GO), `match.ended` (outcome + ranked teams + duration).
+- **Player** — `player.discord_link_requested` from `?connect discord <alias>`.
+
+**ClashEngine is identity-agnostic:** events are keyed by in-game player name. Any Discord-account link and per-player opt-in live entirely in the consuming service — `?connect discord` just relays the alias; the engine stores nothing.
+
+**AFK watchdog.** Players who sit in a queue too long are nudged then culled, per-queue via `Queue<i>AfkWarn` / `Queue<i>AfkCull` (defaults 15 min / 20 min; `AfkWarn = 0` disables). The warning surfaces as a `queue.dwell_warning` event and an in-game DM; the cull dequeues the player and surfaces as `queue.left` with `reason = afk_cull`. Re-queuing (`?play`) resets the timer.
+
+---
+
 ## Player commands
 
 | Command | Group | Notes |
@@ -346,6 +368,7 @@ The same payload structure is used to render the in-game scoreboard at match end
 | `?leaveparty` | player | Leave your current party. If you're the leader of a closed party, the party disbands. |
 | `?partymode [open\|closed]` | player | View or change your party's mode. Closed parties have a leader who controls invites. |
 | `?rating` | player | Show your skill rating per game type. |
+| `?connect discord <alias>` | player | Relay a request to link your in-game name to a Discord alias, so the [event-stream](#event-stream) consumer (e.g. a Discord bot) can notify you. ClashEngine stores nothing — it emits a `player.discord_link_requested` event and the bot service performs the link/opt-in. |
 | `?chart` | player | Show the live scoreboard for the match you're in or spectating. |
 | `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
 | `?helpclash` | player | List the player commands. |

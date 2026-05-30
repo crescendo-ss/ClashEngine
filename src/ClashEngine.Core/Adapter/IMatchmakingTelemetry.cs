@@ -24,7 +24,33 @@ public interface IMatchmakingTelemetry
     /// fire <see cref="OnWinnerPromoted"/> instead of this event.
     /// </summary>
     void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) { }
-    void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at) { }
+
+    /// <summary>
+    /// A player left a queue. <paramref name="reason"/> distinguishes a user cancel from a
+    /// disconnect, a match formation, an AFK cull, a party change, or an operator reset; it
+    /// defaults to <see cref="QueueRemovalReason.Cancel"/> only as source-compatibility for
+    /// external implementers -- every engine call site passes an explicit reason.
+    /// </summary>
+    void OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at,
+        QueueRemovalReason reason = QueueRemovalReason.Cancel) { }
+
+    /// <summary>
+    /// A player has been sitting in <paramref name="queueName"/> for <paramref name="dwell"/>,
+    /// crossing the queue's AFK warning threshold for the first time this dwell-cycle. The engine
+    /// will auto-dequeue them (firing <see cref="OnQueueRemoved"/> with
+    /// <see cref="QueueRemovalReason.AfkCull"/>) once the cull threshold is reached, unless they
+    /// re-queue first (which resets the timer). Adapters typically nudge the player to confirm
+    /// they're still around.
+    /// </summary>
+    void OnQueueDwellWarning(PlayerKey player, string queueName, DateTimeOffset at, TimeSpan dwell) { }
+
+    /// <summary>
+    /// A player asked (via <c>?connect discord</c>) to link their in-game name to a Discord
+    /// <paramref name="discordAlias"/>. Purely a relay: the engine neither stores nor validates
+    /// the alias. The event-stream adapter forwards it to the external service, which performs the
+    /// actual account link and opt-in; a chat adapter typically just acks the request.
+    /// </summary>
+    void OnDiscordLinkRequested(PlayerKey player, string discordAlias, DateTimeOffset at) { }
 
     /// <summary>
     /// A winning player was just auto-re-enqueued by KOTH mode
