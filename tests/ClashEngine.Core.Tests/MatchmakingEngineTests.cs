@@ -469,4 +469,48 @@ public class MatchmakingEngineTests
         Assert.Throws<ArgumentNullException>(() => new MatchmakingEngine(ratings, null!, policies));
         Assert.Throws<ArgumentNullException>(() => new MatchmakingEngine(ratings, clock, null!));
     }
+
+    [Fact]
+    public void Survivors_are_notified_free_to_leave_when_teammate_abandons()
+    {
+        // 2v2: one player on team0 leaves while their teammate stays in. The leaver's per-player
+        // grace expires mid-match, flipping them to Abandoned while team0 is still viable -- so the
+        // surviving teammate must be told once that they are now free to leave penalty-free.
+        var h = new Harness(graceWindow: TimeSpan.FromSeconds(30), killTarget: 100);
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        var match = h.StartProposedMatch();
+
+        var team0 = match.Teams[0];
+        var team1 = match.Teams[1];
+        var leaver = team0[0];
+        var survivor = team0[1];
+
+        h.Engine.OnPlayerLeftArena(leaver, h.Clock.UtcNow);
+
+        // Before grace expires: nothing fires yet.
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        h.Engine.Tick(h.Clock.UtcNow);
+        Assert.Empty(h.Telemetry.TeammateAbandoned);
+
+        // Grace expires: the leaver is assessed an abandon and the survivor is notified once.
+        h.Clock.Advance(TimeSpan.FromSeconds(40));
+        h.Engine.Tick(h.Clock.UtcNow);
+
+        var evt = Assert.Single(h.Telemetry.TeammateAbandoned);
+        Assert.Equal(leaver, evt.Abandoner);
+        Assert.Equal(match.MatchId, evt.MatchId);
+        Assert.Contains(survivor, evt.Survivors);
+        Assert.DoesNotContain(leaver, evt.Survivors);
+        foreach (var opponent in team1)
+            Assert.DoesNotContain(opponent, evt.Survivors);
+
+        // A subsequent tick must not re-fire for the same abandonment.
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.Tick(h.Clock.UtcNow);
+        Assert.Single(h.Telemetry.TeammateAbandoned);
+    }
 }

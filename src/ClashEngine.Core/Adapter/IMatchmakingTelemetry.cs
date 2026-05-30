@@ -113,6 +113,15 @@ public interface IMatchmakingTelemetry
     void OnAbandonment(PlayerKey player, int offenseCount, DateTimeOffset timeoutUntil) { }
 
     /// <summary>
+    /// A match participant was just assessed an abandon (their per-player grace window expired
+    /// mid-match) while <paramref name="survivors"/> -- their still-active teammates -- remain in
+    /// the match. Since the abandoned teammate is no longer viable, those survivors may now leave
+    /// without being assessed an abandon themselves; the adapter notifies them of that courtesy.
+    /// Fires once per fresh abandonment transition and only while the match is still live.
+    /// </summary>
+    void OnTeammateAbandoned(IReadOnlyCollection<PlayerKey> survivors, PlayerKey abandoner, Guid matchId, DateTimeOffset at) { }
+
+    /// <summary>
     /// A player was released from the match roster mid-match (e.g. lives-out elimination) but the
     /// match itself is still live. They stay in the match's stats record for end-of-match
     /// rating/upload purposes; this hook lets stats consumers close the player's open life and

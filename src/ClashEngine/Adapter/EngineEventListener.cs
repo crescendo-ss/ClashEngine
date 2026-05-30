@@ -330,6 +330,22 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             $"You abandoned a match (offense #{offenseCount}). Queue-locked for {HumanDuration.Humanize(remaining)}."));
     }
 
+    public void OnTeammateAbandoned(IReadOnlyCollection<PlayerKey> survivors, PlayerKey abandoner, Guid matchId, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"TeammateAbandoned: {abandoner.Name} abandoned match {matchId:N}; notifying {survivors.Count} survivor(s) they are free to leave.");
+        // Sent live, the moment the abandon is assessed -- not buffered like the post-match DMs
+        // above. The surviving teammate can keep playing or leave penalty-free, so they need to
+        // know now, while the match is still running.
+        foreach (var survivor in survivors)
+        {
+            if (_resolver.Resolve(survivor) is { } p)
+                _chat.SendMessage(p,
+                    $"Your teammate {abandoner.Name} abandoned the match -- you are free to leave without penalty.");
+        }
+    }
+
     public void OnTeamCollapsing(ActiveMatch match, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
     {
         _verbose.Info(LogCategory,

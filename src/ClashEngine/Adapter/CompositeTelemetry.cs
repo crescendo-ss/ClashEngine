@@ -69,6 +69,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnAbandonment(p, n, until);
     }
+    public void OnTeammateAbandoned(IReadOnlyCollection<PlayerKey> survivors, PlayerKey abandoner, Guid matchId, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnTeammateAbandoned(survivors, abandoner, matchId, at);
+    }
     public void OnPlayerReleasedFromMatch(PlayerKey p, Guid matchId, DateTimeOffset at)
     {
         foreach (var l in _listeners) l.OnPlayerReleasedFromMatch(p, matchId, at);

@@ -18,6 +18,7 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public List<ActiveMatch> Started { get; } = new();
     public List<MatchOutcome> Ended { get; } = new();
     public List<(PlayerKey Player, int OffenseCount, DateTimeOffset Until)> Abandonments { get; } = new();
+    public List<(IReadOnlyCollection<PlayerKey> Survivors, PlayerKey Abandoner, Guid MatchId, DateTimeOffset At)> TeammateAbandoned { get; } = new();
     public List<(PlayerKey Player, Guid MatchId, DateTimeOffset At)> PlayerReleases { get; } = new();
     public List<(Guid MatchId, int TeamIdx, DateTimeOffset Since, DateTimeOffset ForfeitAt)> TeamsCollapsing { get; } = new();
     public List<(Guid MatchId, int TeamIdx)> TeamsRecovered { get; } = new();
@@ -52,6 +53,8 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public void OnMatchEnded(MatchOutcome outcome) => Ended.Add(outcome);
     public void OnAbandonment(PlayerKey player, int offenseCount, DateTimeOffset timeoutUntil) =>
         Abandonments.Add((player, offenseCount, timeoutUntil));
+    public void OnTeammateAbandoned(IReadOnlyCollection<PlayerKey> survivors, PlayerKey abandoner, Guid matchId, DateTimeOffset at) =>
+        TeammateAbandoned.Add((survivors, abandoner, matchId, at));
     public void OnPlayerReleasedFromMatch(PlayerKey player, Guid matchId, DateTimeOffset at) =>
         PlayerReleases.Add((player, matchId, at));
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt) =>

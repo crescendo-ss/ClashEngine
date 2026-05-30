@@ -225,6 +225,35 @@ public sealed class ActiveMatch
     public int? TeamIndexOf(PlayerKey player) =>
         _teamOf.TryGetValue(player, out var t) ? t : null;
 
+    /// <summary>
+    /// True if <paramref name="player"/> is currently on track to be counted as an abandoner at
+    /// match end: they left while at least one teammate was still viable and have not been excused
+    /// by a within-grace return. Mirrors the candidate set that feeds
+    /// <see cref="MatchOutcome.AbandonedBy"/>.
+    /// </summary>
+    public bool IsCandidateAbandoner(PlayerKey player) => _candidateAbandoners.Contains(player);
+
+    /// <summary>
+    /// Teammates of <paramref name="player"/> who are currently <see cref="PlayerStatus.Active"/>
+    /// and not knocked out -- i.e. still in the match and able to keep playing. Used to notify the
+    /// survivors when a teammate is assessed an abandon that they may now leave penalty-free.
+    /// </summary>
+    public IReadOnlyList<PlayerKey> ActiveTeammatesOf(PlayerKey player)
+    {
+        if (!_teamOf.TryGetValue(player, out var teamIdx)) return Array.Empty<PlayerKey>();
+        List<PlayerKey>? result = null;
+        var team = Teams[teamIdx];
+        for (int j = 0; j < team.Count; j++)
+        {
+            var mate = team[j];
+            if (mate == player) continue;
+            if (GetStatus(mate) != PlayerStatus.Active) continue;
+            if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(mate)) continue;
+            (result ??= new List<PlayerKey>()).Add(mate);
+        }
+        return result is null ? Array.Empty<PlayerKey>() : result;
+    }
+
     /// <summary>Player has entered the arena and joined their assigned ship/freq.</summary>
     public void OnPlayerJoined(PlayerKey player, DateTimeOffset at)
     {

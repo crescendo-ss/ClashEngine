@@ -653,17 +653,22 @@ public sealed class MatchmakingEngine
     public void Tick(DateTimeOffset at)
     {
         List<ActiveMatch>? toFinalize = null;
-        List<(ActiveMatch Match, Dictionary<int, DateTimeOffset> Prev)>? collapseSnapshots = null;
+        List<(ActiveMatch Match, Dictionary<int, DateTimeOffset> Prev, HashSet<PlayerKey> PrevAbandoned)>? collapseSnapshots = null;
         foreach (var m in _matches.Values)
         {
-            // Snapshot collapse map before Tick so we can emit collapse/recovery events.
-            (collapseSnapshots ??= new()).Add((m, SnapshotCollapsed(m)));
+            // Snapshot collapse map and the already-abandoned set before Tick so we can emit
+            // collapse/recovery and free-to-leave events for the transitions this tick produces.
+            (collapseSnapshots ??= new()).Add((m, SnapshotCollapsed(m), SnapshotAbandoned(m)));
             m.Tick(at);
             if (HasFinished(m)) (toFinalize ??= new List<ActiveMatch>()).Add(m);
         }
         if (collapseSnapshots is not null)
-            foreach (var (m, prev) in collapseSnapshots)
-                if (!HasFinished(m)) DiffCollapsedAndEmit(m, prev);
+            foreach (var (m, prev, prevAbandoned) in collapseSnapshots)
+                if (!HasFinished(m))
+                {
+                    DiffCollapsedAndEmit(m, prev);
+                    EmitFreeToLeaveTransitions(m, prevAbandoned, at);
+                }
         if (toFinalize is not null)
             foreach (var m in toFinalize) FinalizeMatch(m, at);
 
@@ -1079,6 +1084,40 @@ public sealed class MatchmakingEngine
         {
             if (!curr.ContainsKey(kvp.Key))
                 _telemetry.OnTeamRecovered(m, kvp.Key);
+        }
+    }
+
+    /// <summary>Captures the set of players already Abandoned so a follow-up call to
+    /// <see cref="EmitFreeToLeaveTransitions"/> can tell which abandons are fresh this tick.</summary>
+    private static HashSet<PlayerKey> SnapshotAbandoned(ActiveMatch m)
+    {
+        var into = new HashSet<PlayerKey>();
+        foreach (var kvp in m.Statuses)
+            if (kvp.Value == PlayerStatus.Abandoned)
+                into.Add(kvp.Key);
+        return into;
+    }
+
+    /// <summary>
+    /// After a tick, notify the still-active teammates of any player whose grace window just
+    /// expired (a fresh transition into <see cref="PlayerStatus.Abandoned"/>) that they may now
+    /// leave penalty-free. Only while the match is still live -- if it ended this tick, the
+    /// end-of-match messaging covers the survivors instead.
+    /// </summary>
+    private void EmitFreeToLeaveTransitions(ActiveMatch m, HashSet<PlayerKey> prevAbandoned, DateTimeOffset now)
+    {
+        if (m.State != MatchState.Live) return;
+
+        foreach (var kvp in m.Statuses)
+        {
+            if (kvp.Value != PlayerStatus.Abandoned) continue;
+            var abandoner = kvp.Key;
+            if (prevAbandoned.Contains(abandoner)) continue;        // not a fresh transition
+            if (!m.IsCandidateAbandoner(abandoner)) continue;       // lives-out leaver, not an abandon
+
+            var survivors = m.ActiveTeammatesOf(abandoner);
+            if (survivors.Count == 0) continue;
+            _telemetry.OnTeammateAbandoned(survivors, abandoner, m.MatchId, now);
         }
     }
 }
