@@ -24,7 +24,8 @@ public sealed class TeamBalancer
         IReadOnlyList<QueueEntry> candidates,
         MatchShape shape,
         IMatchQualityFunction quality,
-        bool requireGroupsTogether = false)
+        bool requireGroupsTogether = false,
+        IReadOnlyDictionary<GroupId, int>? fullGroupSizes = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(shape);
@@ -52,6 +53,13 @@ public sealed class TeamBalancer
 
             // Per-subset MaxOrdinalSpread check.
             if (shape.MaxOrdinalSpread is double cap && SubsetSpread(pool, subset) > cap)
+                continue;
+
+            // Party integrity: a group is selected all-or-nothing. Skip any subset that includes
+            // some-but-not-all of a group's queued members. This is independent of the same-team
+            // SplitsAnyGroup rule below -- splitting a fully-selected party across teams is allowed,
+            // but pulling in part of a party while the rest stay in the queue is not.
+            if (fullGroupSizes is not null && SubsetPartiallySelectsGroup(subset, pool, fullGroupSizes))
                 continue;
 
             foreach (var partition in EnumeratePartitions(needed, shape.TeamCount, shape.PlayersPerTeam))
@@ -127,6 +135,31 @@ public sealed class TeamBalancer
             if (o > maxOrd) maxOrd = o;
         }
         return maxOrd - minOrd;
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="subset"/> includes some-but-not-all of any group's queued
+    /// members -- i.e. the subset would partially select a party. <paramref name="fullGroupSizes"/>
+    /// counts each group across the WHOLE queue snapshot (not just the candidate pool), so a group
+    /// with a member beyond the lookahead pool can never reach its full size within a pool subset
+    /// and is rejected here too -- preventing a partial pull-in across the lookahead boundary.
+    /// </summary>
+    private static bool SubsetPartiallySelectsGroup(
+        int[] subset, QueueEntry[] pool, IReadOnlyDictionary<GroupId, int> fullGroupSizes)
+    {
+        Dictionary<GroupId, int>? selected = null;
+        for (int i = 0; i < subset.Length; i++)
+        {
+            if (pool[subset[i]].Group is not GroupId g) continue;
+            selected ??= new Dictionary<GroupId, int>();
+            selected[g] = selected.TryGetValue(g, out var c) ? c + 1 : 1;
+        }
+        if (selected is null) return false;
+
+        foreach (var kvp in selected)
+            if (!fullGroupSizes.TryGetValue(kvp.Key, out var full) || kvp.Value != full)
+                return true;
+        return false;
     }
 
     /// <summary>

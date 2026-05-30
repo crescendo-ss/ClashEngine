@@ -404,4 +404,59 @@ public class GroupMatchmakingTests
 
         Assert.Empty(h.Engine.Groups.PendingFor(K("B"), h.Clock.UtcNow));
     }
+
+    [Fact]
+    public void Party_with_a_member_beyond_the_lookahead_is_not_partially_selected()
+    {
+        // 2v2 with the default lookahead (= 4). Queue three solos, then a 2-party at the back, so
+        // only ONE party member (the 4th entry) lands inside the lookahead pool and the other sits
+        // just beyond it. The party is all-or-nothing: the in-pool member must NOT be pulled in
+        // without its partner -- and since the partner is outside the pool, no match can form.
+        var h = new Harness();
+        h.Connect("C", "D", "E", "A", "B");
+
+        h.Engine.TryEnqueue(K("C"), "2v2", T0);
+        h.Engine.TryEnqueue(K("D"), "2v2", T0.AddSeconds(1));
+        h.Engine.TryEnqueue(K("E"), "2v2", T0.AddSeconds(2));
+        h.Engine.TryEnqueueGroup(new[] { K("A"), K("B") }, "2v2", T0.AddSeconds(3), out _);
+
+        // Tick across a long wait window: even as the quality threshold relaxes, the party can
+        // never be partially selected, so no proposal is ever produced.
+        for (int s = 3; s <= 120; s += 10)
+            h.Engine.Tick(T0.AddSeconds(s));
+
+        Assert.Empty(h.Telemetry.Proposed);
+    }
+
+    [Fact]
+    public void A_party_is_pulled_in_whole_rather_than_one_member_dropped_for_quality()
+    {
+        // All five candidates fit in the lookahead pool. Dropping the party's off-rated member (B)
+        // would let the matcher form a flawless {C,D,E,A} 2v2 -- but that partially selects the
+        // party. With integrity enforced the matcher must take the whole party in (or none), so the
+        // proposal contains BOTH A and B.
+        var h = new Harness();
+        h.Engine.Queues.Register(
+            "wide2v2",
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gtw",
+            lookAheadWindow: 8);
+
+        h.Connect("C", "D", "E", "A", "B");
+        h.SetRating("C", 25); h.SetRating("D", 25); h.SetRating("E", 25);
+        h.SetRating("A", 25); h.SetRating("B", 30);   // {C,D,E,A} would be the "best" partial pick
+
+        h.Engine.TryEnqueue(K("C"), "wide2v2", T0);
+        h.Engine.TryEnqueue(K("D"), "wide2v2", T0.AddSeconds(1));
+        h.Engine.TryEnqueue(K("E"), "wide2v2", T0.AddSeconds(2));
+        h.Engine.TryEnqueueGroup(new[] { K("A"), K("B") }, "wide2v2", T0.AddSeconds(3), out _);
+
+        h.Engine.Tick(T0.AddSeconds(3));
+
+        Assert.Single(h.Telemetry.Proposed);
+        var players = h.Telemetry.Proposed[0].Teams.SelectMany(t => t).ToList();
+        Assert.Contains(K("A"), players);
+        Assert.Contains(K("B"), players);
+    }
 }

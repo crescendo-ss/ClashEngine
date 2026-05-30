@@ -130,10 +130,14 @@ public sealed class Matcher
                 ? fullSnapshot
                 : SliceFront(fullSnapshot, poolSize);
 
+            // Group sizes are counted over the FULL queue (not the lookahead slice) so the balancer
+            // can tell a party is only partially within the pool and refuse to pull part of it in.
+            var fullGroupSizes = ComputeGroupSizes(fullSnapshot);
+
             var longestWait = now - snapshot[0].EnqueuedAt;
             double minQuality = def.QualityPolicy.MinQuality(longestWait);
 
-            var current = FindBestRespectingGroups(snapshot, def, minQuality);
+            var current = FindBestRespectingGroups(snapshot, def, minQuality, fullGroupSizes);
             if (current is null)
             {
                 _held.Remove(def.UniqueId);
@@ -181,14 +185,32 @@ public sealed class Matcher
         return null;
     }
 
-    private BalanceResult? FindBestRespectingGroups(IReadOnlyList<QueueEntry> snapshot, QueueDefinition def, double minQuality)
+    private BalanceResult? FindBestRespectingGroups(
+        IReadOnlyList<QueueEntry> snapshot, QueueDefinition def, double minQuality,
+        IReadOnlyDictionary<GroupId, int>? fullGroupSizes)
     {
-        var grouped = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: true);
+        var grouped = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: true, fullGroupSizes);
         if (grouped is not null && grouped.Quality >= minQuality) return grouped;
 
-        var split = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: false);
+        var split = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: false, fullGroupSizes);
         if (split is not null && split.Quality >= minQuality) return split;
         return null;
+    }
+
+    /// <summary>
+    /// Counts queued members per group across <paramref name="entries"/>. Returns null when no
+    /// grouped entries are present (the common solo-only case), letting the balancer skip the check.
+    /// </summary>
+    private static IReadOnlyDictionary<GroupId, int>? ComputeGroupSizes(IReadOnlyList<QueueEntry> entries)
+    {
+        Dictionary<GroupId, int>? sizes = null;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Group is not GroupId g) continue;
+            sizes ??= new Dictionary<GroupId, int>();
+            sizes[g] = sizes.TryGetValue(g, out var c) ? c + 1 : 1;
+        }
+        return sizes;
     }
 
     private void InvalidateHeldIfContains(string queueName, PlayerKey player)
