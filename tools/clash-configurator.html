@@ -492,30 +492,6 @@
     font-style: italic;
     font-size: 13px;
   }
-  .scope-chip {
-    display: inline-flex;
-    align-items: center;
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 4px;
-    font-size: 11px;
-    margin-right: 6px;
-  }
-  .scope-chip > label {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 6px;
-    border-radius: 3px;
-    cursor: pointer;
-    color: var(--text-dim);
-    user-select: none;
-  }
-  .scope-chip > label.active {
-    background: var(--accent);
-    color: white;
-  }
-  .scope-chip input[type="radio"] { display: none; }
   .lvl-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -667,7 +643,7 @@
 
 <header class="page-header">
   <h1>Clash Configurator</h1>
-  <p>Builds two <code>[ClashEngine]</code> blocks side by side: one for <code>conf/global.conf</code> (engine-wide settings) and one for an arena's <code>arena.conf</code> (per-arena settings). Each game type and queue picks which file it belongs in.</p>
+  <p>Builds two <code>[ClashEngine]</code> blocks side by side: plug-in tuning for <code>conf/global.conf</code>, and the game types + queues for an arena's <code>arena.conf</code>. Game types and queues are <strong>arena-scoped</strong> — the engine ignores them if they appear in <code>global.conf</code>.</p>
 </header>
 
 <main>
@@ -768,7 +744,7 @@
         <span class="caret">&#9662;</span>
       </div>
       <div class="section-body">
-        <p class="section-description">A game type is the rules of one match shape. Each card's <em>Global / Arena</em> toggle decides whether it lands in <code>global.conf</code> (visible to every arena) or this arena's <code>arena.conf</code>.</p>
+        <p class="section-description">A game type is the rules of one match shape. Game types live in this arena's <code>arena.conf</code>, but their <strong>names are globally referenceable</strong>: a <code>Queue&lt;i&gt;GameType</code> in <em>any</em> arena can reference one by name. A name is owned by its first declarer for the server's lifetime (sticky, even after the arena detaches), so declare each name once.</p>
         <div id="game-types-list"></div>
         <div class="add-btn-row">
           <button class="subtle" id="add-game-type-btn">+ Add game type</button>
@@ -783,7 +759,7 @@
         <span class="caret">&#9662;</span>
       </div>
       <div class="section-body">
-        <p class="section-description">Each queue is one matchmaking pool that produces matches under a particular game type. Use the <em>Global / Arena</em> toggle to choose which conf file the queue lands in.</p>
+        <p class="section-description">Each queue is one matchmaking pool that produces matches under a particular game type. Queues live in this arena's <code>arena.conf</code>.</p>
         <div id="queues-list"></div>
         <div class="add-btn-row">
           <button class="subtle" id="add-queue-btn">+ Add queue</button>
@@ -810,7 +786,7 @@
         </div>
         <pre class="preview" id="preview-global"></pre>
         <div class="output-empty" id="empty-global" style="display:none">
-          Nothing global-scoped yet. Plug-in tuning or any game type / queue with <em>Global</em> scope goes here.
+          Nothing here yet. Plug-in tuning goes here (game types and queues are arena-scoped).
         </div>
       </div>
 
@@ -824,7 +800,7 @@
         </div>
         <pre class="preview" id="preview-arena"></pre>
         <div class="output-empty" id="empty-arena" style="display:none">
-          Nothing arena-scoped yet. <code>DefaultQueue</code> or any game type / queue with <em>Arena</em> scope goes here.
+          Nothing arena-scoped yet. <code>DefaultQueue</code>, game types, and queues go here.
         </div>
       </div>
     </div>
@@ -938,13 +914,10 @@ let nextId = 1;
 const uid = () => `id${nextId++}`;
 
 function newGameType() {
-  const idx = state.gameTypes.length + 1;
   return {
     _key: uid(),
     collapsed: false,
-    scope: "global",
     name: "",
-    id: idx,
     teamCount: 2,
     playersPerTeam: 4,
     killTarget: 0,
@@ -968,7 +941,6 @@ function newQueue() {
   return {
     _key: uid(),
     collapsed: false,
-    scope: "global",
     name: "",
     label: "",
     gameType: "",
@@ -1492,7 +1464,6 @@ function renderGameTypeCard(gt, index) {
   const header = el("div", { class: "card-header" },
     el("span", {}, el("span", { class: "caret" }, "▾"), " ", titleSpan),
     el("span", { class: "actions" },
-      scopeChip(gt.scope, s => { gt.scope = s; render(); }),
       el("button", {
         class: "danger",
         onclick: (e) => { e.stopPropagation(); removeGameType(gt._key); }
@@ -1500,7 +1471,7 @@ function renderGameTypeCard(gt, index) {
     )
   );
   header.addEventListener("click", (e) => {
-    if (e.target.closest("button") || e.target.closest(".scope-chip")) return;
+    if (e.target.closest("button")) return;
     gt.collapsed = !gt.collapsed;
     card.classList.toggle("collapsed");
   });
@@ -1517,14 +1488,6 @@ function renderGameTypeCard(gt, index) {
       oninput: e => { gt.name = e.target.value.trim(); titleSpan.lastChild.textContent = gt.name || "(unnamed)"; render(); }
     }),
     () => validateGameTypeName(gt)
-  ));
-
-  // Id
-  body.appendChild(simpleField("Id (rating bucket)", "Non-negative integer. Distinct ids isolate rating buckets.",
-    el("input", {
-      type: "number", min: 0, step: 1, value: gt.id,
-      oninput: e => { gt.id = e.target.value === "" ? 0 : parseInt(e.target.value, 10); render(); }
-    })
   ));
 
   // TeamCount
@@ -1806,7 +1769,6 @@ function renderQueueCard(q, index) {
   const header = el("div", { class: "card-header" },
     el("span", {}, el("span", { class: "caret" }, "▾"), " ", titleSpan),
     el("span", { class: "actions" },
-      scopeChip(q.scope, s => { q.scope = s; render(); }),
       el("button", {
         class: "danger",
         onclick: (e) => { e.stopPropagation(); removeQueue(q._key); }
@@ -1814,7 +1776,7 @@ function renderQueueCard(q, index) {
     )
   );
   header.addEventListener("click", (e) => {
-    if (e.target.closest("button") || e.target.closest(".scope-chip")) return;
+    if (e.target.closest("button")) return;
     q.collapsed = !q.collapsed;
     card.classList.toggle("collapsed");
   });
@@ -1994,27 +1956,6 @@ function selectField(options, current, onChange, labelFor = null) {
   return sel;
 }
 
-function scopeChip(currentScope, onChange) {
-  const chip = el("span", { class: "scope-chip" });
-  const radioName = `scope-${uid()}`;
-  ["global", "arena"].forEach(s => {
-    const lab = el("label", { class: currentScope === s ? "active" : "" });
-    const inp = el("input", {
-      type: "radio", name: radioName, value: s,
-      checked: currentScope === s,
-      onchange: () => {
-        chip.querySelectorAll("label").forEach(l => l.classList.remove("active"));
-        lab.classList.add("active");
-        onChange(s);
-      }
-    });
-    lab.appendChild(inp);
-    lab.appendChild(document.createTextNode(s === "global" ? "Global" : "Arena"));
-    chip.appendChild(lab);
-  });
-  return chip;
-}
-
 function validateGameTypeName() { /* validation summary handled centrally */ }
 
 /* ----------------- Add/remove handlers ----------------- */
@@ -2088,12 +2029,11 @@ function validate() {
 
   // Game types
   state.gameTypes.forEach((gt, i) => {
-    const label = `Game type #${i + 1}${gt.name ? ` (${gt.name})` : ""} [${gt.scope}]`;
+    const label = `Game type #${i + 1}${gt.name ? ` (${gt.name})` : ""}`;
     if (!gt.name) errors.push(`${label}: Name is required.`);
     else if (!NAME_RE.test(gt.name)) errors.push(`${label}: Name must be alphanumeric/underscore.`);
     else if (gtNames.has(gt.name.toLowerCase())) errors.push(`${label}: duplicate Name.`);
     else gtNames.add(gt.name.toLowerCase());
-    if (gt.id < 0) errors.push(`${label}: Id must be ≥ 0.`);
     if (gt.teamCount < 2) errors.push(`${label}: TeamCount must be ≥ 2.`);
     if (gt.playersPerTeam < 1) errors.push(`${label}: PlayersPerTeam must be ≥ 1.`);
     if (gt.timeLimitSec !== null && gt.timeLimitSec <= 0)
@@ -2126,7 +2066,7 @@ function validate() {
 
   // Queues
   state.queues.forEach((q, i) => {
-    const label = `Queue #${i + 1}${q.name ? ` (${q.name})` : ""} [${q.scope}]`;
+    const label = `Queue #${i + 1}${q.name ? ` (${q.name})` : ""}`;
     if (!q.name) errors.push(`${label}: Name is required.`);
     else if (!NAME_RE.test(q.name)) errors.push(`${label}: Name must be alphanumeric/underscore.`);
     else if (queueNames.has(q.name.toLowerCase())) errors.push(`${label}: duplicate Name.`);
@@ -2136,9 +2076,7 @@ function validate() {
     } else {
       const referenced = state.gameTypes.find(g => g.name.toLowerCase() === q.gameType.toLowerCase());
       if (!referenced) {
-        errors.push(`${label}: GameType "${q.gameType}" doesn't match any game type defined above.`);
-      } else if (q.scope === "global" && referenced.scope === "arena") {
-        warnings.push(`${label}: references arena-scoped game type "${referenced.name}" — a global queue may not see it. Either make the game type Global or move this queue to Arena.`);
+        warnings.push(`${label}: GameType "${q.gameType}" isn't defined in this file. Game-type names are globally referenceable, so this is fine if it's declared in another arena's arena.conf — otherwise the queue won't load.`);
       }
     }
     if (q.qualityCeiling !== null && (q.qualityCeiling < 0 || q.qualityCeiling > 1))
@@ -2201,8 +2139,9 @@ function emitScope(scope) {
     arenaLines.push(line("DefaultQueue", state.defaultQueue));
   }
 
-  const gts = state.gameTypes.filter(g => g.scope === scope);
-  const qs = state.queues.filter(q => q.scope === scope);
+  // Game types and queues are arena-scoped only; the engine ignores them in global.conf.
+  const gts = scope === "arena" ? state.gameTypes : [];
+  const qs = scope === "arena" ? state.queues : [];
 
   if (tuningLines.length === 0 && arenaLines.length === 0 && gts.length === 0 && qs.length === 0) {
     return "";
@@ -2247,7 +2186,6 @@ function emitScope(scope) {
 function emitGameType(out, gt, idx) {
   const p = `GameType${idx}`;
   out.push(line(`${p}Name`, gt.name));
-  out.push(line(`${p}Id`, String(gt.id)));
   out.push(line(`${p}TeamCount`, String(gt.teamCount)));
   out.push(line(`${p}PlayersPerTeam`, String(gt.playersPerTeam)));
   if (gt.killTarget > 0) out.push(line(`${p}KillTarget`, String(gt.killTarget)));
