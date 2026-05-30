@@ -41,6 +41,14 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnWinnerPromoted(p, q, at, defensesUsed, maxDefenses, sentToBack);
     }
+    public void OnAutoQueued(PlayerKey p, string q, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnAutoQueued(p, q, at);
+    }
+    public void OnAutoQueueDisabledByAfk(PlayerKey p, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnAutoQueueDisabledByAfk(p, at);
+    }
     public void OnQueueNearFull(string q, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)
     {
         foreach (var l in _listeners) l.OnQueueNearFull(q, waiting, waitingCount, needed);

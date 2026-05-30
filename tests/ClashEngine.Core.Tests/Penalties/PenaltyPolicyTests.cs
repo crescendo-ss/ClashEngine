@@ -120,6 +120,21 @@ public class PenaltyPolicyTests
     }
 
     [Fact]
+    public void WithBaseTimeout_returns_a_copy_with_the_new_base()
+    {
+        var original = PenaltyPolicy.DefaultEliminationCooldown;
+        var customised = original.WithBaseTimeout(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(TimeSpan.FromSeconds(30), customised.BaseTimeout);
+        Assert.Equal(original.Kind, customised.Kind);
+        Assert.Equal(original.EscalationFactor, customised.EscalationFactor);
+        Assert.Equal(original.MemoryWindow, customised.MemoryWindow);
+        Assert.Equal(original.MaxTimeout, customised.MaxTimeout);
+        // Original is untouched.
+        Assert.Equal(TimeSpan.FromMinutes(1), original.BaseTimeout);
+    }
+
+    [Fact]
     public void Constructor_rejects_non_positive_max_timeout()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>

@@ -78,6 +78,10 @@ public sealed class PenaltyPolicy
     public PenaltyPolicy WithMaxTimeout(TimeSpan maxTimeout) =>
         new(Kind, BaseTimeout, EscalationFactor, MemoryWindow, maxTimeout);
 
+    /// <summary>Returns a copy of this policy with <see cref="BaseTimeout"/> overridden.</summary>
+    public PenaltyPolicy WithBaseTimeout(TimeSpan baseTimeout) =>
+        new(Kind, baseTimeout, EscalationFactor, MemoryWindow, MaxTimeout);
+
     /// <summary>
     /// Hard ceiling used inside <see cref="TimeoutForOffense"/> to keep the unscaled ladder from
     /// overflowing <see cref="TimeSpan.FromSeconds(double)"/> when <see cref="EscalationFactor"/>

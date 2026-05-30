@@ -12,6 +12,7 @@ using ClashEngine.Core.Events;
 using ClashEngine.Core.GameType;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Penalties;
+using ClashEngine.Core.Preferences;
 using ClashEngine.Core.Queue;
 using ClashEngine.Core.Ratings;
 using ClashEngine.Core.Stats;
@@ -69,8 +70,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private InMemoryRatingStore? _ratingsCache;
     private PersistRatingStore? _persistRatings;
     private PersistPenaltyStore? _persistPenalties;
+    private InMemoryAutoQueueStore? _autoQueueCache;
+    private PersistAutoQueueStore? _persistAutoQueue;
     private DelegatePersistentData<Player>? _ratingsRegistration;
     private DelegatePersistentData<Player>? _penaltiesRegistration;
+    private DelegatePersistentData<Player>? _autoQueueRegistration;
     private MatchmakingCommands? _commandHandlers;
     private MatchStatsRegistry? _matchStats;
     private ClashStatsTelemetry? _matchStatsTelemetry;
@@ -231,6 +235,12 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _ratingsCache = new InMemoryRatingStore();   // legacy fallback if IPersist unavailable
         IRatingStore ratingStore = _persist is not null ? _persistRatings : _ratingsCache;
 
+        // Per-player ?autoqueue preference. Persist-backed when IPersist is available, otherwise an
+        // in-memory cache that lives only for the process (matching the ratings fallback pattern).
+        _persistAutoQueue = new PersistAutoQueueStore();
+        _autoQueueCache = new InMemoryAutoQueueStore();
+        IAutoQueueStore autoQueueStore = _persist is not null ? _persistAutoQueue : _autoQueueCache;
+
         // Per-policy hard ceiling on the assessed timeout. Defaults to 6h; configurable to give
         // operators an escape hatch if a future bug ever puts a player on a runaway escalation
         // ladder again. Values <= 0 fall back to the default rather than disabling the cap.
@@ -239,6 +249,35 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             ? TimeSpan.FromHours(maxPenaltyHours)
             : PenaltyPolicy.DefaultMaxTimeout;
 
+        // Elimination cooldown: when a player loses their last life in an elimination match
+        // (GameType<i>Lives > 0) they are released from the match roster and must wait this long
+        // before ?play can re-queue them into a new match. Accepts seconds or HH:MM:SS; an absent
+        // key uses the engine's 1-minute default policy. An explicit 0 (or a negative value)
+        // disables the cooldown entirely -- the policy is left unregistered, so eliminated players
+        // may requeue immediately. Read at zone scope, like the other engine-wide tuning knobs.
+        var elimCooldown = ConfigReadHelpers.TryReadTimeSpan(
+                _config, _config.Global, "EliminationCooldown", _clashLog, LogCategory)
+            ?? PenaltyPolicy.DefaultEliminationCooldown.BaseTimeout;
+
+        var penaltyPolicies = new List<PenaltyPolicy>
+        {
+            PenaltyPolicy.DefaultAbandonment.WithMaxTimeout(maxPenalty),
+            PenaltyPolicy.DefaultGriefing.WithMaxTimeout(maxPenalty),
+            PenaltyPolicy.DefaultStagingAfk.WithMaxTimeout(maxPenalty),
+        };
+        if (elimCooldown > TimeSpan.Zero)
+        {
+            penaltyPolicies.Add(PenaltyPolicy.DefaultEliminationCooldown
+                .WithBaseTimeout(elimCooldown)
+                .WithMaxTimeout(maxPenalty));
+            _clashLog.Info(LogCategory, $"Elimination cooldown = {elimCooldown}.");
+        }
+        else
+        {
+            _clashLog.Info(LogCategory,
+                "Elimination cooldown disabled (<= 0); eliminated players may requeue immediately.");
+        }
+
         // Engine is constructed with a no-op telemetry sink so that listeners (which need the
         // engine reference) can be wired up below; once they exist we swap in the real
         // composite via SetTelemetry. Events fired before that swap (none, in practice -- the
@@ -246,13 +285,9 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _engine = new MatchmakingEngine(
             ratings: ratingStore,
             clock: _clock,
-            penaltyPolicies: new[]
-            {
-                PenaltyPolicy.DefaultAbandonment.WithMaxTimeout(maxPenalty),
-                PenaltyPolicy.DefaultGriefing.WithMaxTimeout(maxPenalty),
-                PenaltyPolicy.DefaultStagingAfk.WithMaxTimeout(maxPenalty),
-            },
-            invitationTtl: TimeSpan.FromSeconds(15));
+            penaltyPolicies: penaltyPolicies,
+            invitationTtl: TimeSpan.FromSeconds(15),
+            autoQueue: autoQueueStore);
 
         _listener = new EngineEventListener(_chat, _log, _resolver, _clashLog, _engine.Queues, _engine.Groups, _clock);
 
@@ -459,6 +494,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
                 setDataCallback: _persistPenalties.SetData,
                 clearDataCallback: _persistPenalties.ClearData);
             await _persist.RegisterPersistentDataAsync(_penaltiesRegistration);
+
+            _autoQueueRegistration = new DelegatePersistentData<Player>(
+                PersistAutoQueueStore.PersistKey, PersistInterval.Forever, PersistScope.Global,
+                getDataCallback: _persistAutoQueue.GetData,
+                setDataCallback: _persistAutoQueue.SetData,
+                clearDataCallback: _persistAutoQueue.ClearData);
+            await _persist.RegisterPersistentDataAsync(_autoQueueRegistration);
         }
 
         // Only ?play and ?queue are zone-wide so a player can opt into matchmaking from any
@@ -519,9 +561,12 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
                 await _persist.UnregisterPersistentDataAsync(_ratingsRegistration);
             if (_penaltiesRegistration is not null)
                 await _persist.UnregisterPersistentDataAsync(_penaltiesRegistration);
+            if (_autoQueueRegistration is not null)
+                await _persist.UnregisterPersistentDataAsync(_autoQueueRegistration);
         }
         _ratingsRegistration = null;
         _penaltiesRegistration = null;
+        _autoQueueRegistration = null;
     }
 
     async Task<bool> IAsyncArenaAttachableModule.AttachModuleAsync(Arena arena, CancellationToken cancellationToken)
@@ -620,6 +665,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _ratingsCache = null;
         _persistRatings = null;
         _persistPenalties = null;
+        _autoQueueCache = null;
+        _persistAutoQueue = null;
         _commandHandlers = null;
         _matchStats = null;
         _matchStatsTelemetry = null;

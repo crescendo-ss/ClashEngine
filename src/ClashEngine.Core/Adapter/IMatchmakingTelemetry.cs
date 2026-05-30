@@ -69,6 +69,25 @@ public interface IMatchmakingTelemetry
         int defensesUsed, int maxDefenses, bool sentToBack) { }
 
     /// <summary>
+    /// A player with the <c>?autoqueue</c> preference enabled was automatically re-enqueued into
+    /// <paramref name="queueName"/> -- the queue their just-finished match was formed from -- after
+    /// a match that actually ran (Completed or Abandoned). Fires in place of
+    /// <see cref="OnQueueAdded"/> so adapters can send an auto-queue-specific notice, typically with
+    /// a <c>?cancel</c> / <c>?autoqueue off</c> hint for players who don't want to be drawn into
+    /// another match. Not fired for KOTH winners (that's <see cref="OnWinnerPromoted"/>) nor when
+    /// the player was already in the queue (e.g. a KOTH winner who also has auto-queue on).
+    /// </summary>
+    void OnAutoQueued(PlayerKey player, string queueName, DateTimeOffset at) { }
+
+    /// <summary>
+    /// A player's <c>?autoqueue</c> preference was automatically turned off because they were
+    /// flagged for a staging AFK violation. Fires only when the preference was actually on (so the
+    /// adapter only nudges players who lost something). The adapter notifies them they'll need to
+    /// re-enable it with <c>?autoqueue on</c>.
+    /// </summary>
+    void OnAutoQueueDisabledByAfk(PlayerKey player, DateTimeOffset at) { }
+
+    /// <summary>
     /// The queue just reached <c>TotalPlayers - 1</c> waiters (one short of forming a match) for
     /// the first time since it last dropped below that threshold. Gated to queues with
     /// <c>TotalPlayers &gt;= 4</c> -- the "near-full" framing is meaningless on tiny shapes (1v1,

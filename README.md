@@ -114,6 +114,7 @@ cmd_party
 cmd_partymode
 cmd_leaveparty
 cmd_queue
+cmd_autoqueue
 cmd_rating
 cmd_cancel
 cmd_accept
@@ -140,6 +141,7 @@ cmd_chart
 | `RecordReplays` | 0/1 | 1 | Record every started match using the in-plug-in `MatchRecorder`. |
 | `ReplayRecordingDir` | path | `<AppContext.BaseDirectory>/clash-replays` | Where in-flight `.replay` files land. Files are deleted after a successful upload. |
 | `DistanceSampleHz` | int (1–50) | 5 | Frequency of the periodic distance-to-nearest-enemy sampler used for the scoreboard's `dE` column. Set to `0` to disable. |
+| `EliminationCooldown` | seconds or `HH:MM:SS` | `60` (1 min) | When a player loses their last life in an elimination match (`GameType<i>Lives > 0`), they're released from the match and must wait this long before `?play` re-queues them into a new match. Auto-rescinded if the match ends before the cooldown elapses, so a player never waits longer than the match itself ran. Set to `0` to disable (eliminated players may requeue immediately). |
 | `EventStreamUrl` | URL | (unset) | Outbound [event stream](#event-stream) endpoint. Receives one `application/json` POST per queue/match/player event for live advertising/notification (e.g. a Discord bot). Unset disables event emission. Never derived from `UploadUrl` — point it at the consuming service. |
 | `EventStreamApiKey` | string | (unset) | Sent as `X-Api-Key` on event POSTs. Falls back to `UploadApiKey` when unset, so a single gateway terminating both needs no extra config. |
 
@@ -369,6 +371,7 @@ v1 emits:
 | `?partymode [open\|closed]` | player | View or change your party's mode. Closed parties have a leader who controls invites. |
 | `?rating` | player | Show your skill rating per game type. |
 | `?connect discord <alias>` | player | Relay a request to link your in-game name to a Discord alias, so the [event-stream](#event-stream) consumer (e.g. a Discord bot) can notify you. ClashEngine stores nothing — it emits a `player.discord_link_requested` event and the bot service performs the link/opt-in. |
+| `?autoqueue [on\|off]` | player | View or set auto-queue. When **on**, you're automatically re-queued into a match's queue when it ends (the same queue you popped out of), so you keep cycling through matches without re-issuing `?play`. Persists across sessions. Independent of the KOTH `Queue<i>PromoteWinners` setting, and applies to winners and losers alike (added at the back, not the head). Auto-disabled — with a notice to turn it back on — if you're flagged for a staging AFK violation. |
 | `?chart` | player | Show the live scoreboard for the match you're in or spectating. |
 | `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
 | `?helpclash` | player | List the player commands. |

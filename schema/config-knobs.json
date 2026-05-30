@@ -71,6 +71,14 @@
           "source": "src/ClashEngine/ClashModule.cs:346"
         },
         {
+          "key": "EliminationCooldown",
+          "type": "duration",
+          "constraint": "seconds or HH:MM:SS (0 disables)",
+          "default": "60s (engine default)",
+          "description": "When a player loses their last life in an elimination match (Lives > 0) they are released from the match roster and must wait this long before ?play re-queues them into a new match. Absent -> the engine's 1-minute default policy is registered; 0 (or negative) leaves the EliminationCooldown policy unregistered so eliminated players may requeue immediately. Auto-rescinded if the match ends before the cooldown elapses.",
+          "source": "src/ClashEngine/ClashModule.cs:248"
+        },
+        {
           "key": "EventStreamUrl",
           "type": "url",
           "default": null,

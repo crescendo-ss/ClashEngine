@@ -84,6 +84,10 @@ public sealed class MatchmakingCommands
             "?connect discord <alias> -- Link your in-game name to a Discord alias so the Discord " +
             "bot can DM you about queues and matches. The alias is relayed to the bot service, " +
             "which performs the actual link -- ClashEngine itself stores nothing.");
+        _commands.AddCommand("autoqueue", AutoQueue, helpText:
+            "?autoqueue [on|off] -- View or set auto-queue. When on, you're automatically put back " +
+            "into a match's queue when it ends. Persists across sessions. Auto-disabled if you're " +
+            "flagged AFK.");
     }
 
     public void UnregisterGlobal()
@@ -91,6 +95,7 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("play", Next);
         _commands.RemoveCommand("queue", Queue);
         _commands.RemoveCommand("connect", Connect);
+        _commands.RemoveCommand("autoqueue", AutoQueue);
     }
 
     /// <summary>
@@ -825,6 +830,42 @@ public sealed class MatchmakingCommands
         }
     }
 
+    // ---- ?autoqueue [on|off]
+
+    private void AutoQueue(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("autoqueue", player, parameters);
+        if (_resolver.KeyOf(player) is not PlayerKey k) return;
+
+        var arg = parameters.Trim().ToString().ToLowerInvariant();
+
+        // No arg => query and report the current (persisted) state. on/off => set, then report.
+        if (arg.Length != 0)
+        {
+            bool? requested = arg switch
+            {
+                "on" or "1" or "yes" or "enable" => true,
+                "off" or "0" or "no" or "disable" => false,
+                _ => null,
+            };
+            if (requested is not bool enable)
+            {
+                _chat.SendMessage(player, "Usage: ?autoqueue [on|off]");
+                return;
+            }
+            _engine.AutoQueue.Set(k, enable);
+            if (_log.IsDebug)
+                _log.Debug(LogCategory, $"?autoqueue {k.Name} -> {(enable ? "on" : "off")}");
+        }
+
+        // Always report the resulting state. The "is now ON" / "is now OFF" wording is the contract
+        // the bot harness (ClashRig RegressionZone) keys on -- keep it intact when editing.
+        _chat.SendMessage(player, _engine.AutoQueue.IsEnabled(k)
+            ? "Auto-queue is now ON -- after each match you'll be put back into its queue " +
+              "automatically. Use ?autoqueue off to stop, or ?cancel to leave a queue."
+            : "Auto-queue is now OFF -- you won't be put back into the queue after matches.");
+    }
+
     // ---- ?forgive <player>
 
     private void Veto(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
@@ -1002,6 +1043,7 @@ public sealed class MatchmakingCommands
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
             ("?connect discord <alias>",     "Relay a request to link your name to a Discord alias (the bot confirms)."),
+            ("?autoqueue [on|off]",          "Auto re-queue into a match's queue when it ends (persists; off if flagged AFK)."),
             ("?chart",                       "Show the live scoreboard for your match (or one you're spectating)."),
             ("?party",                       "List your current party's members (leader marked if closed)."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),

@@ -45,6 +45,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     private readonly List<(Player Recipient, string Message)> _pendingAbandonmentDms = new();
     private readonly List<(Player Recipient, string Message)> _pendingGriefingDms = new();
     private readonly List<(Player Recipient, string Message)> _pendingPromotionDms = new();
+    private readonly List<(Player Recipient, string Message)> _pendingAutoQueueDms = new();
 
     public EngineEventListener(
         IChat chat,
@@ -189,6 +190,28 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         _pendingPromotionDms.Add((p, message));
     }
 
+    public void OnAutoQueued(PlayerKey player, string queueName, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"AutoQueued: {player.Name} -> {queueName}");
+        if (_resolver.Resolve(player) is not { } p) return;
+
+        // "Auto-queued for {queue} ... back ..." is the contract the bot harness (ClashRig
+        // RegressionZone) keys on: the queue label names which queue, "back" says where they landed.
+        // The non-hyphenated KOTH "Autoqueued ... front of the line" message is deliberately distinct.
+        var descriptor = FormatQueueDescriptor(queueName);
+        _pendingAutoQueueDms.Add((p,
+            $"Auto-queued for {descriptor} -- you're at the back of the line. " +
+            "Use ?cancel to leave, or ?autoqueue off to stop."));
+    }
+
+    public void OnAutoQueueDisabledByAfk(PlayerKey player, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"AutoQueueDisabledByAfk: {player.Name}");
+        if (_resolver.Resolve(player) is not { } p) return;
+        _pendingAutoQueueDms.Add((p,
+            "Auto-queue was turned off because you were flagged AFK. Use ?autoqueue on to re-enable it."));
+    }
+
     public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)
     {
         if (_verbose.IsDebug)
@@ -310,6 +333,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         DrainBuffered(_pendingAbandonmentDms);
         DrainBuffered(_pendingGriefingDms);
         DrainBuffered(_pendingPromotionDms);
+        DrainBuffered(_pendingAutoQueueDms);
     }
 
     private void DrainBuffered(List<(Player Recipient, string Message)> buffer)

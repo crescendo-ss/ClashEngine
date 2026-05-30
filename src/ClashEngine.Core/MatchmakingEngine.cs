@@ -8,6 +8,7 @@ using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Penalties;
+using ClashEngine.Core.Preferences;
 using ClashEngine.Core.Queue;
 using ClashEngine.Core.Ratings;
 
@@ -29,6 +30,7 @@ public sealed class MatchmakingEngine
     private readonly PenaltyTracker _penalties;
     private readonly PlayerEligibility _eligibility;
     private readonly IRatingStore _ratings;
+    private readonly IAutoQueueStore _autoQueue;
     private readonly RatingUpdater _ratingUpdater;
     private readonly IClock _clock;
     private IMatchmakingTelemetry _telemetry;
@@ -68,13 +70,15 @@ public sealed class MatchmakingEngine
         TimeSpan? joinTimeout = null,
         TimeSpan? graceWindow = null,
         TimeSpan? invitationTtl = null,
-        RatingUpdater? ratingUpdater = null)
+        RatingUpdater? ratingUpdater = null,
+        IAutoQueueStore? autoQueue = null)
     {
         ArgumentNullException.ThrowIfNull(ratings);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(penaltyPolicies);
 
         _ratings = ratings;
+        _autoQueue = autoQueue ?? new InMemoryAutoQueueStore();
         _clock = clock;
         _penalties = new PenaltyTracker(penaltyPolicies);
         _quality = quality ?? new OrdinalSpreadQuality();
@@ -96,6 +100,13 @@ public sealed class MatchmakingEngine
     public GroupRegistry Groups => _groups;
     public IReadOnlyDictionary<(Guid MatchId, PlayerKey Target), PendingGriefingPenalty> PendingGriefingPenalties => _pendingGriefs;
     public IRatingStore Ratings => _ratings;
+
+    /// <summary>
+    /// The per-player auto-queue preference store (the <c>?autoqueue</c> switch). The adapter reads
+    /// and writes this from the command handler; the engine consults it during match finalization
+    /// to re-enqueue opted-in players.
+    /// </summary>
+    public IAutoQueueStore AutoQueue => _autoQueue;
     public IReadOnlyDictionary<Guid, ActiveMatch> ActiveMatches => _matches;
 
     /// <summary>
@@ -906,6 +917,14 @@ public sealed class MatchmakingEngine
             var p = m.Outcome.AbandonedBy[i];
             int count = _penalties.RecordPenalty(p, abandonKind, at);
             var until = _penalties.TimeoutUntil(p)!.Value;
+            // A staging-AFK violation auto-disables the player's auto-queue preference: leaving it
+            // on would keep dragging an away-from-keyboard player into matches they'll just AFK
+            // again. Only act (and notify) when it was actually on.
+            if (abandonKind == PenaltyKind.StagingAfk && _autoQueue.IsEnabled(p))
+            {
+                _autoQueue.Set(p, false);
+                _telemetry.OnAutoQueueDisabledByAfk(p, at);
+            }
             _telemetry.OnAbandonment(p, count, until);
         }
 
@@ -941,7 +960,49 @@ public sealed class MatchmakingEngine
             ApplyKothReenqueue(queueDef, m.Outcome, at);
         }
 
+        // Per-player auto-queue (?autoqueue on): re-enqueue opted-in participants of a match that
+        // actually ran back into the queue it formed from. Runs after KOTH so a winner who also has
+        // auto-queue on is already queued (priority) and won't be added a second time. Cancelled
+        // matches are excluded -- their readied players are handled by ReQueueReadiedAtFront, and an
+        // AFK violator already had auto-queue switched off in the abandon loop above.
+        if (queueDef is not null && m.Outcome.FinalState != MatchState.Cancelled)
+            ApplyAutoQueueReenqueue(queueDef, m, at);
+
         _telemetry.OnMatchEnded(m.Outcome);
+    }
+
+    /// <summary>
+    /// Re-enqueues every match participant who has the <c>?autoqueue</c> preference enabled back
+    /// into the queue the match formed from. Mirrors <see cref="ApplyKothReenqueue"/>'s eligibility
+    /// gating (connected, not in timeout, not already in another match) but adds players at the
+    /// back via <see cref="Matcher.Enqueue"/> with group affiliation preserved. Players who
+    /// abandoned the match are skipped -- they bailed, so dragging them back in (and, for live
+    /// abandons, on top of a fresh queue-lock) would be wrong. A player already in the queue (e.g.
+    /// a KOTH winner promoted just above) is left as-is and fires no duplicate notice.
+    /// </summary>
+    private void ApplyAutoQueueReenqueue(QueueDefinition queue, ActiveMatch m, DateTimeOffset at)
+    {
+        var abandoned = m.Outcome!.AbandonedBy.Count > 0
+            ? new HashSet<PlayerKey>(m.Outcome.AbandonedBy)
+            : null;
+
+        for (int t = 0; t < m.Teams.Count; t++)
+        {
+            for (int j = 0; j < m.Teams[t].Count; j++)
+            {
+                var p = m.Teams[t][j];
+                if (abandoned is not null && abandoned.Contains(p)) continue;
+                if (!_autoQueue.IsEnabled(p)) continue;
+                if (!_connected.Contains(p)) continue;            // gone -- nothing to re-queue
+                if (IsInActiveMatch(p)) continue;                 // already pulled into another match
+                if (CheckEligibility(p).Status == EligibilityStatus.InTimeout) continue;
+
+                var rating = _ratings.Get(p, queue.GameType);
+                var groupId = _groups.GroupOf(p);
+                if (_matcher.Enqueue(p, rating, queue.UniqueId, groupId))
+                    _telemetry.OnAutoQueued(p, queue.UniqueId, at);
+            }
+        }
     }
 
     private void ApplyKothReenqueue(QueueDefinition queue, MatchOutcome outcome, DateTimeOffset at)

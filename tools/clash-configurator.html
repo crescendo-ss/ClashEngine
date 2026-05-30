@@ -707,6 +707,14 @@
             <div class="field-error"></div>
           </div>
         </div>
+        <div class="field" data-field="eliminationCooldown">
+          <label>EliminationCooldown</label>
+          <div class="field-input">
+            <div id="pt-elim-cooldown-mount"></div>
+            <div class="field-hint">Wait after a player's last-life elimination before <code>?play</code> re-queues them into a new match. Leave unset for the 1-min default; set <code>0</code> to disable (requeue immediately). Auto-rescinded if the match ends first.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -897,6 +905,7 @@ const state = {
     recordReplays: true,
     replayRecordingDir: "",
     distanceSampleHz: 5,
+    eliminationCooldownSec: null,
   },
   defaultQueue: "",
   gameTypes: [],
@@ -1423,6 +1432,13 @@ function bindPluginTuning() {
       value: pt.distanceSampleHz, min: 0, max: 50, step: 1,
       onChange: v => { pt.distanceSampleHz = v; render(); },
       formatDisplay: v => v === 0 ? "0 (disabled)" : `${v} Hz`
+    })
+  );
+  document.getElementById("pt-elim-cooldown-mount").appendChild(
+    durationWidget({
+      value: pt.eliminationCooldownSec, min: 0, allowUnset: true, unsetLabel: "override",
+      presets: [0, 30, 60, 120, 300],
+      onChange: v => { pt.eliminationCooldownSec = v; render(); }
     })
   );
 
@@ -2053,6 +2069,8 @@ function emitScope(scope) {
       tuningLines.push(line("ReplayRecordingDir", pt.replayRecordingDir));
     if (pt.distanceSampleHz !== DISTANCE_HZ_DEFAULT)
       tuningLines.push(line("DistanceSampleHz", String(pt.distanceSampleHz)));
+    if (pt.eliminationCooldownSec !== null)
+      tuningLines.push(line("EliminationCooldown", String(pt.eliminationCooldownSec)));
   }
 
   // DefaultQueue is arena-only.
