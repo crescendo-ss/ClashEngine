@@ -237,6 +237,12 @@ UploadApiKey        = <secret>
 RecordReplays       = 1
 ReplayRecordingDir  = clash-replays
 DistanceSampleHz    = 5
+
+; --- Outbound event stream (optional) ---
+; One JSON POST per queue/match/player event for a Discord bot, dashboard, or webhook relay.
+; EventStreamApiKey is omitted here, so it falls back to UploadApiKey above. Set it explicitly
+; only when the event consumer needs a different key from the stats server.
+EventStreamUrl      = http://localhost:9090/api/events
 ```
 
 `Zone/arenas/1v1comp/arena.conf` — the standard arena conf plus the game type and the two queues owned by this arena:
