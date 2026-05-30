@@ -3,6 +3,7 @@ using System.Text.Json;
 using ClashEngine.Core;
 using ClashEngine.Core.Adapter;
 using ClashEngine.Core.Events;
+using ClashEngine.Core.GameType;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
@@ -17,6 +18,28 @@ public class EventStreamTelemetryTests
     private static PlayerKey K(string n) => new(n);
     private static readonly DateTimeOffset T0 = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
+    // Minimal game-type def whose Label feeds match.gameLabel; only Name/Label/shape matter here.
+    private static GameTypeDef GtDef(string name, string label) =>
+        new(
+            Name: name,
+            Label: label,
+            Description: null,
+            Metadata: GameTypeMetadata.Uniform(2, 2, lives: 0),
+            TeamCount: 2,
+            PlayersPerTeam: 2,
+            KillTarget: 30,
+            Lives: 0,
+            TimeLimit: null,
+            SpawnSetByTeam: null,
+            MaxSpawnDriftTiles: null,
+            WarpOnSpawn: false,
+            StagingDuration: null,
+            CountdownDuration: null,
+            KnockoutSpecDelay: null,
+            TeamCollapseGrace: null,
+            ShipChangeGracePeriod: null,
+            ReturnItemsAction: ClashEngine.Core.Queue.ItemsAction.Full);
+
     // Drives a real engine whose telemetry IS the mapper, so the event stream is exercised through
     // the genuine queue/match pipeline (counts, reasons, matched dequeues, lifecycle).
     private sealed class Harness
@@ -27,7 +50,7 @@ public class EventStreamTelemetryTests
         public MatchmakingEngine Engine { get; }
         public EventStreamTelemetry Mapper { get; }
 
-        public Harness(int killTarget = 3)
+        public Harness(int killTarget = 3, bool registerGameType = true)
         {
             Engine = new MatchmakingEngine(
                 Ratings, Clock,
@@ -39,7 +62,12 @@ public class EventStreamTelemetryTests
                 "gt1",
                 () => new KillCountEndPolicy(killTarget),
                 label: "2v2 Casual");
-            Mapper = new EventStreamTelemetry(Sink, Engine.Queues, Clock);
+            // The queue references game type "gt1"; registering its def (with a human Label) lets
+            // the mapper resolve match.gameLabel. Skipped when registerGameType is false to exercise
+            // the unregistered-fallback path.
+            if (registerGameType)
+                Engine.GameTypes.ReplaceArenaContribution("lobby", new[] { GtDef("gt1", "2v2 Showdown") }, out _);
+            Mapper = new EventStreamTelemetry(Sink, Engine.Queues, Engine.GameTypes, Clock);
             Engine.SetTelemetry(Mapper);
         }
 
@@ -129,6 +157,7 @@ public class EventStreamTelemetryTests
         var locked = h.Single(ClashEventTypes.MatchTeamsLocked);
         Assert.Null(locked.Match!.MatchId);            // no id at proposal time
         Assert.Equal("gt1", locked.Match.GameType);
+        Assert.Equal("2v2 Showdown", locked.Match.GameLabel);   // resolved from the game-type registry
         Assert.Equal("2v2", locked.Match.QueueName);
         Assert.Equal(2, locked.Match.Teams!.Count);
         Assert.All(locked.Match.Teams, t => Assert.Equal(2, t.Players.Count));
@@ -162,6 +191,7 @@ public class EventStreamTelemetryTests
 
         var started = h.Single(ClashEventTypes.MatchStarted);
         Assert.Equal(match.MatchId, started.Match!.MatchId);
+        Assert.Equal("2v2 Showdown", started.Match.GameLabel);
         Assert.Equal(h.Clock.UtcNow, started.Match.StartedAt);
         Assert.Equal(2, started.Match.Teams!.Count);
 
@@ -174,10 +204,26 @@ public class EventStreamTelemetryTests
 
         var ended = h.Single(ClashEventTypes.MatchEnded);
         Assert.Equal(match.MatchId, ended.Match!.MatchId);
+        Assert.Equal("2v2 Showdown", ended.Match.GameLabel);
         Assert.Equal("Completed", ended.Match.FinalState);
         Assert.Equal(2, ended.Match.Teams!.Count);
         Assert.Equal(1, ended.Match.Teams[0].Rank);
         Assert.NotNull(ended.Match.DurationSeconds);
+    }
+
+    [Fact]
+    public void Match_game_label_is_null_when_gametype_unregistered()
+    {
+        // Queue still references "gt1", but no def is registered, so the label can't be resolved
+        // and the consumer falls back to gameType.
+        var h = new Harness(registerGameType: false);
+        h.Connect("A", "B", "C", "D");
+        h.Enqueue("A", "B", "C", "D");
+        h.Engine.Tick(T0);
+
+        var locked = h.Single(ClashEventTypes.MatchTeamsLocked);
+        Assert.Equal("gt1", locked.Match!.GameType);
+        Assert.Null(locked.Match.GameLabel);
     }
 
     [Fact]
@@ -276,6 +322,29 @@ public class EventStreamTelemetryTests
         Assert.DoesNotContain("\"waiting\"", json);
     }
 
+    [Fact]
+    public void Match_payload_serializes_game_label_camelCase_and_drops_it_when_null()
+    {
+        var options = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        };
+
+        var withLabel = JsonSerializer.Serialize(
+            new EventEnvelope(EventSchema.Version, ClashEventTypes.MatchEnded, T0,
+                Match: new MatchEventPayload(MatchId: null, GameType: "elim", GameLabel: "Elimination")),
+            options);
+        Assert.Contains("\"gameType\":\"elim\"", withLabel);
+        Assert.Contains("\"gameLabel\":\"Elimination\"", withLabel);
+
+        var withoutLabel = JsonSerializer.Serialize(
+            new EventEnvelope(EventSchema.Version, ClashEventTypes.MatchEnded, T0,
+                Match: new MatchEventPayload(MatchId: null, GameType: "elim")),
+            options);
+        Assert.DoesNotContain("\"gameLabel\"", withoutLabel);
+    }
+
     private static (EventStreamTelemetry Mapper, RecordingEventSink Sink, FakeClock Clock) DirectMapper()
     {
         var clock = new FakeClock(T0);
@@ -283,6 +352,6 @@ public class EventStreamTelemetryTests
         registry.Register("2v2", new MatchShape(2, 2),
             new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)), "gt1", label: "2v2 Casual");
         var sink = new RecordingEventSink();
-        return (new EventStreamTelemetry(sink, registry, clock), sink, clock);
+        return (new EventStreamTelemetry(sink, registry, new GameTypeRegistry(), clock), sink, clock);
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ClashEngine.Core.Adapter;
+using ClashEngine.Core.GameType;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
@@ -27,12 +28,14 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
 {
     private readonly IEventSink _sink;
     private readonly QueueRegistry _queues;
+    private readonly GameTypeRegistry _gameTypes;
     private readonly IClock _clock;
 
-    public EventStreamTelemetry(IEventSink sink, QueueRegistry queues, IClock clock)
+    public EventStreamTelemetry(IEventSink sink, QueueRegistry queues, GameTypeRegistry gameTypes, IClock clock)
     {
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _queues = queues ?? throw new ArgumentNullException(nameof(queues));
+        _gameTypes = gameTypes ?? throw new ArgumentNullException(nameof(gameTypes));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
@@ -89,6 +92,7 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
         Emit(ClashEventTypes.MatchTeamsLocked, new MatchEventPayload(
             MatchId: null,
             GameType: gameType,
+            GameLabel: ResolveGameLabel(gameType),
             QueueName: proposal.QueueName,
             QueueLabel: label,
             Arena: arena,
@@ -100,6 +104,7 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
         Emit(ClashEventTypes.MatchStarted, new MatchEventPayload(
             MatchId: match.MatchId,
             GameType: match.GameType,
+            GameLabel: ResolveGameLabel(match.GameType),
             Teams: BuildRosters(match.Teams),
             StartedAt: match.StartedAt));
     }
@@ -116,6 +121,7 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
         Emit(ClashEventTypes.MatchEnded, new MatchEventPayload(
             MatchId: outcome.MatchId,
             GameType: outcome.GameType,
+            GameLabel: ResolveGameLabel(outcome.GameType),
             Teams: teams,
             FinalState: outcome.FinalState.ToString(),
             EndedAt: outcome.EndedAt,
@@ -128,6 +134,13 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
 
     private void Emit(string type, MatchEventPayload match) =>
         _sink.Emit(new EventEnvelope(EventSchema.Version, type, _clock.UtcNow, Match: match));
+
+    /// <summary>Resolves a game type's human-readable label from the registry, for the match
+    /// payload's <c>gameLabel</c>. Returns <see langword="null"/> when the name is empty or the
+    /// type isn't registered (e.g. legacy/test queues); the consumer then falls back to
+    /// <c>gameType</c>.</summary>
+    private string? ResolveGameLabel(string gameType) =>
+        !string.IsNullOrEmpty(gameType) && _gameTypes.TryGet(gameType, out var def) ? def.Label : null;
 
     /// <summary>Resolves a queue's display/shape fields from the registry. Falls back to the bare
     /// name and zeroed shape if the queue isn't registered (shouldn't happen for engine-sourced

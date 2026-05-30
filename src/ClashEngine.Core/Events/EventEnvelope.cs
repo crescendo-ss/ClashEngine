@@ -42,10 +42,14 @@ public sealed record QueueEventPayload(
 
 /// <summary>Payload for <c>match.*</c> events. <see cref="MatchId"/> is absent on
 /// <c>match.teams_locked</c> (the proposal carries no id yet) and present on
-/// <c>match.started</c> / <c>match.ended</c>, which a consumer can correlate by it.</summary>
+/// <c>match.started</c> / <c>match.ended</c>, which a consumer can correlate by it.
+/// <see cref="GameLabel"/> is the game type's human-readable label (e.g. "Elimination");
+/// it is optional/nullable, and a consumer falls back to <see cref="GameType"/> when it is
+/// absent.</summary>
 public sealed record MatchEventPayload(
     Guid? MatchId,
     string GameType,
+    string? GameLabel = null,
     string? QueueName = null,
     string? QueueLabel = null,
     string? Arena = null,

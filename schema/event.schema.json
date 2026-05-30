@@ -99,6 +99,10 @@
           "type": "string",
           "description": "Registry name of the game type."
         },
+        "gameLabel": {
+          "type": ["string", "null"],
+          "description": "Human-readable game/mode label, e.g. \"Elimination\". Optional; the consumer falls back to gameType when absent and derives the NvN shape from the rosters."
+        },
         "queueName": {
           "type": ["string", "null"],
           "description": "Source queue's registry id. Present on match.teams_locked; null on started/ended (correlate by matchId/roster)."

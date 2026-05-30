@@ -364,7 +364,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _eventSink = BuildEventSink();
         if (_eventSink is IDisposable disposableEventSink)
             _unregisterActions.Add(disposableEventSink.Dispose);
-        var eventStreamTelemetry = new EventStreamTelemetry(_eventSink, _engine.Queues, _clock);
+        var eventStreamTelemetry = new EventStreamTelemetry(_eventSink, _engine.Queues, _engine.GameTypes, _clock);
 
         Func<Guid, string?>? recordingPathLookup = _replayRecorder is not null
             ? (Func<Guid, string?>)(id => _replayRecorder.GetRecordingPath(id))
