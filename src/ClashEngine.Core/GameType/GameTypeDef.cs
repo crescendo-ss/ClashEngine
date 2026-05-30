@@ -16,7 +16,7 @@ namespace ClashEngine.Core.GameType;
 /// <see cref="Metadata"/> are version-frozen on the stats server (per the gametype schema)
 /// -- a subsequent re-POST with the same name but different fields creates a new version
 /// on the server side; ClashEngine itself stores only the current parsed view here.</para>
-/// <para>The remaining knobs (team shape, lives, spawn / ship layout, durations) drive
+/// <para>The remaining knobs (team shape, lives, spawn layout, durations) drive
 /// match formation locally. They are summarized into <see cref="Metadata"/> for the upload
 /// payload but are otherwise ClashEngine-internal.</para>
 /// </remarks>
@@ -37,7 +37,6 @@ public sealed record GameTypeDef(
     TimeSpan? CountdownDuration,
     TimeSpan? KnockoutSpecDelay,
     TimeSpan? TeamCollapseGrace,
-    IReadOnlyList<IReadOnlyList<int>>? ShipBySlot,
     TimeSpan? ShipChangeGracePeriod,
     ItemsAction ReturnItemsAction);
 

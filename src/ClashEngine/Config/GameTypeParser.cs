@@ -114,8 +114,6 @@ internal static class GameTypeParser
         TimeSpan? shipChangeGracePeriod = ReadOptionalNonNegativeTimeSpan(config, handle, p + "ShipChangeGracePeriod", p, log);
         ItemsAction returnItemsAction = ReadReturnItemsAction(config, handle, p, log);
 
-        var shipBySlot = ShipBySlotParser.Read(config, handle, p, teamCount, perTeam, log);
-
         // Auto-derive the metadata blob from the resolved shape. The stats server stores this
         // verbatim with the gametype version; downstream consumers (scoreboards, dashboards)
         // read teamCount / teamSizes / livesPerPlayer from here. Operators don't see a
@@ -128,7 +126,7 @@ internal static class GameTypeParser
             teamCount, perTeam, killTarget, lives, timeLimit,
             spawnSetByTeam, maxDrift, warpOnSpawn,
             stagingDuration, countdownDuration, knockoutSpecDelay,
-            teamCollapseGrace, shipBySlot, shipChangeGracePeriod,
+            teamCollapseGrace, shipChangeGracePeriod,
             returnItemsAction);
     }
 
@@ -178,16 +176,13 @@ internal static class GameTypeParser
         string spawnDesc = def.SpawnSetByTeam is null
             ? "(none)"
             : string.Join(", ", SpawnSetParser.Describe(def.SpawnSetByTeam));
-        string shipDesc = def.ShipBySlot is null
-            ? "(default Warbird)"
-            : string.Join(", ", ShipBySlotParser.Describe(def.ShipBySlot));
 
         log.Debug(ConfigConstants.LogCategory,
             $"GameType '{def.Name}' parsed: Label='{def.Label}', TeamCount={def.TeamCount}, PlayersPerTeam={def.PlayersPerTeam}, " +
             $"KillTarget={(def.KillTarget > 0 ? def.KillTarget.ToString() : "0 (unset)")}, " +
             $"TimeLimit={(def.TimeLimit is { } tl ? tl.ToString() : "(unset)")}, " +
             $"Lives={(def.Lives > 0 ? def.Lives.ToString() : "0 (unlimited)")}, " +
-            $"WarpOnSpawn={def.WarpOnSpawn}, Spawns={spawnDesc}, Ships={shipDesc}, " +
+            $"WarpOnSpawn={def.WarpOnSpawn}, Spawns={spawnDesc}, " +
             $"MaxSpawnDrift={(def.MaxSpawnDriftTiles is { } md ? md + "t" : "(unset)")}, " +
             $"StagingDuration={(def.StagingDuration is { } sd ? sd.ToString() : "(default 10s)")}, " +
             $"CountdownDuration={(def.CountdownDuration is { } cd ? cd.ToString() : "(default 5s)")}, " +

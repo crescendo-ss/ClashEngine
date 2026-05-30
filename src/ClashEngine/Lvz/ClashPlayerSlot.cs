@@ -19,7 +19,6 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
     private readonly ClashMatchData _matchData;
     private readonly ClashTeam _team;
     private readonly PlayerKey _key;
-    private readonly ShipType _ship;
 
     public ClashPlayerSlot(ClashMatchData matchData, ClashTeam team, int slotIdx, PlayerKey key)
     {
@@ -27,7 +26,6 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
         _team = team;
         SlotIdx = slotIdx;
         _key = key;
-        _ship = ResolveShipFromQueue(matchData.Queue, team.TeamIdx, slotIdx);
     }
 
     public IMatchData MatchData => _matchData;
@@ -75,7 +73,8 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
         }
     }
 
-    public ShipType Ship => _ship;
+    // All match participants spawn as Warbird; per-slot ship overrides have been removed.
+    public ShipType Ship => ShipType.Warbird;
 
     // Live-read from the recorder's per-life inventory: reset to the ship's initial loadout on
     // OnSpawn, decremented on OnItemUsed, and incremented on green-prize pickups.
@@ -107,15 +106,5 @@ internal sealed class ClashPlayerSlot : IPlayerSlot, IMemberStats
         if (v < short.MinValue) return short.MinValue;
         if (v > short.MaxValue) return short.MaxValue;
         return (short)v;
-    }
-
-    private static ShipType ResolveShipFromQueue(Core.Queue.QueueDefinition queue, int teamIdx, int slotIdx)
-    {
-        if (queue.ShipBySlot is null) return ShipType.Spec;
-        if (teamIdx < 0 || teamIdx >= queue.ShipBySlot.Count) return ShipType.Spec;
-        var team = queue.ShipBySlot[teamIdx];
-        if (slotIdx < 0 || slotIdx >= team.Count) return ShipType.Spec;
-        int raw = team[slotIdx];
-        return raw is >= 0 and <= 7 ? (ShipType)raw : ShipType.Spec;
     }
 }

@@ -414,12 +414,6 @@
     max-width: 80px;
   }
   .spawn-pair .sep { color: var(--text-dim); }
-  .ship-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .ship-row select { max-width: 130px; }
   .add-btn-row {
     margin-top: 8px;
   }
@@ -813,7 +807,6 @@
    from src/ClashEngine/Config/*.cs and tools/queue_designer.py.
    ---------------------------------------------------------------------- */
 
-const SHIP_NAMES = ["warbird","javelin","spider","leviathan","terrier","weasel","lancaster","shark"];
 const ITEMS_ACTIONS = ["full","restore","burn"];
 const LOG_VERBOSITY_DEFAULT = "Normal";
 const REPLAY_DIR_DEFAULT = "clash-replays";
@@ -929,8 +922,6 @@ function newGameType() {
     warpOnSpawn: false,
     teamSpawns: [[], []],
     maxSpawnDriftTiles: 0,
-    shipsEnabled: false,
-    teamShips: [[], []],
     stagingDurationSec: null,
     countdownDurationSec: null,
     knockoutSpecDelaySec: null,
@@ -1498,8 +1489,6 @@ function renderGameTypeCard(gt, index) {
         gt.teamCount = v;
         while (gt.teamSpawns.length < v) gt.teamSpawns.push([]);
         gt.teamSpawns.length = v;
-        while (gt.teamShips.length < v) gt.teamShips.push([]);
-        gt.teamShips.length = v;
         render();
       },
       onCommit: () => rerenderCardBody(card, gt),
@@ -1513,10 +1502,6 @@ function renderGameTypeCard(gt, index) {
       value: gt.playersPerTeam, min: 1, max: 50, step: 1,
       onChange: v => {
         gt.playersPerTeam = v;
-        for (const row of gt.teamShips) {
-          while (row.length < v) row.push("");
-          row.length = v;
-        }
         render();
       },
       onCommit: () => rerenderCardBody(card, gt),
@@ -1590,41 +1575,6 @@ function renderGameTypeCard(gt, index) {
     ));
   }
   body.appendChild(spawnGroup);
-
-  /* TODO(per-slot ships): pending audit of the per-team ship-roster feature in the
-     engine before re-exposing in the UI. Re-enable this block to expose:
-       - "Override ships" checkbox (gt.shipsEnabled)
-       - one shipTeamRow(gt, t) per team with PlayersPerTeam ship dropdowns
-     The emit and validation paths below are commented out in parallel.
-  // --- Per-slot ships subgroup ---
-  const shipsGroup = el("div", { class: "subgroup" }, el("h4", {}, "Per-slot ships"));
-  shipsGroup.appendChild(simpleField("Override ships", "Off → every slot is Warbird. On → pick a ship per slot for each team.",
-    el("label", { class: "checkbox-row" },
-      el("input", {
-        type: "checkbox", checked: gt.shipsEnabled,
-        onchange: e => {
-          gt.shipsEnabled = e.target.checked;
-          if (gt.shipsEnabled) {
-            for (let t = 0; t < gt.teamCount; t++) {
-              if (!gt.teamShips[t]) gt.teamShips[t] = [];
-              while (gt.teamShips[t].length < gt.playersPerTeam) gt.teamShips[t].push("warbird");
-              gt.teamShips[t].length = gt.playersPerTeam;
-            }
-          }
-          rerenderCardBody(card, gt);
-          render();
-        }
-      }),
-      "Enabled"
-    )
-  ));
-  if (gt.shipsEnabled) {
-    for (let t = 0; t < gt.teamCount; t++) {
-      shipsGroup.appendChild(shipTeamRow(gt, t));
-    }
-  }
-  body.appendChild(shipsGroup);
-  */
 
   // --- Match-flow timings ---
   const timingGroup = el("div", { class: "subgroup" }, el("h4", {}, "Match-flow timings"));
@@ -1734,28 +1684,6 @@ function spawnPairRow(gt, t, i) {
 }
 
 function clampInt16(v) { return Math.max(-32768, Math.min(32767, v)); }
-
-function shipTeamRow(gt, t) {
-  const row = el("div", { class: "team-row" });
-  row.appendChild(el("div", { class: "team-label" }, `Team${t + 1}`));
-  const cells = el("div", { class: "ship-row" });
-  if (!gt.teamShips[t]) gt.teamShips[t] = [];
-  while (gt.teamShips[t].length < gt.playersPerTeam) gt.teamShips[t].push("warbird");
-  gt.teamShips[t].length = gt.playersPerTeam;
-  for (let s = 0; s < gt.playersPerTeam; s++) {
-    const sel = el("select", {
-      onchange: e => { gt.teamShips[t][s] = e.target.value; render(); }
-    });
-    SHIP_NAMES.forEach(name => {
-      const opt = el("option", { value: name }, name);
-      if (gt.teamShips[t][s] === name) opt.selected = true;
-      sel.appendChild(opt);
-    });
-    cells.appendChild(sel);
-  }
-  row.appendChild(cells);
-  return row;
-}
 
 /* ----------------- Queue card ----------------- */
 
@@ -2053,12 +1981,6 @@ function validate() {
     } else if (gt.maxSpawnDriftTiles > 0) {
       warnings.push(`${label}: MaxSpawnDrift only takes effect when WarpOnSpawn is on.`);
     }
-    /* TODO(per-slot ships): validation suppressed pending engine-feature audit. Re-enable alongside the UI and emit code.
-    if (gt.shipsEnabled) {
-      const mismatch = gt.teamShips.slice(0, gt.teamCount).find(r => r.length !== gt.playersPerTeam);
-      if (mismatch) errors.push(`${label}: per-team ship rows must each have ${gt.playersPerTeam} entries.`);
-    }
-    */
     if (gt.killTarget === 0 && gt.timeLimitSec === null) {
       warnings.push(`${label}: no KillTarget and no TimeLimit — engine falls back to 30 kills.`);
     }
@@ -2204,16 +2126,6 @@ function emitGameType(out, gt, idx) {
     }
     if (gt.maxSpawnDriftTiles > 0) out.push(line(`${p}MaxSpawnDrift`, String(gt.maxSpawnDriftTiles)));
   }
-  /* TODO(per-slot ships): emit suppressed pending engine-feature audit. Re-enable alongside the UI subgroup above.
-  if (gt.shipsEnabled) {
-    for (let t = 0; t < gt.teamCount; t++) {
-      const row = gt.teamShips[t] || [];
-      if (row.length === gt.playersPerTeam) {
-        out.push(line(`${p}Team${t + 1}Ships`, row.join(",")));
-      }
-    }
-  }
-  */
   if (gt.stagingDurationSec !== null) out.push(line(`${p}StagingDuration`, formatTime(gt.stagingDurationSec)));
   if (gt.countdownDurationSec !== null) out.push(line(`${p}CountdownDuration`, formatTime(gt.countdownDurationSec)));
   if (gt.knockoutSpecDelaySec !== null) out.push(line(`${p}KnockoutSpecDelay`, formatTime(gt.knockoutSpecDelaySec)));

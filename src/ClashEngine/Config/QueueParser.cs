@@ -107,7 +107,6 @@ internal static class QueueParser
                 vetoWindow: vetoWindow,
                 ratingWeight: casual ? 0.5 : 1.0,
                 matchArenaName: string.IsNullOrWhiteSpace(arenaName) ? null : arenaName,
-                shipBySlot: gt.ShipBySlot,
                 spawnSetByTeam: gt.SpawnSetByTeam,
                 maxSpawnDriftTiles: gt.MaxSpawnDriftTiles,
                 warpOnSpawn: gt.WarpOnSpawn,

@@ -178,12 +178,6 @@ These keys move the match's pre-GO physical setup off the arena's default spawn 
 
 **Pre-GO drift enforcement.** While `WarpOnSpawn = 1`, every position packet during Staging and Countdown is checked against the team's chosen spawn; players past the threshold are warped back to that spawn. At GO, the entire team is re-warped to the chosen spawn one final time so any sub-threshold drift is snapped flush.
 
-#### Per-slot ships
-
-| Key | Type | Default | Notes |
-|---|---|---|---|
-| `GameType<i>Team<t>Ships` | comma-separated names or 0..7 | (unset → all Warbird) | Per-team list of ships, one per slot. Names are case-insensitive (`warbird`, `javelin`, `spider`, `leviathan`/`lev`, `terrier`/`terr`, `weasel`, `lancaster`/`lanc`, `shark`); numbers are the canonical Continuum ship indices. Each team's count must equal `PlayersPerTeam`; a mismatch (or any team unset while another is set) skips the override and reverts to all-Warbird. |
-
 #### Match-flow timings (warmup / countdown / spec grace)
 
 | Key | Type | Default | Notes |

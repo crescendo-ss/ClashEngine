@@ -117,7 +117,7 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
             for (int j = 0; j < match.Teams[t].Count; j++)
             {
                 var player = match.Teams[t][j];
-                ShipType ship = ResolveShip(queue, t, j);
+                ShipType ship = ShipType.Warbird;
 
                 int maxEnergy = ch is null ? 1000 : ShipEnergyConfigBuilder.GetMaxEnergy(_config, ch, ship);
                 double recharge = ch is null ? 0.0 : ShipEnergyConfigBuilder.GetRechargeRatePerTick(_config, ch, ship);
@@ -339,16 +339,6 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
         if (string.IsNullOrEmpty(arenaName)) return null;
         var arena = _arenaManager.FindArena(arenaName);
         return arena?.Cfg;
-    }
-
-    private static ShipType ResolveShip(QueueDefinition queue, int teamIdx, int slotIdx)
-    {
-        if (queue.ShipBySlot is null) return ShipType.Warbird;
-        if (teamIdx >= queue.ShipBySlot.Count) return ShipType.Warbird;
-        var team = queue.ShipBySlot[teamIdx];
-        if (slotIdx >= team.Count) return ShipType.Warbird;
-        int raw = team[slotIdx];
-        return raw is >= 0 and <= 7 ? (ShipType)raw : ShipType.Warbird;
     }
 
     private readonly record struct MatchInfo(

@@ -177,7 +177,7 @@ public sealed class MatchOrchestrator
                     continue;
                 }
 
-                var ship = ShipFor(t, j);
+                var ship = ShipType.Warbird;
                 _pendingPlacement[key] = new PlacementInfo(ship, freq, spawn.X, spawn.Y);
 
                 if (arenaName is not null && !IsInArena(player, arenaName))
@@ -314,23 +314,23 @@ public sealed class MatchOrchestrator
         if (player.Ship != ShipType.Spec)
             return ReturnResult.AlreadyActive;
 
-        int teamIdx = -1, slotIdx = -1;
+        int teamIdx = -1;
         for (int t = 0; t < _proposal.Teams.Count && teamIdx < 0; t++)
         {
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
-                if (_proposal.Teams[t][j] == key) { teamIdx = t; slotIdx = j; break; }
+                if (_proposal.Teams[t][j] == key) { teamIdx = t; break; }
             }
         }
         if (teamIdx < 0) return ReturnResult.MatchEnded;
 
         short freq = (short)(_freqBase + teamIdx * MatchFreqAllocator.FreqStep);
         // Prefer the ship the player was actually on at the moment they specced -- preserves any
-        // post-death ship-change made within the grace window. Falls back to the queue's slotted
-        // ship for first-time placements (no spec snapshot yet) or if the snapshot was lost.
+        // post-death ship-change made within the grace window. Falls back to Warbird for
+        // first-time placements (no spec snapshot yet) or if the snapshot was lost.
         var ship = _shipAtLeave.TryGetValue(key, out var savedShip) && savedShip != ShipType.Spec
             ? savedShip
-            : ShipFor(teamIdx, slotIdx);
+            : ShipType.Warbird;
         _game.SetShipAndFreq(player, ship, freq);
 
         // Apply the game type's items policy to the freshly-respawned loadout.
@@ -887,14 +887,6 @@ public sealed class MatchOrchestrator
         var names = new string[team.Count];
         for (int i = 0; i < team.Count; i++) names[i] = team[i].Name;
         return string.Join("/", names);
-    }
-
-    private ShipType ShipFor(int teamIdx, int slotIdx)
-    {
-        if (_queue.ShipBySlot is null) return ShipType.Warbird;
-        var raw = _queue.ShipBySlot[teamIdx][slotIdx];
-        if (raw < 0 || raw > 7) return ShipType.Warbird;
-        return (ShipType)raw;
     }
 
 }

@@ -9,7 +9,7 @@ namespace ClashEngine.Core.Queue;
 /// <summary>
 /// A named matchmaking queue together with its match shape, quality policy, the rating
 /// game-type it stores ratings under, end-of-match adjudication, griefing-detection knobs,
-/// and per-team ship / arena / spawn placement config.
+/// and per-team arena / spawn placement config.
 /// </summary>
 public sealed class QueueDefinition
 {
@@ -24,7 +24,6 @@ public sealed class QueueDefinition
         TimeSpan? vetoWindow = null,
         double ratingWeight = 1.0,
         string? matchArenaName = null,
-        IReadOnlyList<IReadOnlyList<int>>? shipBySlot = null,
         IReadOnlyList<IReadOnlyList<SpawnPoint>>? spawnSetByTeam = null,
         int? maxSpawnDriftTiles = null,
         bool warpOnSpawn = false,
@@ -68,21 +67,6 @@ public sealed class QueueDefinition
         if (timeLimit is { } tl && tl <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeLimit), "Must be positive when set.");
 
-        if (shipBySlot is not null)
-        {
-            if (shipBySlot.Count != shape.TeamCount)
-                throw new ArgumentException(
-                    $"shipBySlot must have one entry per team ({shape.TeamCount}); got {shipBySlot.Count}.",
-                    nameof(shipBySlot));
-            for (int t = 0; t < shipBySlot.Count; t++)
-            {
-                if (shipBySlot[t].Count != shape.PlayersPerTeam)
-                    throw new ArgumentException(
-                        $"shipBySlot[{t}] must have {shape.PlayersPerTeam} entries; got {shipBySlot[t].Count}.",
-                        nameof(shipBySlot));
-            }
-        }
-
         if (spawnSetByTeam is not null)
         {
             if (spawnSetByTeam.Count != shape.TeamCount)
@@ -119,7 +103,6 @@ public sealed class QueueDefinition
         VetoWindow = vetoWindow ?? TimeSpan.FromSeconds(60);
         RatingWeight = ratingWeight;
         MatchArenaName = matchArenaName;
-        ShipBySlot = shipBySlot;
         SpawnSetByTeam = spawnSetByTeam;
         MaxSpawnDriftTiles = maxSpawnDriftTiles;
         WarpOnSpawn = warpOnSpawn;
@@ -208,7 +191,6 @@ public sealed class QueueDefinition
     public TimeSpan VetoWindow { get; }
     public double RatingWeight { get; }
     public string? MatchArenaName { get; }
-    public IReadOnlyList<IReadOnlyList<int>>? ShipBySlot { get; }
 
     /// <summary>
     /// Per-team set of candidate spawn points. At setup the orchestrator picks one entry from

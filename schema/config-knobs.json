@@ -166,14 +166,6 @@
           "source": "src/ClashEngine/Config/GameTypeParser.cs:102"
         },
         {
-          "key": "GameType<i>Team<t>Ships",
-          "type": "shipList",
-          "format": "comma-separated ship names or 0..7 indices",
-          "default": "(all Warbird)",
-          "description": "Per-team ship per slot, t in 1..TeamCount. Names case-insensitive: warbird, javelin, spider, leviathan/lev, terrier/terr, weasel, lancaster/lanc, shark. Each team's count must equal PlayersPerTeam; any mismatch (or one team set while another isn't) reverts all teams to Warbird.",
-          "source": "src/ClashEngine/Config/GameTypeParser.cs:117 (ShipBySlotParser.Read)"
-        },
-        {
           "key": "GameType<i>StagingDuration",
           "type": "duration",
           "constraint": "> 0",

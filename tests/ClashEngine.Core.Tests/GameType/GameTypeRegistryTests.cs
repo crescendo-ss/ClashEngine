@@ -22,7 +22,6 @@ public class GameTypeRegistryTests
             CountdownDuration: null,
             KnockoutSpecDelay: null,
             TeamCollapseGrace: null,
-            ShipBySlot: null,
             ShipChangeGracePeriod: null,
             ReturnItemsAction: Core.Queue.ItemsAction.Full);
 

@@ -65,32 +65,6 @@ public class QueueDefinitionTests
     }
 
     [Fact]
-    public void Ship_by_slot_round_trips()
-    {
-        var ships = new IReadOnlyList<int>[]
-        {
-            new[] { 1, 2 },   // team 0: Warbird, Javelin
-            new[] { 3, 4 },   // team 1: Spider, Leviathan
-        };
-        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), shipBySlot: ships);
-        Assert.NotNull(def.ShipBySlot);
-        Assert.Equal(2, def.ShipBySlot![0][1]);
-        Assert.Equal(4, def.ShipBySlot[1][1]);
-    }
-
-    [Fact]
-    public void Ship_by_slot_dimension_mismatch_throws()
-    {
-        var wrongTeamCount = new IReadOnlyList<int>[] { new[] { 1, 2 } };  // only 1 team
-        Assert.Throws<ArgumentException>(() =>
-            new QueueDefinition("q", new MatchShape(2, 2), Policy(), shipBySlot: wrongTeamCount));
-
-        var wrongSlotCount = new IReadOnlyList<int>[] { new[] { 1, 2, 3 }, new[] { 4, 5, 6 } };  // 3 per team
-        Assert.Throws<ArgumentException>(() =>
-            new QueueDefinition("q", new MatchShape(2, 2), Policy(), shipBySlot: wrongSlotCount));
-    }
-
-    [Fact]
     public void Label_defaults_to_BaseName_when_no_label_supplied()
     {
         // No owner arena: BaseName == Name == "q"; Label falls back to BaseName.

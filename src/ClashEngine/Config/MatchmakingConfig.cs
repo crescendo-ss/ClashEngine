@@ -48,8 +48,6 @@ namespace ClashEngine.Config;
 /// GameType1WarpOnSpawn    = 1
 /// GameType1Team1Spawns    = 480,256;480,257
 /// GameType1Team2Spawns    = 544,256;544,257
-/// GameType1Team1Ships     = warbird,javelin,spider
-/// GameType1Team2Ships     = warbird,javelin,spider
 ///
 /// QueueCount = 2
 /// Queue1Name              = 3v3comp
