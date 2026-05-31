@@ -428,7 +428,11 @@ public sealed class MatchmakingCommands
         foreach (var d in defs)
         {
             var shape = d.Shape;
-            var shapeTag = $"{shape.TeamCount}v{shape.PlayersPerTeam}";
+            // Spell the shape out so the "v" in queue labels (versus) is never confused with the
+            // team/per-team split. TeamCount is always >= 2; PlayersPerTeam can be 1 (e.g. 1v1 ->
+            // "2 teams of 1 player").
+            var shapeTag = $"{shape.TeamCount} teams of {shape.PlayersPerTeam} " +
+                (shape.PlayersPerTeam == 1 ? "player" : "players");
             int waiting = d.Queue.Snapshot().Count;
             _chat.SendMessage(player, $"  {d.Label} [{shapeTag}]: {waiting} waiting");
         }
