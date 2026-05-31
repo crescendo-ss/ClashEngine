@@ -55,10 +55,11 @@ public sealed class MatchmakingEngine
     /// <summary>Minimum match shape (in total players) eligible for near-full chat notifications.</summary>
     private const int NearFullMinShape = 4;
 
-    // (player, queueName) -> the QueueEntry.EnqueuedAt we last fired an AFK dwell-warning for.
-    // Keying on the enqueue epoch means a leave-and-re-queue (which stamps a fresh EnqueuedAt)
-    // re-arms the warning even if no sweep observed the gap. Stale pairs (player no longer in the
-    // queue) are pruned at the top of SweepAfkDwell to bound memory.
+    // (player, queueName) -> the QueueEntry.LastSeenAt we last fired an AFK dwell-warning for.
+    // Keying on the liveness epoch means anything that stamps a fresh LastSeenAt -- a leave-and-
+    // re-queue, or a present player re-issuing ?play (Matcher.Touch) -- re-arms the warning even
+    // if no sweep observed the gap. Stale pairs (player no longer in the queue) are pruned at the
+    // top of SweepAfkDwell to bound memory.
     private readonly Dictionary<(PlayerKey Player, string Queue), DateTimeOffset> _dwellWarned = new();
 
     public MatchmakingEngine(
@@ -300,7 +301,14 @@ public sealed class MatchmakingEngine
 
         var rating = _ratings.Get(player, def.GameType);
         if (!_matcher.Enqueue(player, rating, queueName))
-            return EnqueueResult.AlreadyQueued;
+        {
+            // Already queued here: treat the repeat ?play as a liveness ping. Refresh the AFK
+            // dwell clock (LastSeenAt) -- leaving queue order, wait-based quality relaxation, and
+            // the displayed wait (all keyed on EnqueuedAt) untouched -- so a present player can
+            // keep themselves from being culled, exactly as the dwell warning instructs.
+            _matcher.Touch(player, queueName, at);
+            return EnqueueResult.AlreadyQueuedRefreshed;
+        }
 
         _telemetry.OnQueueAdded(player, queueName, at);
         return EnqueueResult.Ok;
@@ -429,7 +437,16 @@ public sealed class MatchmakingEngine
                 _ => EnqueueResult.Ok,
             };
             if (status != EnqueueResult.Ok) return status;
-            if (def.Queue.Contains(members[i])) return EnqueueResult.AlreadyQueued;
+            if (def.Queue.Contains(members[i]))
+            {
+                // Party already queued here -> the repeat ?play is a liveness ping for the whole
+                // party. Refresh every member that's present (atomic enqueue keeps them together,
+                // but touch defensively) and report the refresh rather than a bare AlreadyQueued.
+                bool refreshed = false;
+                for (int j = 0; j < members.Count; j++)
+                    refreshed |= _matcher.Touch(members[j], queueName, at);
+                return refreshed ? EnqueueResult.AlreadyQueuedRefreshed : EnqueueResult.AlreadyQueued;
+            }
         }
 
         // Reject duplicate keys within the group.
@@ -721,9 +738,10 @@ public sealed class MatchmakingEngine
     /// <summary>
     /// Warns once and then auto-culls players who have sat in a queue past its configured AFK
     /// dwell thresholds (<see cref="QueueDefinition.AfkDwellWarning"/> /
-    /// <see cref="QueueDefinition.AfkDwellCull"/>). Re-queuing resets the timer (a fresh
-    /// <see cref="Queue.QueueEntry.EnqueuedAt"/>, which the warned-set keys on, re-arms the
-    /// warning). No-op for queues with warning disabled (null / non-positive).
+    /// <see cref="QueueDefinition.AfkDwellCull"/>). The clock is the entry's
+    /// <see cref="Queue.QueueEntry.LastSeenAt"/>, so re-queuing OR a present player re-issuing
+    /// <c>?play</c> (which touches LastSeenAt) resets the timer and re-arms the warning. No-op for
+    /// queues with warning disabled (null / non-positive).
     /// </summary>
     private void SweepAfkDwell(DateTimeOffset at)
     {
@@ -754,7 +772,7 @@ public sealed class MatchmakingEngine
             for (int i = 0; i < snapshot.Count; i++)
             {
                 var entry = snapshot[i];
-                var dwell = at - entry.EnqueuedAt;
+                var dwell = at - entry.LastSeenAt;
 
                 if (cull is { } cullSpan && cullSpan > TimeSpan.Zero && dwell >= cullSpan)
                 {
@@ -765,10 +783,10 @@ public sealed class MatchmakingEngine
                 if (dwell >= warnSpan)
                 {
                     var key = (entry.Player, def.UniqueId);
-                    // Fire once per (player, enqueue-epoch): a fresh EnqueuedAt re-warns.
-                    if (!_dwellWarned.TryGetValue(key, out var warnedFor) || warnedFor != entry.EnqueuedAt)
+                    // Fire once per (player, liveness-epoch): a fresh LastSeenAt re-warns.
+                    if (!_dwellWarned.TryGetValue(key, out var warnedFor) || warnedFor != entry.LastSeenAt)
                     {
-                        _dwellWarned[key] = entry.EnqueuedAt;
+                        _dwellWarned[key] = entry.LastSeenAt;
                         _telemetry.OnQueueDwellWarning(entry.Player, def.UniqueId, at, dwell);
                     }
                 }
@@ -1218,6 +1236,12 @@ public enum EnqueueResult
     InMatch,
     InTimeout,
     AlreadyQueued,
+
+    /// <summary>The player (or party) was already in the requested queue, and the repeat
+    /// <c>?play</c> was treated as a liveness ping: their AFK dwell clock was refreshed without
+    /// changing queue position. Distinct from <see cref="AlreadyQueued"/> so the reply can confirm
+    /// the refresh rather than read as an inert "already queued".</summary>
+    AlreadyQueuedRefreshed,
 
     /// <summary>The group has more members than the queue's <c>PlayersPerTeam</c>.</summary>
     GroupTooLarge,

@@ -249,12 +249,14 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
-    public void Already_queued_returns_AlreadyQueued()
+    public void Replaying_play_while_queued_returns_AlreadyQueuedRefreshed()
     {
         var h = new Harness();
         h.Connect("A");
         Assert.Equal(EnqueueResult.Ok, h.Engine.TryEnqueue(K("A"), "2v2", T0));
-        Assert.Equal(EnqueueResult.AlreadyQueued, h.Engine.TryEnqueue(K("A"), "2v2", T0));
+        // A repeat ?play is a liveness ping, not an error: it refreshes the AFK dwell clock and
+        // reports the refresh distinctly so the reply can confirm rather than read as inert.
+        Assert.Equal(EnqueueResult.AlreadyQueuedRefreshed, h.Engine.TryEnqueue(K("A"), "2v2", T0));
     }
 
     [Fact]

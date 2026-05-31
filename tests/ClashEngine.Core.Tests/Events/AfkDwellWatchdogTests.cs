@@ -117,6 +117,63 @@ public class AfkDwellWatchdogTests
     }
 
     [Fact]
+    public void Replaying_play_refreshes_LastSeenAt_but_preserves_EnqueuedAt()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromHours(1));
+        h.Connect("A");
+        h.Enqueue("A");
+
+        h.Advance(TimeSpan.FromMinutes(5));
+        h.Enqueue("A");   // repeat ?play while queued -> liveness ping at T0+5m
+
+        Assert.True(h.Engine.Queues.TryGet("1v1", out var def));
+        var entry = def.Queue.Snapshot().Single();
+        Assert.Equal(T0, entry.EnqueuedAt);                            // true time-in-queue preserved
+        Assert.Equal(T0 + TimeSpan.FromMinutes(5), entry.LastSeenAt);  // AFK dwell clock advanced
+    }
+
+    [Fact]
+    public void Replaying_play_defers_the_dwell_warning()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromHours(1));
+        h.Connect("A");
+        h.Enqueue("A");
+
+        h.Advance(TimeSpan.FromMinutes(14));
+        h.Tick();
+        Assert.Empty(h.Telemetry.DwellWarnings);   // not warned yet
+
+        h.Enqueue("A");   // liveness ping at T0+14m resets the dwell clock
+
+        h.Advance(TimeSpan.FromMinutes(14));   // 28m in queue, but only 14m since the refresh
+        h.Tick();
+        Assert.Empty(h.Telemetry.DwellWarnings);   // refresh deferred the warning
+
+        h.Advance(TimeSpan.FromMinutes(1));    // 15m since the refresh
+        h.Tick();
+        Assert.Single(h.Telemetry.DwellWarnings);
+    }
+
+    [Fact]
+    public void Replaying_play_defers_the_cull()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromMinutes(20));
+        h.Connect("A");
+        h.Enqueue("A");
+
+        h.Advance(TimeSpan.FromMinutes(19));
+        h.Tick();
+        Assert.True(h.StillQueued("A"));
+
+        h.Enqueue("A");   // liveness ping just shy of the cull threshold
+
+        h.Advance(TimeSpan.FromMinutes(19));   // 38m in queue, but 19m since refresh < 20m cull
+        h.Tick();
+        Assert.True(h.StillQueued("A"));
+        Assert.DoesNotContain(h.Telemetry.QueueRemovals, r => r.Reason == QueueRemovalReason.AfkCull);
+    }
+
+    [Fact]
     public void Zero_warn_disables_the_watchdog()
     {
         var h = new Harness(warn: TimeSpan.Zero, cull: TimeSpan.Zero);

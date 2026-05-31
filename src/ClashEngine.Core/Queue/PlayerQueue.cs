@@ -65,6 +65,19 @@ public sealed class PlayerQueue
 
     public bool Contains(PlayerKey player) => _index.ContainsKey(player);
 
+    /// <summary>
+    /// Refreshes the queued player's liveness timestamp (<see cref="QueueEntry.LastSeenAt"/>) to
+    /// <paramref name="at"/> without changing their queue position or
+    /// <see cref="QueueEntry.EnqueuedAt"/>. Used to reset the AFK dwell clock when a present player
+    /// re-affirms via <c>?play</c>. Returns <see langword="false"/> if the player isn't queued.
+    /// </summary>
+    public bool Touch(PlayerKey player, DateTimeOffset at)
+    {
+        if (!_index.TryGetValue(player, out var node)) return false;
+        node.Value = node.Value with { LastSeenAt = at };
+        return true;
+    }
+
     public bool TryPeek(out QueueEntry entry)
     {
         if (_entries.First is null)

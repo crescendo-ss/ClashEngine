@@ -318,6 +318,7 @@ public sealed class MatchmakingCommands
             EnqueueResult.InMatch => "You're already in a match.",
             EnqueueResult.InTimeout => RenderInTimeoutMessage(key, partyMembers),
             EnqueueResult.AlreadyQueued => $"You're already in '{display}'.",
+            EnqueueResult.AlreadyQueuedRefreshed => $"You're already in '{display}' -- refreshed your spot, so you won't be removed for inactivity.",
             EnqueueResult.GroupTooLarge => $"Your group is too large for '{display}'.",
             _ => null,
         };

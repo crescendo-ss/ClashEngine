@@ -87,6 +87,17 @@ public sealed class Matcher
         return true;
     }
 
+    /// <summary>
+    /// Refreshes an already-queued player's liveness timestamp (the AFK dwell clock) without
+    /// moving them in the queue or disturbing their <see cref="QueueEntry.EnqueuedAt"/>. Returns
+    /// <see langword="false"/> if the queue is unknown or the player isn't in it.
+    /// </summary>
+    public bool Touch(PlayerKey player, string queueName, DateTimeOffset at)
+    {
+        if (!_registry.TryGet(queueName, out var def)) return false;
+        return def.Queue.Touch(player, at);
+    }
+
     public bool Dequeue(PlayerKey player, string queueName)
     {
         if (!_registry.TryGet(queueName, out var def)) return false;
