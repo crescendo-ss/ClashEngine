@@ -688,6 +688,23 @@ public class ActiveMatchTests
         Assert.Contains(K("A"), m.Outcome!.AbandonedBy);
     }
 
+    [Fact]
+    public void Cancel_during_forming_does_not_penalize_a_lone_leaver()
+    {
+        // The orchestrator's GO!-time cancel (a player was in spec at the start) uses the candidate
+        // rule, identical to the join-timeout cancellation: a 1v1 leaver stranded no teammate, so
+        // they are not flagged as an abandoner.
+        var teams = new IReadOnlyList<PlayerKey>[] { new[] { K("A") }, new[] { K("B") } };
+        var m = BuildMatch(teams: teams);
+        m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
+        m.OnPlayerJoined(K("B"), T0.AddSeconds(1));
+        m.OnPlayerLeft(K("A"), T0.AddSeconds(2));   // A specs during Forming -> InGrace
+
+        m.Cancel(T0.AddSeconds(3));
+        Assert.Equal(MatchState.Cancelled, m.State);
+        Assert.Empty(m.Outcome!.AbandonedBy);
+    }
+
     private static ActiveMatch JoinAll(ActiveMatch m, DateTimeOffset? at = null)
     {
         var when = at ?? T0.AddSeconds(5);

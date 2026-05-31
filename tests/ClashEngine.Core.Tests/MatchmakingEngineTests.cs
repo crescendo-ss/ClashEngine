@@ -133,51 +133,61 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
-    public void Spec_before_GO_strands_the_match_until_the_returner_re_enables_MarkMatchLive()
+    public void MarkMatchLive_returns_false_when_a_player_specced_during_the_countdown()
     {
-        // Regression for the "specced during countdown" stranding. A player who is placed and then
-        // specs while the match is still Forming (before the orchestrator's GO! tick) goes into
-        // grace -- but they're no longer Active, so MarkMatchLive refuses the Forming->Live flip
-        // (the roster isn't all-Active) and the engine sits in Forming until the join-timeout
-        // cancels it, dragging both teams to spec for no apparent reason. Once the specced player
-        // returns to their ship the transition must succeed, which is what
-        // MatchOrchestrator.TryReturn now retries.
-        var h = new Harness(joinTimeout: TimeSpan.FromSeconds(30));
+        // A player who specs while the match is still Forming goes into grace (no longer Active), so
+        // the orchestrator's GO! MarkMatchLive returns false. That false is the cue the orchestrator
+        // uses to abandon the match rather than start it a player short -- see
+        // MatchOrchestrator.AbandonForAbsenteesAtGo. (A return BEFORE GO! flips them back to Active,
+        // so a timely ?return still lets the match start; see the ActiveMatch grace tests.)
+        var h = new Harness();
         h.Connect("A", "B", "C", "D");
         foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
         h.Engine.Tick(T0);
-
         var matchId = h.Engine.ActiveMatches.Keys.Single();
         var match = h.Engine.ActiveMatches[matchId];
 
-        // Setup/Staging: everyone is placed onto their ship (Pending -> Active).
         h.Clock.Advance(TimeSpan.FromSeconds(2));
         foreach (var n in new[] { "A", "B", "C", "D" })
             h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
 
-        // Countdown (still Forming): 'A' specs -> InGrace (recoverable), and GO! can't fire while
-        // a rostered player isn't Active.
+        // 'A' specs during the countdown -> InGrace, no longer Active.
         h.Clock.Advance(TimeSpan.FromSeconds(3));
         h.Engine.OnPlayerSpecced(K("A"), h.Clock.UtcNow);
         Assert.Equal(PlayerStatus.InGrace, match.GetStatus(K("A")));
+
         Assert.False(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
+        Assert.Empty(h.Telemetry.Started);
         Assert.Equal(MatchState.Forming, match.State);
+    }
 
-        // 'A' returns to their ship (the orchestrator's ?return) before the join-timeout.
+    [Fact]
+    public void CancelForming_immediately_cancels_with_the_candidate_abandoner_rule()
+    {
+        // The orchestrator calls this at GO! when a player is missing -- it must cancel right away
+        // (not wait out the join-timeout) and assess abandonment by the usual candidate rule.
+        var h = new Harness(joinTimeout: TimeSpan.FromMinutes(5));   // long, to prove we don't wait for it
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+        var match = h.Engine.ActiveMatches[matchId];
+
         h.Clock.Advance(TimeSpan.FromSeconds(2));
-        h.Engine.OnPlayerReturned(K("A"), h.Clock.UtcNow);
-        Assert.Equal(PlayerStatus.Active, match.GetStatus(K("A")));
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
 
-        // The retried GO! now succeeds: the match goes Live instead of stranding until the
-        // join-timeout cancels it.
-        Assert.True(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
-        Assert.Equal(MatchState.Live, match.State);
-        Assert.Single(h.Telemetry.Started);
+        // A rostered player specs during the countdown; GO! finds them missing.
+        h.Clock.Advance(TimeSpan.FromSeconds(3));
+        var absentee = match.Teams[0][0];
+        h.Engine.OnPlayerSpecced(absentee, h.Clock.UtcNow);
+        Assert.False(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
 
-        // And the join-timeout, had it arrived, no longer cancels a now-Live match.
-        h.Clock.Advance(TimeSpan.FromSeconds(40));
-        h.Engine.Tick(h.Clock.UtcNow);
-        Assert.Equal(MatchState.Live, match.State);
+        Assert.True(h.Engine.CancelForming(matchId, h.Clock.UtcNow));
+        Assert.Equal(MatchState.Cancelled, match.State);
+        // The absentee stranded their (viable) 2v2 teammate, so they alone are assessed an abandoner.
+        Assert.Single(match.Outcome!.AbandonedBy);
+        Assert.Contains(absentee, match.Outcome.AbandonedBy);
     }
 
     [Fact]

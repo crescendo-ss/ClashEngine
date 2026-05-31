@@ -707,6 +707,19 @@ public sealed class ActiveMatch
     }
 
     /// <summary>
+    /// Cancels a Forming match on demand -- used when the orchestrator reaches GO! and finds a
+    /// rostered player still in spec, so the match can't start. Identical to the join-timeout
+    /// cancellation (no-shows flagged, abandonment assessed by the usual candidate rule, so a lone
+    /// leaver who stranded no viable teammate stays penalty-free) but immediate, rather than after
+    /// the full <see cref="JoinTimeout"/>. No-op once the match has left Forming.
+    /// </summary>
+    public void Cancel(DateTimeOffset at)
+    {
+        if (State != MatchState.Forming) return;
+        FinalizeCancellation(at);
+    }
+
+    /// <summary>
     /// Finalize as a forfeit win: exactly one team is still alive. Survivor ranks first; other
     /// teams ranked by kill count.
     /// </summary>

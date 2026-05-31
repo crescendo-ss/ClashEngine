@@ -511,6 +511,24 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
+    /// Cancels a still-Forming match immediately -- the orchestrator calls this at GO! when a
+    /// rostered player isn't on their ship (e.g. specced during the countdown and didn't return).
+    /// Runs the same finalization the join-timeout would, just now: no-shows are flagged and
+    /// abandonment is assessed by the candidate rule (a lone leaver who stranded no teammate stays
+    /// penalty-free), then the match is torn down. Unlike <see cref="CancelMatchAsAfk"/> it neither
+    /// force-flags the absentee nor re-queues anyone -- it is purely "do the join-timeout cancel
+    /// now." Returns false if the match is unknown or already past Forming.
+    /// </summary>
+    public bool CancelForming(Guid matchId, DateTimeOffset at)
+    {
+        if (!_matches.TryGetValue(matchId, out var match)) return false;
+        if (match.State != MatchState.Forming) return false;
+        match.Cancel(at);
+        FinalizeMatch(match, at);
+        return true;
+    }
+
+    /// <summary>
     /// Auto-re-enqueue players who readied during a match that was cancelled because of AFK
     /// participants. Mirrors <see cref="ApplyKothReenqueue"/>'s pattern: priority insertion
     /// at the head of the queue, group affiliation preserved via <see cref="GroupRegistry.GroupOf"/>,

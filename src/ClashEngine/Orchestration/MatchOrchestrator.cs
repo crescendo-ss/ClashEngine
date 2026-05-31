@@ -6,6 +6,7 @@ using ClashEngine.Adapter;
 using ClashEngine.Core;
 using ClashEngine.Core.Adapter;
 using ClashEngine.Core.Identity;
+using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Queue;
 using ClashEngine.Core.Stats;
@@ -422,17 +423,12 @@ public sealed class MatchOrchestrator
             returnNotice += $" [Lives: {lives}]";
         BroadcastToAll(returnNotice);
 
-        // If this player specced before the countdown's GO! tick, the engine refused the
-        // Forming->Live flip at GO! -- MarkLive requires every rostered player Active, and a
-        // pre-GO spec marks them Abandoned immediately (no pre-match grace). Without a retry the
-        // engine sits in Forming until its join-timeout fires FinalizeCancellation, yanking BOTH
-        // teams to spec with no explanation even though everyone is back on their ships. Now that
-        // SetShipAndFreq has driven this player back to Active, re-attempt the transition.
-        // MarkMatchLive is idempotent: a no-op once the match is already Live, or if some other
-        // rostered player is still in spec (in which case their own ?return retries it).
-        if (Phase == MatchPhase.Live)
-            _engine.MarkMatchLive(_matchId, _clock.UtcNow);
-
+        // If this player specced before the countdown's GO! tick, the engine deferred its
+        // Forming->Live flip (MarkMatchLive at GO! armed a pending go-live). We deliberately do NOT
+        // retry MarkMatchLive here: SetShipAndFreq above drives engine.OnPlayerReturned via an
+        // asynchronous ship-change callback that fires on a later mainloop iteration, so from the
+        // engine's view the player is still in spec at this point and a retry would no-op. The
+        // engine completes the deferred go-live off that async return instead.
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
                 $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq} " +
@@ -882,15 +878,23 @@ public sealed class MatchOrchestrator
                 return true;
             }
 
-            SetPhase(MatchPhase.Live);
             // Engine-side Forming -> Live happens here, not during placement: the engine treats
             // "Live" as gameplay-live, so no Live-only state (kill processing, team-collapse, etc.)
-            // can fire pre-GO even if a ship-lock expires early.
-            _engine.MarkMatchLive(_matchId, _clock.UtcNow);
-            // The "GO!" announcement reaches participants and focused spectators alike.
-            // Mirror upstream TeamVersusMatch's start cue: the message carries a Ding so players
-            // get an audible "match has started" beat in addition to the chat line.
-            BroadcastToAll("GO!", ChatSound.Ding);
+            // can fire pre-GO even if a ship-lock expires early. MarkMatchLive returns false when a
+            // rostered player isn't Active -- i.e. someone specced during the countdown and didn't
+            // ?return in time. We don't start a match a player short: abandon it cleanly instead.
+            if (_engine.MarkMatchLive(_matchId, _clock.UtcNow))
+            {
+                SetPhase(MatchPhase.Live);
+                // The "GO!" announcement reaches participants and focused spectators alike.
+                // Mirror upstream TeamVersusMatch's start cue: the message carries a Ding so players
+                // get an audible "match has started" beat in addition to the chat line.
+                BroadcastToAll("GO!", ChatSound.Ding);
+            }
+            else
+            {
+                AbandonForAbsenteesAtGo();
+            }
         }
         catch (Exception ex)
         {
@@ -898,6 +902,56 @@ public sealed class MatchOrchestrator
                 $"Match {_matchId:N}: OnCountdownTick failed: {ex}");
         }
         return false;
+    }
+
+    /// <summary>
+    /// Called at the countdown's GO! tick when <see cref="MatchmakingEngine.MarkMatchLive"/> reports
+    /// the roster isn't all-Active -- a rostered player specced during the countdown and is still in
+    /// spec at the start. Rather than begin the match a player short (or strand the engine in Forming
+    /// until its join-timeout cancels it), abandon it now via
+    /// <see cref="MatchmakingEngine.CancelForming"/>: the cancellation runs exactly as the
+    /// join-timeout's would (abandonment assessed by the candidate rule, so a lone leaver who
+    /// stranded no viable teammate stays penalty-free), just immediately. We name the absentee(s) in
+    /// the cancel notice to everyone present so no one is left wondering why they were specced.
+    /// </summary>
+    private void AbandonForAbsenteesAtGo()
+    {
+        if (!_engine.ActiveMatches.TryGetValue(_matchId, out var match)) return;
+
+        // Absentees are the players the engine doesn't see as Active (specced during the countdown);
+        // everyone else is present and on their ship.
+        var absent = new List<PlayerKey>();
+        var present = new List<Player>();
+        for (int t = 0; t < _proposal.Teams.Count; t++)
+            for (int j = 0; j < _proposal.Teams[t].Count; j++)
+            {
+                var k = _proposal.Teams[t][j];
+                if (match.GetStatus(k) == PlayerStatus.Active)
+                {
+                    if (_resolver.Resolve(k) is { } p) present.Add(p);
+                }
+                else
+                {
+                    absent.Add(k);
+                }
+            }
+
+        // Defensive: MarkMatchLive only fails when someone isn't Active, so absent is non-empty in
+        // practice. If physical state somehow disagrees, don't cancel for no one -- let the engine's
+        // join-timeout be the backstop.
+        if (absent.Count == 0) return;
+
+        var names = string.Join(", ", absent.Select(k => k.Name));
+        var cancelMessage =
+            $"Match cancelled -- {names} {(absent.Count == 1 ? "wasn't" : "weren't")} on a ship at the start. " +
+            "Use ?play to queue again.";
+        if (_audience is not null)
+            _audience.Broadcast(_matchId, _queue.MatchArenaName, present, cancelMessage);
+        else
+            foreach (var p in present) _chat.SendMessage(p, cancelMessage);
+
+        _engine.CancelForming(_matchId, _clock.UtcNow);
+        // Cleanup is invoked by the registry's OnMatchEnded handler.
     }
 
     /// <summary>Sends <paramref name="message"/> to every resolvable participant and to any
