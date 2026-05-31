@@ -149,7 +149,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         if (_resolver.Resolve(player) is not { } p) return;
         var descriptor = FormatQueueDescriptor(queueName);
         var message = reason == QueueRemovalReason.AfkCull
-            ? $"Removed from {descriptor} after sitting idle in queue. Use ?play to rejoin."
+            ? $"Removed from {descriptor} -- you'd been waiting a while, so we assumed you stepped away. Use ?play to rejoin."
             : $"Left {descriptor} queue.";
         _chat.SendMessage(p, message);
     }
@@ -185,8 +185,8 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         int? waiting = _queues.TryGet(queueName, out var def) ? def.Queue.Count : null;
         var countSuffix = waiting is { } w ? $", {w} in queue" : "";
         var message = sentToBack
-            ? $"Win -- {maxDefenses}-defense streak capped, re-queued at the back of {descriptor}{countSuffix}. Use ?cancel to leave matchmaking."
-            : $"Congrats! Autoqueued and promoted to be at the front of the line for {descriptor} (win-streak: {defensesUsed}). Use ?cancel to leave matchmaking.";
+            ? $"Your win-streak exceeds the maximum allowed to be promoted to the front of the queue. Re-queued at the back of {descriptor}{countSuffix}."
+            : $"Congrats! Autoqueued and promoted to be at the front of the line for {descriptor} (win-streak: {defensesUsed}).";
         _pendingPromotionDms.Add((p, message));
     }
 
@@ -242,7 +242,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
 
         var descriptor = FormatQueueDescriptor(queueName);
         var seconds = (int)Math.Ceiling(holdWindow.TotalSeconds);
-        var message = $"Match candidates found in {descriptor} -- looking for a fairer split (up to {seconds}s).";
+        var message = $"{descriptor} matchmaking succeeded. Waiting up to {seconds}s to find the fairest split...";
         BroadcastToCandidates(candidates, message);
     }
 

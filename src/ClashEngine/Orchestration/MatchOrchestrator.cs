@@ -209,8 +209,8 @@ public sealed class MatchOrchestrator
         // private "beep" (same sound players hear when TeamVersus drops them into a match).
         // Spectators get a plain arena broadcast since they don't need the call-to-action.
         var notice =
-            $"Match found! Move or fire to confirm you're here (up to {(int)_queue.StagingDuration.TotalSeconds}s). " +
-            "Change ships freely; you lock 5s before GO. Spec to abandon.";
+            $"You have {(int)_queue.StagingDuration.TotalSeconds} seconds to move or fire to confirm you're here. " +
+            "You may change ships freely; ships are locked 5s before GO.";
         SendDmToParticipants(notice);
         BroadcastToSpectators(notice);
     }
