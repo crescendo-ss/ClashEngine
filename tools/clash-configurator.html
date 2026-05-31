@@ -686,6 +686,22 @@
             <div class="field-hint">Per-match viewer template. May contain a literal <code>{matchId}</code> token.</div>
           </div>
         </div>
+        <div class="field" data-field="eventStreamUrl">
+          <label>EventStreamUrl</label>
+          <div class="field-input">
+            <input type="url" id="pt-event-stream-url" placeholder="http://localhost:9090/api/events">
+            <div class="field-hint">Outbound event-stream endpoint. One <code>application/json</code> POST per queue/match/player event for a Discord bot, dashboard, or relay. Unset disables event emission. Never derived from <code>UploadUrl</code>.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
+        <div class="field" data-field="eventStreamApiKey">
+          <label>EventStreamApiKey</label>
+          <div class="field-input">
+            <input type="password" id="pt-event-stream-api-key" placeholder="(falls back to UploadApiKey)">
+            <div class="field-hint">Sent as <code>X-Api-Key</code> on event POSTs. Falls back to <code>UploadApiKey</code> when unset, so a single gateway terminating both needs no extra config.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
         <div class="field" data-field="recordReplays">
           <label>RecordReplays</label>
           <div class="field-input">
@@ -704,14 +720,6 @@
           <div class="field-input">
             <div id="pt-distance-hz-mount"></div>
             <div class="field-hint">Distance-to-nearest-enemy sample rate. 1&ndash;50, or 0 to disable. Default 5.</div>
-            <div class="field-error"></div>
-          </div>
-        </div>
-        <div class="field" data-field="eliminationCooldown">
-          <label>EliminationCooldown</label>
-          <div class="field-input">
-            <div id="pt-elim-cooldown-mount"></div>
-            <div class="field-hint">Wait after a player's last-life elimination before <code>?play</code> re-queues them into a new match. Leave unset for the 1-min default; set <code>0</code> to disable (requeue immediately). Auto-rescinded if the match ends first.</div>
             <div class="field-error"></div>
           </div>
         </div>
@@ -902,10 +910,11 @@ const state = {
     uploadUrl: "",
     uploadApiKey: "",
     statsViewUrl: "",
+    eventStreamUrl: "",
+    eventStreamApiKey: "",
     recordReplays: true,
     replayRecordingDir: "",
     distanceSampleHz: 5,
-    eliminationCooldownSec: null,
   },
   defaultQueue: "",
   gameTypes: [],
@@ -927,6 +936,7 @@ function newGameType() {
     lives: 0,
     teamCollapseGraceSec: null,
     shipChangeGraceSec: null,
+    eliminationCooldownSec: null,
     returnItemsAction: "full",
     warpOnSpawn: false,
     teamSpawns: [[], []],
@@ -1421,6 +1431,12 @@ function bindPluginTuning() {
   document.getElementById("pt-stats-view-url").addEventListener("input", e => {
     pt.statsViewUrl = e.target.value.trim(); render();
   });
+  document.getElementById("pt-event-stream-url").addEventListener("input", e => {
+    pt.eventStreamUrl = e.target.value.trim(); render();
+  });
+  document.getElementById("pt-event-stream-api-key").addEventListener("input", e => {
+    pt.eventStreamApiKey = e.target.value; render();
+  });
   document.getElementById("pt-record-replays").addEventListener("change", e => {
     pt.recordReplays = e.target.checked; render();
   });
@@ -1432,13 +1448,6 @@ function bindPluginTuning() {
       value: pt.distanceSampleHz, min: 0, max: 50, step: 1,
       onChange: v => { pt.distanceSampleHz = v; render(); },
       formatDisplay: v => v === 0 ? "0 (disabled)" : `${v} Hz`
-    })
-  );
-  document.getElementById("pt-elim-cooldown-mount").appendChild(
-    durationWidget({
-      value: pt.eliminationCooldownSec, min: 0, allowUnset: true, unsetLabel: "override",
-      presets: [0, 30, 60, 120, 300],
-      onChange: v => { pt.eliminationCooldownSec = v; render(); }
     })
   );
 
@@ -1613,6 +1622,13 @@ function renderGameTypeCard(gt, index) {
       value: gt.knockoutSpecDelaySec, min: 0, allowUnset: true, unsetLabel: "override",
       presets: [0, 1, 2, 3, 5],
       onChange: v => { gt.knockoutSpecDelaySec = v; render(); }
+    })
+  ));
+  timingGroup.appendChild(simpleField("EliminationCooldown", "Elimination only: wait after a player's last-life death before <code>?play</code> re-queues them. Leave unset for the 1-min default; set <code>0</code> to disable (requeue immediately). Auto-rescinded if the match ends first.",
+    durationWidget({
+      value: gt.eliminationCooldownSec, min: 0, allowUnset: true, unsetLabel: "override",
+      presets: [0, 30, 60, 120, 300],
+      onChange: v => { gt.eliminationCooldownSec = v; render(); }
     })
   ));
   timingGroup.appendChild(simpleField("TeamCollapseGrace", "How long a team can be empty before forfeiting. Default 10s.",
@@ -1967,6 +1983,15 @@ function validate() {
   if (pt.uploadUrl && !pt.uploadApiKey) {
     warnings.push("UploadUrl is set but UploadApiKey is blank — engine will fall back to writing match envelopes to disk.");
   }
+  if (pt.eventStreamUrl && !/^https?:\/\//i.test(pt.eventStreamUrl)) {
+    errors.push("EventStreamUrl must be an http(s) URL.");
+  }
+  if (pt.eventStreamApiKey && !pt.eventStreamUrl) {
+    warnings.push("EventStreamApiKey is set but EventStreamUrl is blank — no events will be sent.");
+  }
+  if (pt.eventStreamUrl && !pt.eventStreamApiKey && !pt.uploadApiKey) {
+    warnings.push("EventStreamUrl is set but no API key is available (EventStreamApiKey unset, UploadApiKey blank) — event emission will be disabled.");
+  }
   if (pt.distanceSampleHz < 0 || pt.distanceSampleHz > 50) {
     errors.push("DistanceSampleHz must be 0 or 1–50.");
   }
@@ -2064,13 +2089,13 @@ function emitScope(scope) {
     if (pt.uploadUrl) tuningLines.push(line("UploadUrl", pt.uploadUrl));
     if (pt.uploadApiKey) tuningLines.push(line("UploadApiKey", pt.uploadApiKey));
     if (pt.statsViewUrl) tuningLines.push(line("StatsViewUrl", pt.statsViewUrl));
+    if (pt.eventStreamUrl) tuningLines.push(line("EventStreamUrl", pt.eventStreamUrl));
+    if (pt.eventStreamApiKey) tuningLines.push(line("EventStreamApiKey", pt.eventStreamApiKey));
     if (pt.recordReplays !== true) tuningLines.push(line("RecordReplays", pt.recordReplays ? "1" : "0"));
     if (pt.replayRecordingDir && pt.replayRecordingDir !== REPLAY_DIR_DEFAULT)
       tuningLines.push(line("ReplayRecordingDir", pt.replayRecordingDir));
     if (pt.distanceSampleHz !== DISTANCE_HZ_DEFAULT)
       tuningLines.push(line("DistanceSampleHz", String(pt.distanceSampleHz)));
-    if (pt.eliminationCooldownSec !== null)
-      tuningLines.push(line("EliminationCooldown", String(pt.eliminationCooldownSec)));
   }
 
   // DefaultQueue is arena-only.
@@ -2147,6 +2172,7 @@ function emitGameType(out, gt, idx) {
   if (gt.stagingDurationSec !== null) out.push(line(`${p}StagingDuration`, formatTime(gt.stagingDurationSec)));
   if (gt.countdownDurationSec !== null) out.push(line(`${p}CountdownDuration`, formatTime(gt.countdownDurationSec)));
   if (gt.knockoutSpecDelaySec !== null) out.push(line(`${p}KnockoutSpecDelay`, formatTime(gt.knockoutSpecDelaySec)));
+  if (gt.eliminationCooldownSec !== null) out.push(line(`${p}EliminationCooldown`, formatTime(gt.eliminationCooldownSec)));
 }
 
 function emitQueue(out, q, idx) {

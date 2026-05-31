@@ -38,7 +38,8 @@ public sealed record GameTypeDef(
     TimeSpan? KnockoutSpecDelay,
     TimeSpan? TeamCollapseGrace,
     TimeSpan? ShipChangeGracePeriod,
-    ItemsAction ReturnItemsAction);
+    ItemsAction ReturnItemsAction,
+    TimeSpan? EliminationCooldown = null);
 
 /// <summary>
 /// Auto-derived <c>metadata</c> blob attached to the gametype-registration POST. Follows the

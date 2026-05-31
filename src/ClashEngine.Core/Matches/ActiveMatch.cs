@@ -45,7 +45,8 @@ public sealed class ActiveMatch
         TimeSpan graceWindow,
         DateTimeOffset proposedAt,
         int? livesPerPlayer = null,
-        TimeSpan? teamCollapseGrace = null)
+        TimeSpan? teamCollapseGrace = null,
+        TimeSpan? eliminationCooldown = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(gameType);
         ArgumentNullException.ThrowIfNull(teams);
@@ -60,6 +61,8 @@ public sealed class ActiveMatch
             throw new ArgumentOutOfRangeException(nameof(livesPerPlayer), "Must be >= 1 when specified.");
         if (teamCollapseGrace is { } tcg && tcg < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(teamCollapseGrace), "Must be non-negative.");
+        if (eliminationCooldown is { } ecd && ecd < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(eliminationCooldown), "Must be non-negative.");
 
         MatchId = matchId;
         GameType = gameType;
@@ -70,6 +73,7 @@ public sealed class ActiveMatch
         ProposedAt = proposedAt;
         LivesPerPlayer = livesPerPlayer;
         TeamCollapseGrace = teamCollapseGrace ?? TimeSpan.FromSeconds(10);
+        EliminationCooldown = eliminationCooldown;
         State = MatchState.Forming;
         _killsByTeam = new int[teams.Count];
 
@@ -121,6 +125,15 @@ public sealed class ActiveMatch
     /// <see langword="null"/> = unlimited (no exit-time tracking).
     /// </summary>
     public int? LivesPerPlayer { get; }
+
+    /// <summary>
+    /// Cooldown applied to a player released by a last-life elimination in this match before
+    /// <c>?play</c> re-queues them, sourced from the game type's
+    /// <c>GameType&lt;i&gt;EliminationCooldown</c>. <see langword="null"/> = use the engine's
+    /// built-in default; <see cref="TimeSpan.Zero"/> = no cooldown for this game type. Only
+    /// consulted when <see cref="LivesPerPlayer"/> is set.
+    /// </summary>
+    public TimeSpan? EliminationCooldown { get; }
 
     public IReadOnlyList<int> KillsByTeam => _killsByTeam;
     public IReadOnlyDictionary<PlayerKey, int> KillsByPlayer => _killsByPlayer;

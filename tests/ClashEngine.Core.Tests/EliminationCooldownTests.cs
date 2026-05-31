@@ -205,6 +205,94 @@ public class EliminationCooldownTests
         Assert.True(match.IsKnockedOut(K("A")));
     }
 
+    /// <summary>
+    /// Forms a 2v2 lives=1 match under a game type carrying <paramref name="cooldown"/>, marks it
+    /// Live, and eliminates one player via a cross-team last-life kill. 2v2 (not 1v1) so the
+    /// victim's surviving teammate keeps the match Live -- match end auto-rescinds the cooldown,
+    /// which would mask what we're asserting. Returns the still-Live engine and the eliminated
+    /// player.
+    /// </summary>
+    private static (MatchmakingEngine Engine, FakeClock Clock, PlayerKey Victim) EliminateOneIn2v2(TimeSpan? cooldown)
+    {
+        var clock = new FakeClock(T0);
+        var engine = new MatchmakingEngine(
+            new InMemoryRatingStore(), clock,
+            new[]
+            {
+                PenaltyPolicy.DefaultAbandonment,
+                PenaltyPolicy.DefaultGriefing,
+                PenaltyPolicy.DefaultEliminationCooldown,
+            },
+            quality: new OrdinalSpreadQuality(),
+            telemetry: new RecordingTelemetry(),
+            joinTimeout: TimeSpan.FromMinutes(1),
+            graceWindow: TimeSpan.FromSeconds(30));
+
+        engine.Queues.Register(
+            "2v2-lives",
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt-elim",
+            () => new KillCountEndPolicy(1000),     // never end on kills alone
+            vetoesRequired: 1,
+            holdWindow: TimeSpan.Zero,
+            livesPerPlayer: 1,
+            eliminationCooldown: cooldown);
+
+        foreach (var n in new[] { "A", "B", "X", "Y" }) engine.OnPlayerConnected(K(n), T0);
+        foreach (var n in new[] { "A", "B", "X", "Y" }) engine.TryEnqueue(K(n), "2v2-lives", T0);
+        engine.Tick(T0);
+        var match = engine.ActiveMatches.First().Value;
+        Assert.Equal(1, match.LivesPerPlayer);
+        Assert.Equal(cooldown, match.EliminationCooldown);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        foreach (var n in new[] { "A", "B", "X", "Y" }) engine.OnPlayerJoinedArena(K(n), clock.UtcNow);
+        engine.MarkMatchLive(match.MatchId, clock.UtcNow);
+
+        // Kill across teams so the victim loses their last life. The killer is on A's team; the
+        // victim is the head of the opposing team.
+        int aTeam = match.TeamIndexOf(K("A"))!.Value;
+        var killer = match.Teams[aTeam][0];
+        var victim = match.Teams[aTeam == 0 ? 1 : 0][0];
+        clock.Advance(TimeSpan.FromSeconds(1));
+        engine.OnKill(killer, victim, clock.UtcNow);
+
+        Assert.Equal(MatchState.Live, match.State);   // teammates still alive on both sides
+        Assert.True(match.IsKnockedOut(victim));
+        return (engine, clock, victim);
+    }
+
+    [Fact]
+    public void Per_gametype_cooldown_overrides_default_on_elimination()
+    {
+        var (engine, clock, victim) = EliminateOneIn2v2(TimeSpan.FromSeconds(30));
+
+        // The 30s game-type cooldown applies -- shorter than the 1-min policy default.
+        Assert.True(engine.Penalties.IsInTimeout(victim, clock.UtcNow));
+        Assert.True(engine.Penalties.IsInTimeout(victim, clock.UtcNow + TimeSpan.FromSeconds(29)));
+        Assert.False(engine.Penalties.IsInTimeout(victim, clock.UtcNow + TimeSpan.FromSeconds(31)));
+    }
+
+    [Fact]
+    public void Per_gametype_zero_cooldown_records_no_penalty()
+    {
+        var (engine, clock, victim) = EliminateOneIn2v2(TimeSpan.Zero);
+
+        // Cooldown disabled for this game type: the eliminated player may requeue immediately.
+        Assert.False(engine.Penalties.IsInTimeout(victim, clock.UtcNow));
+    }
+
+    [Fact]
+    public void Absent_gametype_cooldown_falls_back_to_policy_default()
+    {
+        var (engine, clock, victim) = EliminateOneIn2v2(cooldown: null);
+
+        // No per-game-type value -> the engine's 1-minute default policy applies.
+        Assert.True(engine.Penalties.IsInTimeout(victim, clock.UtcNow + TimeSpan.FromSeconds(59)));
+        Assert.False(engine.Penalties.IsInTimeout(victim, clock.UtcNow + TimeSpan.FromSeconds(61)));
+    }
+
     [Fact]
     public void Cross_match_kill_is_still_rejected()
     {

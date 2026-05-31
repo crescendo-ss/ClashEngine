@@ -30,7 +30,7 @@ public sealed class PenaltyTracker
     private readonly Dictionary<PenaltyKind, PenaltyPolicy> _policies;
     private readonly object _gate = new();
 
-    private readonly record struct Event(DateTimeOffset At, double Severity);
+    private readonly record struct Event(DateTimeOffset At, double Severity, TimeSpan? BaseTimeoutOverride);
 
     public PenaltyTracker(params PenaltyPolicy[] policies)
         : this((IEnumerable<PenaltyPolicy>)policies) { }
@@ -54,11 +54,14 @@ public sealed class PenaltyTracker
 
     public bool HasPolicy(PenaltyKind kind) => _policies.ContainsKey(kind);
 
-    public int RecordPenalty(PlayerKey player, PenaltyKind kind, DateTimeOffset at, double severity = 1.0)
+    public int RecordPenalty(PlayerKey player, PenaltyKind kind, DateTimeOffset at, double severity = 1.0,
+        TimeSpan? baseTimeoutOverride = null)
     {
         if (player.IsDefault) throw new ArgumentException("Player must not be default.", nameof(player));
         if (!_policies.ContainsKey(kind)) throw new InvalidOperationException($"No policy registered for {kind}.");
         if (severity < 1.0) throw new ArgumentOutOfRangeException(nameof(severity), "Must be >= 1.");
+        if (baseTimeoutOverride is { } bto && bto < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(baseTimeoutOverride), "Must be non-negative when specified.");
 
         lock (_gate)
         {
@@ -68,7 +71,7 @@ public sealed class PenaltyTracker
                 list = new List<Event>();
                 _events[key] = list;
             }
-            list.Add(new Event(at, severity));
+            list.Add(new Event(at, severity, baseTimeoutOverride));
             list.Sort(static (a, b) => a.At.CompareTo(b.At));
             return ComputeOffenseCountLocked(list, kind);
         }
@@ -131,7 +134,7 @@ public sealed class PenaltyTracker
             var list = new List<PenaltyRecord>();
             foreach (var kvp in _events)
                 foreach (var ev in kvp.Value)
-                    list.Add(new PenaltyRecord(kvp.Key.Player, kvp.Key.Kind, ev.At, ev.Severity));
+                    list.Add(new PenaltyRecord(kvp.Key.Player, kvp.Key.Kind, ev.At, ev.Severity, ev.BaseTimeoutOverride));
             return list;
         }
     }
@@ -152,7 +155,7 @@ public sealed class PenaltyTracker
                     list = new List<Event>();
                     _events[key] = list;
                 }
-                list.Add(new Event(r.At, r.Severity));
+                list.Add(new Event(r.At, r.Severity, r.BaseTimeoutOverride));
             }
             foreach (var list in _events.Values)
                 list.Sort(static (a, b) => a.At.CompareTo(b.At));
@@ -194,7 +197,7 @@ public sealed class PenaltyTracker
                     list = new List<Event>();
                     _events[key] = list;
                 }
-                list.Add(new Event(r.At, r.Severity));
+                list.Add(new Event(r.At, r.Severity, r.BaseTimeoutOverride));
             }
 
             foreach (var kvp in _events)
@@ -216,7 +219,7 @@ public sealed class PenaltyTracker
                 var policy = GetPolicy(kvp.Key.Kind);
                 int count = ComputeOffenseCountLocked(kvp.Value, kvp.Key.Kind);
                 var latest = kvp.Value[^1];
-                var timeoutEnd = latest.At + policy.EffectiveTimeoutFor(count, latest.Severity);
+                var timeoutEnd = latest.At + policy.EffectiveTimeoutFor(count, latest.Severity, latest.BaseTimeoutOverride);
                 var memoryEnd = latest.At + policy.MemoryWindow;
                 if (timeoutEnd <= at && memoryEnd <= at)
                 {
@@ -236,7 +239,7 @@ public sealed class PenaltyTracker
         if (count == 0) return null;
         var policy = GetPolicy(kind);
         var latest = list[^1];
-        return latest.At + policy.EffectiveTimeoutFor(count, latest.Severity);
+        return latest.At + policy.EffectiveTimeoutFor(count, latest.Severity, latest.BaseTimeoutOverride);
     }
 
     private int ComputeOffenseCountLocked(List<Event> sortedEvents, PenaltyKind kind)

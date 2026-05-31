@@ -250,33 +250,21 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             : PenaltyPolicy.DefaultMaxTimeout;
 
         // Elimination cooldown: when a player loses their last life in an elimination match
-        // (GameType<i>Lives > 0) they are released from the match roster and must wait this long
-        // before ?play can re-queue them into a new match. Accepts seconds or HH:MM:SS; an absent
-        // key uses the engine's 1-minute default policy. An explicit 0 (or a negative value)
-        // disables the cooldown entirely -- the policy is left unregistered, so eliminated players
-        // may requeue immediately. Read at zone scope, like the other engine-wide tuning knobs.
-        var elimCooldown = ConfigReadHelpers.TryReadTimeSpan(
-                _config, _config.Global, "EliminationCooldown", _clashLog, LogCategory)
-            ?? PenaltyPolicy.DefaultEliminationCooldown.BaseTimeout;
-
+        // (GameType<i>Lives > 0) they are released from the match roster and must wait before
+        // ?play re-queues them into a new match. The cooldown length is per game type
+        // (GameType<i>EliminationCooldown), applied as a per-event base override when the match
+        // forms. The policy registered here supplies the built-in 1-minute default a game type
+        // falls back to when it doesn't set its own cooldown, plus the MemoryWindow / MaxTimeout
+        // that bound every elimination event. It is always registered: a game type that sets
+        // EliminationCooldown = 0 disables the cooldown for its own matches by recording no
+        // penalty (engine-side), not by leaving the policy out.
         var penaltyPolicies = new List<PenaltyPolicy>
         {
             PenaltyPolicy.DefaultAbandonment.WithMaxTimeout(maxPenalty),
             PenaltyPolicy.DefaultGriefing.WithMaxTimeout(maxPenalty),
             PenaltyPolicy.DefaultStagingAfk.WithMaxTimeout(maxPenalty),
+            PenaltyPolicy.DefaultEliminationCooldown.WithMaxTimeout(maxPenalty),
         };
-        if (elimCooldown > TimeSpan.Zero)
-        {
-            penaltyPolicies.Add(PenaltyPolicy.DefaultEliminationCooldown
-                .WithBaseTimeout(elimCooldown)
-                .WithMaxTimeout(maxPenalty));
-            _clashLog.Info(LogCategory, $"Elimination cooldown = {elimCooldown}.");
-        }
-        else
-        {
-            _clashLog.Info(LogCategory,
-                "Elimination cooldown disabled (<= 0); eliminated players may requeue immediately.");
-        }
 
         // Engine is constructed with a no-op telemetry sink so that listeners (which need the
         // engine reference) can be wired up below; once they exist we swap in the real

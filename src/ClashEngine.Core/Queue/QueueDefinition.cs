@@ -43,7 +43,8 @@ public sealed class QueueDefinition
         string? ownerArenaName = null,
         string? label = null,
         TimeSpan? afkDwellWarning = null,
-        TimeSpan? afkDwellCull = null)
+        TimeSpan? afkDwellCull = null,
+        TimeSpan? eliminationCooldown = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -72,6 +73,8 @@ public sealed class QueueDefinition
             throw new ArgumentOutOfRangeException(nameof(afkDwellWarning), "Must be non-negative.");
         if (afkDwellCull is { } adc && adc < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(afkDwellCull), "Must be non-negative.");
+        if (eliminationCooldown is { } ecd && ecd < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(eliminationCooldown), "Must be non-negative.");
         if (afkDwellWarning is { } warnPositive && warnPositive > TimeSpan.Zero
             && afkDwellCull is { } cullPositive && cullPositive > TimeSpan.Zero
             && cullPositive < warnPositive)
@@ -132,6 +135,7 @@ public sealed class QueueDefinition
         ReturnItemsAction = returnItemsAction;
         AfkDwellWarning = afkDwellWarning;
         AfkDwellCull = afkDwellCull;
+        EliminationCooldown = eliminationCooldown;
         OwnerArenaName = ownerArenaName;
 
         // BaseName is the structural part of UniqueId without the arena prefix. Used as the
@@ -291,9 +295,19 @@ public sealed class QueueDefinition
     /// <summary>
     /// Lives each player starts with. <see langword="null"/> = unlimited (no elimination). When
     /// set, a player at 0 lives is eliminated and released from the match-roster (subject to
-    /// <see cref="PenaltyKind.EliminationCooldown"/> if configured).
+    /// <see cref="EliminationCooldown"/>).
     /// </summary>
     public int? LivesPerPlayer { get; }
+
+    /// <summary>
+    /// How long a player released by a last-life elimination in a match of this queue's game type
+    /// must wait before <c>?play</c> re-queues them (a <see cref="PenaltyKind.EliminationCooldown"/>
+    /// penalty). Inherited from the game type's <c>GameType&lt;i&gt;EliminationCooldown</c>.
+    /// <see langword="null"/> = use the engine's built-in default cooldown;
+    /// <see cref="TimeSpan.Zero"/> = disabled for this game type (eliminated players may requeue
+    /// immediately). Only meaningful when <see cref="LivesPerPlayer"/> is set.
+    /// </summary>
+    public TimeSpan? EliminationCooldown { get; }
 
     /// <summary>
     /// How long an entire team can be without any Active or Pending players before forfeiting.

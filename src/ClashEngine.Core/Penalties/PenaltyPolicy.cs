@@ -90,10 +90,18 @@ public sealed class PenaltyPolicy
     /// </summary>
     private static readonly TimeSpan MaxComputableTimeout = TimeSpan.FromDays(365 * 10);
 
-    public TimeSpan TimeoutForOffense(int offenseCount)
+    public TimeSpan TimeoutForOffense(int offenseCount) => TimeoutForOffense(offenseCount, BaseTimeout);
+
+    /// <summary>
+    /// As <see cref="TimeoutForOffense(int)"/>, but escalating from <paramref name="baseTimeout"/>
+    /// instead of <see cref="BaseTimeout"/>. Used for per-event base overrides (e.g. a per-game-type
+    /// <c>EliminationCooldown</c> duration carried on the individual penalty event rather than the
+    /// kind-wide policy).
+    /// </summary>
+    private TimeSpan TimeoutForOffense(int offenseCount, TimeSpan baseTimeout)
     {
         if (offenseCount < 1) throw new ArgumentOutOfRangeException(nameof(offenseCount));
-        double seconds = BaseTimeout.TotalSeconds * Math.Pow(EscalationFactor, offenseCount - 1);
+        double seconds = baseTimeout.TotalSeconds * Math.Pow(EscalationFactor, offenseCount - 1);
         // BaseTimeout * EscalationFactor^N grows unbounded; with the default 10-minute / 2x
         // ladder, the 42nd offense already exceeds TimeSpan.FromSeconds's range. Clamp instead
         // of throwing so a player with a long penalty history can still have ?play / status
@@ -104,14 +112,22 @@ public sealed class PenaltyPolicy
     }
 
     /// <summary>
-    /// Final assessed timeout: <see cref="TimeoutForOffense"/> times <paramref name="severity"/>,
+    /// Final assessed timeout: <see cref="TimeoutForOffense(int)"/> times <paramref name="severity"/>,
     /// clamped to <see cref="MaxTimeout"/>. This is what <see cref="PenaltyTracker"/> uses to
     /// compute the wall-clock end of a player's penalty.
     /// </summary>
-    public TimeSpan EffectiveTimeoutFor(int offenseCount, double severity = 1.0)
+    /// <param name="baseTimeoutOverride">
+    /// When non-<see langword="null"/>, escalation runs from this value instead of
+    /// <see cref="BaseTimeout"/>. Lets a single event carry its own base duration -- the mechanism
+    /// behind the per-game-type elimination cooldown, where each match's cooldown length is fixed
+    /// by its game type rather than a kind-wide policy. <see cref="EscalationFactor"/> and
+    /// <paramref name="severity"/> still apply on top (a no-op for the elimination kind, which has
+    /// factor 1.0 and is recorded at severity 1.0).
+    /// </param>
+    public TimeSpan EffectiveTimeoutFor(int offenseCount, double severity = 1.0, TimeSpan? baseTimeoutOverride = null)
     {
         if (severity < 1.0) throw new ArgumentOutOfRangeException(nameof(severity), "Must be >= 1.");
-        var baseTimeout = TimeoutForOffense(offenseCount);
+        var baseTimeout = TimeoutForOffense(offenseCount, baseTimeoutOverride ?? BaseTimeout);
         double seconds = baseTimeout.TotalSeconds * severity;
         if (double.IsNaN(seconds) || seconds >= MaxTimeout.TotalSeconds)
             return MaxTimeout;

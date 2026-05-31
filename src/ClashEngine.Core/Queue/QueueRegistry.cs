@@ -56,7 +56,8 @@ public sealed class QueueRegistry
         string? ownerArenaName = null,
         string? label = null,
         TimeSpan? afkDwellWarning = null,
-        TimeSpan? afkDwellCull = null)
+        TimeSpan? afkDwellCull = null,
+        TimeSpan? eliminationCooldown = null)
     {
         if (_byName.ContainsKey(name))
             throw new ArgumentException($"Queue '{name}' already registered.", nameof(name));
@@ -71,7 +72,7 @@ public sealed class QueueRegistry
             holdWindow, qualityCeiling, knockoutSpecDelay,
             livesPerPlayer, teamCollapseGrace, shipChangeGracePeriod,
             timeLimit, returnItemsAction, ownerArenaName, label,
-            afkDwellWarning, afkDwellCull);
+            afkDwellWarning, afkDwellCull, eliminationCooldown);
         _byName[name] = def;
         return def;
     }

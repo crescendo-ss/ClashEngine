@@ -113,6 +113,9 @@ internal static class GameTypeParser
         TimeSpan? teamCollapseGrace = ReadOptionalNonNegativeTimeSpan(config, handle, p + "TeamCollapseGrace", p, log);
         TimeSpan? shipChangeGracePeriod = ReadOptionalNonNegativeTimeSpan(config, handle, p + "ShipChangeGracePeriod", p, log);
         ItemsAction returnItemsAction = ReadReturnItemsAction(config, handle, p, log);
+        // Absent -> null (engine's built-in default cooldown); 0 -> disabled (eliminated players in
+        // this game type requeue immediately); >0 -> that duration. Negative is warned and dropped.
+        TimeSpan? eliminationCooldown = ReadOptionalNonNegativeTimeSpan(config, handle, p + "EliminationCooldown", p, log);
 
         // Auto-derive the metadata blob from the resolved shape. The stats server stores this
         // verbatim with the gametype version; downstream consumers (scoreboards, dashboards)
@@ -127,7 +130,7 @@ internal static class GameTypeParser
             spawnSetByTeam, maxDrift, warpOnSpawn,
             stagingDuration, countdownDuration, knockoutSpecDelay,
             teamCollapseGrace, shipChangeGracePeriod,
-            returnItemsAction);
+            returnItemsAction, eliminationCooldown);
     }
 
     /// <summary>Reads <c>GameType&lt;i&gt;ReturnItemsAction</c>. Accepts <c>full</c>, <c>restore</c>,
@@ -189,6 +192,7 @@ internal static class GameTypeParser
             $"KnockoutSpecDelay={(def.KnockoutSpecDelay is { } ks ? ks.ToString() : "(default 0)")}, " +
             $"TeamCollapseGrace={(def.TeamCollapseGrace is { } tg ? tg.ToString() : "(default 10s)")}, " +
             $"ShipChangeGracePeriod={(def.ShipChangeGracePeriod is { } sg ? sg.ToString() : "(default 10s)")}, " +
+            $"EliminationCooldown={(def.EliminationCooldown is { } ec ? (ec == TimeSpan.Zero ? "0 (disabled)" : ec.ToString()) : "(default 1m)")}, " +
             $"ReturnItemsAction={def.ReturnItemsAction}.");
     }
 }

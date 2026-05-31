@@ -261,8 +261,19 @@ public sealed class MatchmakingEngine
         {
             _matchOf.Remove(victim);
             _telemetry.OnPlayerReleasedFromMatch(victim, matchId, at);
+            // The cooldown length is the match's game type's EliminationCooldown:
+            //   null     -> use the policy's built-in default (BaseTimeout),
+            //   > 0       -> that duration, carried as a per-event base override,
+            //   Zero      -> disabled for this game type: record nothing, requeue immediately.
             if (_penalties.HasPolicy(PenaltyKind.EliminationCooldown))
-                _penalties.RecordPenalty(victim, PenaltyKind.EliminationCooldown, at);
+            {
+                var cooldown = m.EliminationCooldown;
+                if (cooldown is null)
+                    _penalties.RecordPenalty(victim, PenaltyKind.EliminationCooldown, at);
+                else if (cooldown.Value > TimeSpan.Zero)
+                    _penalties.RecordPenalty(victim, PenaltyKind.EliminationCooldown, at,
+                        baseTimeoutOverride: cooldown.Value);
+            }
         }
 
         if (HasFinished(m)) FinalizeMatch(m, at);
@@ -877,7 +888,8 @@ public sealed class MatchmakingEngine
             _graceWindow,
             at,
             livesPerPlayer: def.LivesPerPlayer,
-            teamCollapseGrace: def.TeamCollapseGrace);
+            teamCollapseGrace: def.TeamCollapseGrace,
+            eliminationCooldown: def.EliminationCooldown);
         _matches[matchId] = match;
         _matchQueue[matchId] = def;
 

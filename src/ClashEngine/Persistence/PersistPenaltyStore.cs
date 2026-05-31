@@ -16,7 +16,13 @@ namespace ClashEngine.Persistence;
 public sealed class PersistPenaltyStore
 {
     public const int PersistKey = 101;
-    private const ushort BlobVersion = 1;
+
+    // v2 added a per-event base-timeout override (long ticks, -1 = none) after each row's
+    // severity -- it carries a per-game-type elimination cooldown across relogin. v1 blobs (no
+    // override field) are still read for backward compatibility; we always write the current
+    // version.
+    private const ushort BlobVersion = 2;
+    private const ushort LegacyBlobVersionNoOverride = 1;
 
     private readonly PenaltyTracker _tracker;
 
@@ -44,6 +50,9 @@ public sealed class PersistPenaltyStore
             writer.Write((byte)r.Kind);
             writer.Write(r.At.UtcTicks);
             writer.Write(r.Severity);
+            // -1 = no per-event base override (use the kind-wide policy default). A real override
+            // is always positive, so -1 is an unambiguous null sentinel.
+            writer.Write(r.BaseTimeoutOverride is { } o ? o.Ticks : -1L);
         }
     }
 
@@ -78,7 +87,7 @@ public sealed class PersistPenaltyStore
                 _tracker.ReplacePlayerHistory(key, rows);
                 return;
             }
-            if (version != BlobVersion)
+            if (version != BlobVersion && version != LegacyBlobVersionNoOverride)
             {
                 _tracker.ReplacePlayerHistory(key, rows);
                 return;
@@ -91,8 +100,14 @@ public sealed class PersistPenaltyStore
                 long ticks = reader.ReadInt64();
                 double severity = reader.ReadDouble();
                 if (severity < 1.0) severity = 1.0;
+                TimeSpan? baseTimeoutOverride = null;
+                if (version >= BlobVersion)
+                {
+                    long overrideTicks = reader.ReadInt64();
+                    if (overrideTicks >= 0) baseTimeoutOverride = TimeSpan.FromTicks(overrideTicks);
+                }
                 if (!_tracker.HasPolicy(kind)) continue;
-                rows.Add(new PenaltyRecord(key, kind, new DateTimeOffset(ticks, TimeSpan.Zero), severity));
+                rows.Add(new PenaltyRecord(key, kind, new DateTimeOffset(ticks, TimeSpan.Zero), severity, baseTimeoutOverride));
             }
         }
         catch (Exception)

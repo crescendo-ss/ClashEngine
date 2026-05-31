@@ -127,7 +127,8 @@ internal static class QueueParser
                 ownerArenaName: ownerArenaName,
                 label: label,
                 afkDwellWarning: afkWarn,
-                afkDwellCull: afkCull);
+                afkDwellCull: afkCull,
+                eliminationCooldown: gt.EliminationCooldown);
         }
         catch (Exception ex)
         {

@@ -254,6 +254,55 @@ public class PenaltyTrackerTests
     }
 
     [Fact]
+    public void BaseTimeoutOverride_replaces_policy_base_for_that_event()
+    {
+        // The override stands in for the kind's BaseTimeout when assessing that event -- the
+        // mechanism behind a per-game-type elimination cooldown.
+        var t = Tracker(griefBase: TimeSpan.FromMinutes(5));
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0, baseTimeoutOverride: TimeSpan.FromSeconds(30));
+
+        // 30s override (offense 1, factor^0 = 1) instead of the 5min policy base.
+        Assert.Equal(T0 + TimeSpan.FromSeconds(30), t.TimeoutEndForKind(K("Alice"), PenaltyKind.Griefing));
+    }
+
+    [Fact]
+    public void BaseTimeoutOverride_negative_throws()
+    {
+        var t = Tracker();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0, baseTimeoutOverride: TimeSpan.FromSeconds(-1)));
+    }
+
+    [Fact]
+    public void BaseTimeoutOverride_combines_with_escalation_and_severity()
+    {
+        var t = Tracker(griefBase: TimeSpan.FromMinutes(5), griefFactor: 2.0, griefMemory: TimeSpan.FromHours(24));
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0);
+        // Latest event governs: count = 2 → 2min override × factor^1 (=2) = 4min, × severity 3 = 12min.
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0 + TimeSpan.FromMinutes(30),
+            severity: 3.0, baseTimeoutOverride: TimeSpan.FromMinutes(2));
+
+        Assert.Equal(T0 + TimeSpan.FromMinutes(30) + TimeSpan.FromMinutes(12),
+                     t.TimeoutEndForKind(K("Alice"), PenaltyKind.Griefing));
+    }
+
+    [Fact]
+    public void Snapshot_round_trips_base_timeout_override()
+    {
+        var t = Tracker();
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0, baseTimeoutOverride: TimeSpan.FromSeconds(45));
+        var snap = t.Snapshot();
+
+        Assert.Single(snap);
+        Assert.Equal(TimeSpan.FromSeconds(45), snap[0].BaseTimeoutOverride);
+
+        var t2 = Tracker();
+        t2.Rehydrate(snap);
+        Assert.Equal(t.TimeoutEndForKind(K("Alice"), PenaltyKind.Griefing),
+                     t2.TimeoutEndForKind(K("Alice"), PenaltyKind.Griefing));
+    }
+
+    [Fact]
     public void ReplacePlayerHistory_replaces_existing_events_instead_of_appending()
     {
         // Regression for the persistence-doubling bug: re-loading a player's history must not
