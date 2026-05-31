@@ -25,21 +25,29 @@
           "values": ["Off", "Normal", "Verbose", "Trace"],
           "default": "Normal",
           "description": "Log detail level. Verbose adds command/event/orchestrator debug; Trace adds every wire event. Runtime-mutable via ?clashlog.",
-          "source": "src/ClashEngine/ClashModule.cs:214"
+          "source": "src/ClashEngine/ClashModule.cs:227"
+        },
+        {
+          "key": "MaxPenaltyHours",
+          "type": "int",
+          "constraint": "> 0 (<= 0 falls back to the engine default cap)",
+          "default": 6,
+          "description": "Hard ceiling (in hours) applied to every assessed matchmaking penalty timeout -- the cap is threaded into all penalty policies (abandonment, griefing, staging-AFK, elimination cooldown) via WithMaxTimeout, so no escalation ladder can exceed it. An operator escape hatch against a runaway-escalation bug. Values <= 0 fall back to the engine's built-in default cap (PenaltyPolicy.DefaultMaxTimeout) rather than disabling the cap.",
+          "source": "src/ClashEngine/ClashModule.cs:247"
         },
         {
           "key": "UploadUrl",
           "type": "url",
           "default": null,
           "description": "Stats-upload endpoint receiving the multipart/form-data match POST (metadata JSON + replay). Both UploadUrl and UploadApiKey must be set, or ClashEngine writes match envelopes as JSON files under <BaseDirectory>/matches instead.",
-          "source": "src/ClashEngine/ClashModule.cs:872"
+          "source": "src/ClashEngine/ClashModule.cs:996"
         },
         {
           "key": "UploadApiKey",
           "type": "string",
           "default": null,
           "description": "Sent as the X-Api-Key header on the upload POST. Required (with UploadUrl) for HTTP upload.",
-          "source": "src/ClashEngine/ClashModule.cs:873"
+          "source": "src/ClashEngine/ClashModule.cs:997"
         },
         {
           "key": "StatsViewUrl",
@@ -53,14 +61,14 @@
           "type": "bool",
           "default": 1,
           "description": "Record every started match with the in-plug-in MatchRecorder.",
-          "source": "src/ClashEngine/ClashModule.cs:278"
+          "source": "src/ClashEngine/ClashModule.cs:310"
         },
         {
           "key": "ReplayRecordingDir",
           "type": "path",
           "default": "<AppContext.BaseDirectory>/clash-replays",
           "description": "Where in-flight .replay files land. Files are deleted after a successful upload.",
-          "source": "src/ClashEngine/ClashModule.cs:300"
+          "source": "src/ClashEngine/ClashModule.cs:332"
         },
         {
           "key": "DistanceSampleHz",
@@ -68,21 +76,21 @@
           "constraint": "1..50 (0 disables)",
           "default": 5,
           "description": "Sampling frequency of the distance-to-nearest-enemy sampler feeding the scoreboard's dE column. 0 disables.",
-          "source": "src/ClashEngine/ClashModule.cs:346"
+          "source": "src/ClashEngine/ClashModule.cs:386"
         },
         {
           "key": "EventStreamUrl",
           "type": "url",
           "default": null,
           "description": "Outbound event-stream endpoint receiving normalized queue/match/player JSON events (one application/json POST per event, X-Api-Key auth) for live advertising/notification, e.g. a Discord bot. Unset (the default) disables event emission. Always dedicated -- never derived from UploadUrl, since the consumer is a distinct service.",
-          "source": "src/ClashEngine/ClashModule.cs:BuildEventSink"
+          "source": "src/ClashEngine/ClashModule.cs:1070 (BuildEventSink)"
         },
         {
           "key": "EventStreamApiKey",
           "type": "string",
           "default": null,
           "description": "Sent as the X-Api-Key header on event POSTs. Falls back to UploadApiKey when unset, so a single gateway terminating both needs no extra config.",
-          "source": "src/ClashEngine/ClashModule.cs:BuildEventSink"
+          "source": "src/ClashEngine/ClashModule.cs:1071 (BuildEventSink)"
         }
       ]
     },
@@ -209,7 +217,7 @@
           "constraint": ">= 0 (0 disables)",
           "default": "60s (engine default)",
           "description": "Only meaningful for elimination matches (Lives > 0). When a player loses their last life they are released from the match roster and must wait this long before ?play re-queues them. Absent -> the engine's built-in 1-minute default; 0 -> no cooldown for this game type (the engine records no penalty, so eliminated players may requeue immediately); >0 -> that duration, applied as a per-event base override on the EliminationCooldown penalty. Auto-rescinded if the match ends before the cooldown elapses. Negative -> dropped to default.",
-          "source": "src/ClashEngine/Config/GameTypeParser.cs (ReadOptionalNonNegativeTimeSpan)"
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:118 (ReadOptionalNonNegativeTimeSpan)"
         },
         {
           "key": "GameType<i>TeamCollapseGrace",
@@ -265,7 +273,7 @@
           "type": "string",
           "default": "(value of Name)",
           "description": "Pretty display string for chat output and the JSON match-stats payload. Decouples display from the lookup name.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:64"
+          "source": "src/ClashEngine/Config/QueueParser.cs:70"
         },
         {
           "key": "Queue<i>Preset",
@@ -273,14 +281,14 @@
           "values": ["casual"],
           "default": null,
           "description": "Opt-in lenient bundle: qStart/qFloor 0.4/0.10 (vs 0.6/0.30), no MaxLiabilityGap cap, RelaxTime 45s, RatingWeight 0.5, griefing teamkill threshold 3 (vs 2). Each knob is still individually overridable. Unrecognized -> ignored (standard defaults apply).",
-          "source": "src/ClashEngine/Config/QueueParser.cs:159 (ReadPreset)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:169 (ReadPreset)"
         },
         {
           "key": "Queue<i>MatchArena",
           "type": "string",
           "default": null,
           "description": "Arena players are sent to for the match. Recommended: a dedicated arena listed in PermanentArenas.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:63"
+          "source": "src/ClashEngine/Config/QueueParser.cs:69"
         },
         {
           "key": "Queue<i>LookAhead",
@@ -288,7 +296,7 @@
           "constraint": ">= 0",
           "default": 0,
           "description": "Extra candidates above the minimum (TotalPlayers) the matcher considers for the best partition. 0 = strict FIFO. Negative -> coerced to 0. The engine's pool size is TotalPlayers + this.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:175 (ReadLookAhead)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:185 (ReadLookAhead)"
         },
         {
           "key": "Queue<i>RelaxTime",
@@ -296,7 +304,7 @@
           "constraint": "> 0",
           "default": "120s standard / 45s with Preset=casual",
           "description": "How fast the quality threshold decays from qStart to qFloor. Longer = stricter early; shorter = accepts weaker matches sooner. <= 0 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:189 (ReadRelaxTime)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:199 (ReadRelaxTime)"
         },
         {
           "key": "Queue<i>HoldWindow",
@@ -304,7 +312,7 @@
           "constraint": ">= 0",
           "default": "10s",
           "description": "Once a viable partition is found, how long the matcher waits for a better one. 0 pops immediately. Negative -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:200 (ReadHoldWindow)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:210 (ReadHoldWindow)"
         },
         {
           "key": "Queue<i>QualityCeiling",
@@ -312,7 +320,7 @@
           "constraint": "[0, 1]",
           "default": 0.9,
           "description": "If a held candidate's quality reaches this, pop without waiting out the hold window. Out of range -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:211 (ReadQualityCeiling)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:221 (ReadQualityCeiling)"
         },
         {
           "key": "Queue<i>VetoesRequired",
@@ -320,7 +328,7 @@
           "constraint": ">= 1",
           "default": 2,
           "description": "Distinct match participants who must ?forgive a pending griefing penalty within VetoWindow to rescind it. Below 1 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:222 (ReadVetoesRequired)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:232 (ReadVetoesRequired)"
         },
         {
           "key": "Queue<i>VetoWindow",
@@ -328,14 +336,14 @@
           "constraint": "> 0",
           "default": "60s (engine default)",
           "description": "Open period for vetos after a griefing flag fires; the penalty becomes final at the end if the threshold wasn't reached. <= 0 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:233 (ReadVetoWindow)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:243 (ReadVetoWindow)"
         },
         {
           "key": "Queue<i>PromoteWinners",
           "type": "bool",
           "default": 0,
           "description": "KOTH mode: the winning team auto-re-enqueues at the head of this queue after a Completed match.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:247 (ReadKoth)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:257 (ReadKoth)"
         },
         {
           "key": "Queue<i>MaxConsecutiveDefenses",
@@ -343,21 +351,21 @@
           "constraint": ">= 1",
           "default": 3,
           "description": "Max consecutive wins a champion can defend before going to the back of the queue. Only meaningful with PromoteWinners=1. Below 1 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:247 (ReadKoth)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:257 (ReadKoth)"
         },
         {
           "key": "Queue<i>AfkWarn",
           "type": "duration",
           "default": 900,
           "description": "In-queue dwell time (seconds or HH:MM:SS) before a one-time 'still there?' AFK warning fires (queue.dwell_warning event + in-game DM). 0 disables both the warning AND the cull for this queue. Re-queuing resets the timer.",
-          "source": "src/ClashEngine/Config/QueueParser.cs (ReadAfkDwell)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:280 (ReadAfkDwell)"
         },
         {
           "key": "Queue<i>AfkCull",
           "type": "duration",
           "default": 1200,
           "description": "In-queue dwell time (seconds or HH:MM:SS) before the player is auto-dequeued (queue.left reason=afk_cull). 0 keeps the warning but never culls. A value below AfkWarn is raised to AfkWarn.",
-          "source": "src/ClashEngine/Config/QueueParser.cs (ReadAfkDwell)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:280 (ReadAfkDwell)"
         }
       ]
     },
@@ -373,7 +381,7 @@
           "type": "string",
           "default": null,
           "description": "Base queue name ?play resolves to when issued from this arena without an explicit queue. Read from arena scope only. Unset -> ?play requires a named queue.",
-          "source": "src/ClashEngine/Config/MatchmakingConfig.cs:122 (DefaultQueueForArena)"
+          "source": "src/ClashEngine/Config/MatchmakingConfig.cs:116 (DefaultQueueForArena)"
         }
       ]
     }
@@ -386,28 +394,28 @@
         "derivedFrom": "Queue<i>Preset",
         "value": "1.0 standard / 0.5 with Preset=casual",
         "description": "Match importance toward rating updates. No standalone conf key.",
-        "source": "src/ClashEngine/Config/QueueParser.cs:102"
+        "source": "src/ClashEngine/Config/QueueParser.cs:109"
       },
       {
         "name": "MatchShape.MaxLiabilityGap",
         "derivedFrom": "Queue<i>Preset",
         "value": "8.0 standard / none with Preset=casual",
         "description": "Cap on the rating gap of the weakest player. No standalone conf key.",
-        "source": "src/ClashEngine/Config/QueueParser.cs:83"
+        "source": "src/ClashEngine/Config/QueueParser.cs:90"
       },
       {
         "name": "GriefingHeuristic",
         "derivedFrom": "GameType<i>Lives and Queue<i>Preset",
         "value": "Lives>0 -> EarlyExitHeuristic (2-min min duration); else TeamkillThresholdHeuristic (threshold 3 casual / 2 standard)",
         "description": "Griefing detector selected from the game type and preset. No standalone conf key.",
-        "source": "src/ClashEngine/Config/QueueParser.cs:86"
+        "source": "src/ClashEngine/Config/QueueParser.cs:93"
       },
       {
         "name": "GameTypeMetadata",
         "derivedFrom": "GameType<i>TeamCount, PlayersPerTeam, Lives",
         "value": "GameTypeMetadata.Uniform(teamCount, perTeam, lives)",
         "description": "Auto-derived stats-server metadata blob (teamCount/teamSizes/livesPerPlayer). There is intentionally no GameType<i>Metadata conf key.",
-        "source": "src/ClashEngine/Config/GameTypeParser.cs:124"
+        "source": "src/ClashEngine/Config/GameTypeParser.cs:125"
       }
     ]
   }

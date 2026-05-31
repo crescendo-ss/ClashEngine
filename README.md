@@ -135,6 +135,7 @@ cmd_chart
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `LogVerbosity` | `Off` / `Normal` / `Verbose` / `Trace` | `Normal` | Runtime-mutable via `?clashlog`. `Verbose` adds debug for command inputs/outcomes, engine event translations, orchestrator phase transitions. `Trace` adds every wire event (connect/disconnect/ship/freq/kill). |
+| `MaxPenaltyHours` | int > 0 | `6` | Hard ceiling (in hours) on any assessed matchmaking penalty timeout. Applied to every penalty policy (abandonment, griefing, staging-AFK, elimination cooldown) so no escalation ladder can exceed it — an operator escape hatch against a runaway-escalation bug. `<= 0` falls back to the engine's built-in default cap. |
 | `UploadUrl` | URL | (unset) | Stats-upload endpoint. Receives `multipart/form-data` POST with metadata JSON + replay file. |
 | `UploadApiKey` | string | (unset) | Sent as `X-Api-Key` header. Both `UploadUrl` and `UploadApiKey` must be set for HTTP upload; if either is missing, ClashEngine writes match envelopes as JSON files under `<AppContext.BaseDirectory>/matches` instead. |
 | `StatsViewUrl` | URL template | (unset) | Per-match viewer URL. After the end-of-match scoreboard, an arena message `Match stats: <url>` is broadcast to everyone in the match arena. The template may include a literal `{matchId}` token (replaced with the dashed GUID, e.g. `8b34f35d-b3b5-4747-941a-5cb96153641e`); without one, the id is appended. Leave unset to suppress the line. |

@@ -663,6 +663,14 @@
             <div class="field-hint">Runtime-mutable via <code>?clashlog</code>. Trace logs every wire event.</div>
           </div>
         </div>
+        <div class="field" data-field="maxPenaltyHours">
+          <label>MaxPenaltyHours</label>
+          <div class="field-input">
+            <input type="number" id="pt-max-penalty-hours" min="1" step="1" placeholder="6">
+            <div class="field-hint">Hard ceiling (in hours) on any matchmaking penalty timeout &mdash; applied to every penalty (abandon, grief, staging-AFK, elimination cooldown). Blank uses the default of 6. <code>0</code> or less falls back to the engine default cap.</div>
+            <div class="field-error"></div>
+          </div>
+        </div>
         <div class="field" data-field="uploadUrl">
           <label>UploadUrl</label>
           <div class="field-input">
@@ -827,6 +835,7 @@ const ITEMS_ACTIONS = ["full","restore","burn"];
 const LOG_VERBOSITY_DEFAULT = "Normal";
 const REPLAY_DIR_DEFAULT = "clash-replays";
 const DISTANCE_HZ_DEFAULT = 5;
+const MAX_PENALTY_HOURS_DEFAULT = 6;
 
 const NAME_RE = /^[A-Za-z0-9_]+$/;
 
@@ -907,6 +916,7 @@ function renderLvlToCanvas(canvas, tiles) {
 const state = {
   pluginTuning: {
     logVerbosity: LOG_VERBOSITY_DEFAULT,
+    maxPenaltyHours: MAX_PENALTY_HOURS_DEFAULT,
     uploadUrl: "",
     uploadApiKey: "",
     statsViewUrl: "",
@@ -1423,6 +1433,18 @@ function bindPluginTuning() {
   document.getElementById("pt-log-verbosity").addEventListener("change", e => {
     pt.logVerbosity = e.target.value; render();
   });
+  // MaxPenaltyHours (int hours; blank = default). Stored numeric so the emit
+  // default-comparison works; <=0 is allowed (engine reads it as "fall back to default").
+  const mph = document.getElementById("pt-max-penalty-hours");
+  if (mph) {
+    mph.value = pt.maxPenaltyHours === MAX_PENALTY_HOURS_DEFAULT ? "" : pt.maxPenaltyHours;
+    mph.addEventListener("input", () => {
+      const raw = mph.value.trim();
+      const parsed = parseInt(raw, 10);
+      pt.maxPenaltyHours = (raw === "" || Number.isNaN(parsed)) ? MAX_PENALTY_HOURS_DEFAULT : parsed;
+      render();
+    });
+  }
   document.getElementById("pt-upload-url").addEventListener("input", e => {
     pt.uploadUrl = e.target.value.trim(); render();
   });
@@ -2004,6 +2026,9 @@ function validate() {
   if (pt.distanceSampleHz < 0 || pt.distanceSampleHz > 50) {
     errors.push("DistanceSampleHz must be 0 or 1–50.");
   }
+  if (pt.maxPenaltyHours <= 0) {
+    warnings.push("MaxPenaltyHours ≤ 0 falls back to the engine's default penalty cap (6h).");
+  }
 
   // Game types
   state.gameTypes.forEach((gt, i) => {
@@ -2095,6 +2120,7 @@ function emitScope(scope) {
   const tuningLines = [];
   if (scope === "global") {
     if (pt.logVerbosity !== LOG_VERBOSITY_DEFAULT) tuningLines.push(line("LogVerbosity", pt.logVerbosity));
+    if (pt.maxPenaltyHours !== MAX_PENALTY_HOURS_DEFAULT) tuningLines.push(line("MaxPenaltyHours", String(pt.maxPenaltyHours)));
     if (pt.uploadUrl) tuningLines.push(line("UploadUrl", pt.uploadUrl));
     if (pt.uploadApiKey) tuningLines.push(line("UploadApiKey", pt.uploadApiKey));
     if (pt.statsViewUrl) tuningLines.push(line("StatsViewUrl", pt.statsViewUrl));
