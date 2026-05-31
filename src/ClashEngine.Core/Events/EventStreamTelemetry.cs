@@ -39,7 +39,22 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
-    public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null)
+    public void OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator = null) =>
+        EmitQueueJoined(player, queueName);
+
+    // KOTH winner promotion and ?autoqueue re-enqueue fire their own telemetry events (so the chat
+    // adapter can send a promotion/auto-queue-specific DM) instead of OnQueueAdded. For the event
+    // stream the *reason* is irrelevant -- the player is now a queue member and the board's count must
+    // reflect it -- so both map to a plain queue.joined. The player is already enqueued before these
+    // fire (MatchmakingEngine.ApplyKothReenqueue / the auto-queue loop enqueue before calling
+    // telemetry), so ResolveQueue's count is the correct post-add occupancy.
+    public void OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,
+        int defensesUsed, int maxDefenses, bool sentToBack) => EmitQueueJoined(player, queueName);
+
+    public void OnAutoQueued(PlayerKey player, string queueName, DateTimeOffset at) =>
+        EmitQueueJoined(player, queueName);
+
+    private void EmitQueueJoined(PlayerKey player, string queueName)
     {
         var (label, gameType, capacity, count) = ResolveQueue(queueName);
         Emit(ClashEventTypes.QueueJoined,

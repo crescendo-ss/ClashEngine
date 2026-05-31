@@ -284,10 +284,90 @@ public class EventStreamTelemetryTests
         // through the interface to confirm none produce an envelope.
         IMatchmakingTelemetry t = mapper;
         t.OnInviteSent(K("A"), K("B"), clock.UtcNow, TimeSpan.FromSeconds(15));
-        t.OnWinnerPromoted(K("A"), "2v2", clock.UtcNow, 1, 3, false);
         t.OnQueueHoldStarted("2v2", new[] { K("A") }, 0.5, TimeSpan.FromSeconds(10));
         t.OnAbandonment(K("A"), 1, clock.UtcNow);
         Assert.Empty(sink.Events);
+    }
+
+    [Fact]
+    public void Winner_promotion_maps_to_queue_joined()
+    {
+        // The engine fires OnWinnerPromoted (not OnQueueAdded) for a KOTH re-enqueue so the chat
+        // adapter can send a promotion-specific DM. For the stream the reason is irrelevant -- the
+        // winner is a queue member again -- so it surfaces as a plain queue.joined, no reason.
+        var (mapper, sink, clock) = DirectMapper();
+        mapper.OnWinnerPromoted(K("A"), "2v2", clock.UtcNow, defensesUsed: 2, maxDefenses: 3, sentToBack: false);
+
+        var e = sink.Events.Single();
+        Assert.Equal(ClashEventTypes.QueueJoined, e.Type);
+        Assert.Equal("2v2", e.Queue!.QueueName);
+        Assert.Equal("2v2 Casual", e.Queue.QueueLabel);
+        Assert.Equal("gt1", e.Queue.GameType);
+        Assert.Equal("A", e.Queue.Player);
+        Assert.Null(e.Queue.Reason);
+        Assert.Null(e.Match);
+        Assert.Null(e.Player);
+    }
+
+    [Fact]
+    public void Auto_queue_maps_to_queue_joined()
+    {
+        var (mapper, sink, clock) = DirectMapper();
+        mapper.OnAutoQueued(K("B"), "2v2", clock.UtcNow);
+
+        var e = sink.Events.Single();
+        Assert.Equal(ClashEventTypes.QueueJoined, e.Type);
+        Assert.Equal("2v2", e.Queue!.QueueName);
+        Assert.Equal("B", e.Queue.Player);
+        Assert.Null(e.Queue.Reason);
+        Assert.Null(e.Match);
+    }
+
+    [Fact]
+    public void Koth_promotion_emits_queue_joined_with_post_add_count()
+    {
+        // End-to-end: a real KOTH match completes and re-enqueues both winners at the head. Each
+        // re-enqueue must surface on the stream as queue.joined carrying the queue's post-add
+        // occupancy (1, then 2 as the winners are re-enqueued in turn), so the board stays accurate.
+        var clock = new FakeClock(T0);
+        var sink = new RecordingEventSink();
+        var engine = new MatchmakingEngine(
+            new InMemoryRatingStore(), clock,
+            new[] { PenaltyPolicy.DefaultAbandonment, PenaltyPolicy.DefaultGriefing });
+        engine.Queues.Register(
+            "koth2v2",
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt1",
+            () => new KillCountEndPolicy(1),
+            promoteWinnersToFront: true,
+            maxConsecutiveDefenses: 3);
+        engine.GameTypes.ReplaceArenaContribution("lobby", new[] { GtDef("gt1", "2v2 Showdown") }, out _);
+        engine.SetTelemetry(new EventStreamTelemetry(sink, engine.Queues, engine.GameTypes, clock));
+
+        foreach (var n in new[] { "A", "B", "C", "D" }) engine.OnPlayerConnected(K(n), clock.UtcNow);
+        foreach (var n in new[] { "A", "B", "C", "D" }) engine.TryEnqueue(K(n), "koth2v2", clock.UtcNow);
+        engine.Tick(clock.UtcNow);
+
+        var match = engine.ActiveMatches.Values.Single();
+        foreach (var team in match.Teams)
+            foreach (var p in team)
+                engine.OnPlayerJoinedArena(p, clock.UtcNow);
+        engine.MarkMatchLive(match.MatchId, clock.UtcNow);
+        var winners = match.Teams[0];
+
+        int before = sink.Events.Count;
+        clock.Advance(TimeSpan.FromSeconds(5));
+        engine.OnKill(winners[0], match.Teams[1][0], clock.UtcNow);
+
+        var promotions = sink.Events.Skip(before)
+            .Where(e => e.Type == ClashEventTypes.QueueJoined && e.Queue!.QueueName == "koth2v2")
+            .ToList();
+        Assert.Equal(2, promotions.Count);
+        Assert.Equal(
+            winners.Select(w => w.Name).OrderBy(x => x),
+            promotions.Select(p => p.Queue!.Player!).OrderBy(x => x));
+        Assert.Equal(new[] { 1, 2 }, promotions.Select(p => p.Queue!.Count).OrderBy(c => c));
     }
 
     [Fact]
