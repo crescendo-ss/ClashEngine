@@ -929,6 +929,7 @@ function newGameType() {
     _key: uid(),
     collapsed: false,
     name: "",
+    label: "",
     teamCount: 2,
     playersPerTeam: 4,
     killTarget: 0,
@@ -1504,6 +1505,14 @@ function renderGameTypeCard(gt, index) {
       oninput: e => { gt.name = e.target.value.trim(); titleSpan.lastChild.textContent = gt.name || "(unnamed)"; render(); }
     }),
     () => validateGameTypeName(gt)
+  ));
+
+  // Label
+  body.appendChild(simpleField("Label", "Pretty display string. Feeds <code>match.gameLabel</code> on the event stream and the stats-server registration. Defaults to Name.",
+    el("input", {
+      type: "text", value: gt.label, placeholder: gt.name || "(same as Name)",
+      oninput: e => { gt.label = e.target.value; render(); }
+    })
   ));
 
   // TeamCount
@@ -2151,6 +2160,7 @@ function emitScope(scope) {
 function emitGameType(out, gt, idx) {
   const p = `GameType${idx}`;
   out.push(line(`${p}Name`, gt.name));
+  if (gt.label) out.push(line(`${p}Label`, gt.label));
   out.push(line(`${p}TeamCount`, String(gt.teamCount)));
   out.push(line(`${p}PlayersPerTeam`, String(gt.playersPerTeam)));
   if (gt.killTarget > 0) out.push(line(`${p}KillTarget`, String(gt.killTarget)));
