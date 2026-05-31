@@ -8,10 +8,10 @@ namespace ClashEngine.Core.Queue;
 /// <c>GameType&lt;i&gt;Team&lt;t&gt;SpawnCenter</c> + <c>GameType&lt;i&gt;Team&lt;t&gt;SpawnRadius</c>.
 /// </summary>
 /// <remarks>
-/// <para><see cref="Center"/> is in <b>pixels</b> (the same coordinate convention as the start
+/// <para><see cref="Center"/> is in <b>tiles</b> (the same coordinate convention as the start
 /// location, <see cref="StartPoint"/>), so an operator can reuse one coordinate for both. The
-/// native client setting is in tiles, so <see cref="Center"/>'s <see cref="StartPoint.TileX"/> /
-/// <see cref="StartPoint.TileY"/> are written to the client.</para>
+/// native client setting is also in tiles, so <see cref="Center"/>'s <see cref="StartPoint.TileX"/> /
+/// <see cref="StartPoint.TileY"/> are written to the client directly.</para>
 /// <para><see cref="RadiusTiles"/> is in <b>tiles</b> (same unit as the start-drift budget and the
 /// native 9-bit client radius field, which caps at 511). The client spawns the ship at a random
 /// point within this radius of the center.</para>

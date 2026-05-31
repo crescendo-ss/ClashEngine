@@ -8,7 +8,7 @@ using SS.Core.ComponentInterfaces;
 namespace ClashEngine.Config;
 
 /// <summary>Parses the per-team match <b>starting</b>-location lists nested under each game-type
-/// block: <c>{prefix}Team{T}Starts = x1,y1; x2,y2; ...</c> (pixels). These are the one-time
+/// block: <c>{prefix}Team{T}Starts = x1,y1; x2,y2; ...</c> (tiles). These are the one-time
 /// setup-warp destinations; in-match respawn boxes are parsed separately by
 /// <see cref="SpawnAreaParser"/>.</summary>
 internal static class StartSetParser

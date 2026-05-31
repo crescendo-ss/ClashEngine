@@ -176,7 +176,7 @@
           "type": "spawnSet",
           "format": "x,y; x,y; ...",
           "default": null,
-          "description": "Per-team candidate match-start coordinates in pixels for t in 1..TeamCount. The orchestrator picks one entry uniformly at random per match and warps the whole team there. Gated by UseStartLocation.",
+          "description": "Per-team candidate match-start coordinates in tiles for t in 1..TeamCount. The orchestrator picks one entry uniformly at random per match and warps the whole team there. Gated by UseStartLocation.",
           "source": "src/ClashEngine/Config/GameTypeParser.cs:101 (StartSetParser.Read)"
         },
         {
@@ -192,7 +192,7 @@
           "type": "point",
           "format": "x,y",
           "default": null,
-          "description": "Per-team in-match respawn box center in pixels for t in 1..TeamCount. When set, overrides the team's players' native [Spawn] client settings so the client respawns them here after every death. Self-gating; independent of UseStartLocation.",
+          "description": "Per-team in-match respawn box center in tiles for t in 1..TeamCount. When set, overrides the team's players' native [Spawn] client settings so the client respawns them here after every death. Self-gating; independent of UseStartLocation.",
           "source": "src/ClashEngine/Config/SpawnAreaParser.cs"
         },
         {

@@ -199,7 +199,7 @@ public sealed class MatchOrchestrator
                     // (ship + freq + warp + lock) finishes when EnterArena fires for them, via
                     // the registry's PlayerActionCallback dispatcher -> OnPlayerEnteredArena.
                     // SendToArena's start args are tile coords (and it silently ignores any >=
-                    // 1024); StartPoint is pixels, so hand it the tile form.
+                    // 1024); StartPoint is tiles, so TileX/TileY hand it the value directly.
                     _arenaManager.SendToArena(player, arenaName, start.TileX, start.TileY);
                     if (_verbose.IsDebug)
                         _verbose.Debug(LogCategory,
@@ -276,15 +276,15 @@ public sealed class MatchOrchestrator
         _game.SetShipAndFreq(player, info.Ship, info.Freq);
         if (info.StartX != 0 || info.StartY != 0)
         {
-            // StartX/Y are pixels (the documented Team<t>Starts contract); IGame.WarpTo takes
-            // tile coords, so shift down by 4 (16 px/tile).
-            _game.WarpTo(player, (short)(info.StartX >> 4), (short)(info.StartY >> 4));
+            // StartX/Y are tile coords (the documented Team<t>Starts contract); IGame.WarpTo takes
+            // tiles, so hand them straight through.
+            _game.WarpTo(player, info.StartX, info.StartY);
             // Anchor the idle tracker at the warp destination so stale pre-warp position
             // packets (in-flight when WarpTo went out) don't seed the tracker at the old
             // position and trigger a false-positive "moved" detection on the first post-warp
-            // packet. The anchor lives in position-packet pixel space -- which StartX/Y
-            // already are -- so pass them straight through.
-            _idleTracker.AnchorAt(key, info.StartX, info.StartY);
+            // packet. The anchor lives in position-packet pixel space, so scale the tile start
+            // up by 16.
+            _idleTracker.AnchorAt(key, (short)(info.StartX << 4), (short)(info.StartY << 4));
         }
         // No SS-Core IGame.Lock during setup -- the MatchFreqAdvisor enforces freq lock from
         // proposal time and opens a ship-change window for the staging duration so participants
@@ -588,12 +588,12 @@ public sealed class MatchOrchestrator
 
         if (_drift.ShouldWarpBack(key, x, y, out var start) && _resolver.Resolve(key) is { } drifter)
         {
-            // start is pixels; WarpTo takes tiles.
+            // start is tiles; WarpTo takes tiles.
             _game.WarpTo(drifter, start.TileX, start.TileY);
             if (_verbose.IsDebug)
             {
-                // Position packet x/y and start are both pixels; report drift in tiles (16 px each).
-                int dxPixels = x - start.X, dyPixels = y - start.Y;
+                // Position packet x/y are pixels; compare against the start's pixel form (16 px/tile).
+                int dxPixels = x - start.PixelX, dyPixels = y - start.PixelY;
                 int driftTiles = (int)(Math.Sqrt((long)dxPixels * dxPixels + (long)dyPixels * dyPixels) / 16);
                 _verbose.Debug(LogCategory,
                     $"Match {_matchId:N}: warped {key.Name} back to start ({start.X},{start.Y}) -- " +

@@ -9,7 +9,7 @@ namespace ClashEngine.Config;
 
 /// <summary>
 /// Parses the per-team in-match <b>respawn</b> boxes nested under each game-type block:
-/// <c>{prefix}Team{T}SpawnCenter = x,y</c> (pixels) and <c>{prefix}Team{T}SpawnRadius = r</c>
+/// <c>{prefix}Team{T}SpawnCenter = x,y</c> (tiles) and <c>{prefix}Team{T}SpawnRadius = r</c>
 /// (tiles). These drive the client-settings <c>[Spawn]</c> override (a port of SS's
 /// <c>SendSpawnOverrides</c>) so the client respawns players inside the box after a death.
 /// Distinct from the one-time start warp parsed by <see cref="StartSetParser"/>.

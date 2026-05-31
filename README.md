@@ -178,9 +178,9 @@ Two independent concerns share this group. **Start locations** move the match's 
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `GameType<i>UseStartLocation` | 0/1 | 0 (off) | Master switch for start locations. Off → no start warp; arena defaults apply. Does not affect respawn boxes. |
-| `GameType<i>Team<t>Starts` | `x,y; x,y; ...` | (unset) | Per-team **set** of candidate match-start coordinates in pixels. At setup the orchestrator picks one entry uniformly at random and warps every player on that team to it. Multiple coords give a team a rotating start-point pool; a single coord is fine too. |
+| `GameType<i>Team<t>Starts` | `x,y; x,y; ...` | (unset) | Per-team **set** of candidate match-start coordinates in tiles. At setup the orchestrator picks one entry uniformly at random and warps every player on that team to it. Multiple coords give a team a rotating start-point pool; a single coord is fine too. |
 | `GameType<i>MaxStartDrift` | int ≥ 0 (tiles) | (unset) | Maximum drift in tiles (1 tile = 16 px) a player may travel from the team's chosen start during Staging and Countdown. Drifters get warped back. `null` or `0` disables drift enforcement. |
-| `GameType<i>Team<t>SpawnCenter` | `x,y` | (unset) | Per-team **respawn** box center, in pixels. When set, the orchestrator overrides that team's players' native `[Spawn]` client settings so the client respawns them here after every death (and on `?return`). Self-gating; independent of `UseStartLocation`. |
+| `GameType<i>Team<t>SpawnCenter` | `x,y` | (unset) | Per-team **respawn** box center, in tiles. When set, the orchestrator overrides that team's players' native `[Spawn]` client settings so the client respawns them here after every death (and on `?return`). Self-gating; independent of `UseStartLocation`. |
 | `GameType<i>Team<t>SpawnRadius` | int 0–511 (tiles) | 0 | Radius in tiles of the respawn box; the client spawns at a random point within it. `0` = respawn exactly at the center. Ignored without a matching `SpawnCenter`. |
 
 **Pre-GO drift enforcement.** While `UseStartLocation = 1`, every position packet during Staging and Countdown is checked against the team's chosen start; players past the threshold are warped back to that start. Enforcement stops at GO — players are not re-warped when the match goes live, so any sub-threshold drift accumulated during the countdown is where the match starts from.
@@ -278,12 +278,12 @@ GameType1KillTarget     = 3
 ;GameType1TimeLimit     = 0:10:00          ; uncomment to add a time cap
 GameType1Lives          = 0
 GameType1UseStartLocation  = 1
-GameType1Team1Starts       = 7680,4096; 7680,4112; 7680,4128
-GameType1Team2Starts       = 8704,4096; 8704,4112; 8704,4128
+GameType1Team1Starts       = 480,256; 480,257; 480,258
+GameType1Team2Starts       = 544,256; 544,257; 544,258
 GameType1MaxStartDrift     = 6             ; tiles
-GameType1Team1SpawnCenter  = 7680,4096     ; respawn box center (pixels)
+GameType1Team1SpawnCenter  = 480,256       ; respawn box center (tiles)
 GameType1Team1SpawnRadius  = 4             ; tiles (random spread on each respawn)
-GameType1Team2SpawnCenter  = 8704,4096
+GameType1Team2SpawnCenter  = 544,256
 GameType1Team2SpawnRadius  = 4
 GameType1StagingDuration   = 8             ; seconds, upper bound (default 10)
 GameType1CountdownDuration = 10            ; seconds (min 5, default 10; ships lock 5s before GO)

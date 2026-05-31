@@ -13,9 +13,10 @@ namespace ClashEngine.Orchestration;
 /// separate concern, handled by client-settings overrides -- see <see cref="ClashEngine.Adapter.SpawnSettingsApplier"/>.)
 /// </summary>
 /// <remarks>
-/// All distance math is done in <b>pixel</b> units (squared, no <c>sqrt</c>): both the
-/// position-packet coordinates and the <see cref="StartPoint"/> are pixels (1 tile = 16 px), so
-/// they compare directly. <see cref="QueueDefinition.MaxStartDriftTiles"/> is a tile budget, so
+/// All distance math is done in <b>pixel</b> units (squared, no <c>sqrt</c>): the position-packet
+/// coordinates are pixels and the <see cref="StartPoint"/> is tiles (1 tile = 16 px), so the start
+/// is compared via its <see cref="StartPoint.PixelX"/>/<see cref="StartPoint.PixelY"/> form.
+/// <see cref="QueueDefinition.MaxStartDriftTiles"/> is a tile budget, so
 /// <see cref="ShouldWarpBack"/> scales it up by 16 before the comparison. Returning
 /// <see langword="false"/> for "no start override configured" rather than a magic value keeps the
 /// call site readable.
@@ -52,9 +53,9 @@ internal sealed class StartDriftEnforcer
     /// True iff drift enforcement is configured and <paramref name="player"/> has wandered
     /// more than <see cref="QueueDefinition.MaxStartDriftTiles"/> tiles from their team's
     /// chosen start location. <paramref name="xPixels"/> and <paramref name="yPixels"/> are the
-    /// player's position-packet coordinates (pixels); they compare directly against the
-    /// pixel-valued <see cref="StartPoint"/>, with the tile drift budget scaled up by 16. Outputs
-    /// the start point (pixels) to warp the player back to.
+    /// player's position-packet coordinates (pixels); they compare against the tile-valued
+    /// <see cref="StartPoint"/> via its pixel form, with the tile drift budget scaled up by 16.
+    /// Outputs the start point (tiles) to warp the player back to.
     /// </summary>
     public bool ShouldWarpBack(PlayerKey player, short xPixels, short yPixels, out StartPoint backTo)
     {
@@ -65,8 +66,8 @@ internal sealed class StartDriftEnforcer
         if (!_chosenStartByTeam.TryGetValue(teamIdx, out var start)) return false;
         if (start.X == 0 && start.Y == 0) return false;
 
-        int dxPixels = xPixels - start.X;
-        int dyPixels = yPixels - start.Y;
+        int dxPixels = xPixels - start.PixelX;
+        int dyPixels = yPixels - start.PixelY;
         long distSq = (long)dxPixels * dxPixels + (long)dyPixels * dyPixels;
         long maxPixels = (long)maxTiles * 16;
         long maxSq = maxPixels * maxPixels;
