@@ -12,11 +12,12 @@ namespace ClashEngine.Orchestration;
 /// whether a player has wandered too far from their team's chosen spawn.
 /// </summary>
 /// <remarks>
-/// All distance math is done in tile units (squared, no <c>sqrt</c>). Position packets carry
-/// pixel coordinates (1 tile = 16 pixels), so <see cref="ShouldWarpBack"/> shifts the inputs
-/// down by 4 before comparing against the tile-valued <see cref="SpawnPoint"/> and
-/// <see cref="QueueDefinition.MaxSpawnDriftTiles"/>. Returning <see langword="false"/> for
-/// "no spawn override configured" rather than a magic value keeps the call site readable.
+/// All distance math is done in <b>pixel</b> units (squared, no <c>sqrt</c>): both the
+/// position-packet coordinates and the <see cref="SpawnPoint"/> are pixels (1 tile = 16 px), so
+/// they compare directly. <see cref="QueueDefinition.MaxSpawnDriftTiles"/> is a tile budget, so
+/// <see cref="ShouldWarpBack"/> scales it up by 16 before the comparison. Returning
+/// <see langword="false"/> for "no spawn override configured" rather than a magic value keeps the
+/// call site readable.
 /// </remarks>
 internal sealed class SpawnDriftEnforcer
 {
@@ -50,8 +51,9 @@ internal sealed class SpawnDriftEnforcer
     /// True iff drift enforcement is configured and <paramref name="player"/> has wandered
     /// more than <see cref="QueueDefinition.MaxSpawnDriftTiles"/> tiles from their team's
     /// chosen spawn. <paramref name="xPixels"/> and <paramref name="yPixels"/> are the player's
-    /// position-packet coordinates (pixels); they are converted to tiles before comparison.
-    /// Outputs the spawn coords (tiles) to warp the player back to.
+    /// position-packet coordinates (pixels); they compare directly against the pixel-valued
+    /// <see cref="SpawnPoint"/>, with the tile drift budget scaled up by 16. Outputs the spawn
+    /// (pixels) to warp the player back to.
     /// </summary>
     public bool ShouldWarpBack(PlayerKey player, short xPixels, short yPixels, out SpawnPoint backTo)
     {
@@ -62,10 +64,11 @@ internal sealed class SpawnDriftEnforcer
         if (!_chosenSpawnByTeam.TryGetValue(teamIdx, out var spawn)) return false;
         if (spawn.X == 0 && spawn.Y == 0) return false;
 
-        int dxTiles = (xPixels >> 4) - spawn.X;
-        int dyTiles = (yPixels >> 4) - spawn.Y;
-        long distSq = (long)dxTiles * dxTiles + (long)dyTiles * dyTiles;
-        long maxSq = (long)maxTiles * maxTiles;
+        int dxPixels = xPixels - spawn.X;
+        int dyPixels = yPixels - spawn.Y;
+        long distSq = (long)dxPixels * dxPixels + (long)dyPixels * dyPixels;
+        long maxPixels = (long)maxTiles * 16;
+        long maxSq = maxPixels * maxPixels;
         if (distSq <= maxSq) return false;
 
         backTo = spawn;
