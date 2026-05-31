@@ -106,6 +106,33 @@ public class QueueRemovalReasonTests
     }
 
     [Fact]
+    public void Match_formation_reports_matched_for_other_queues_the_player_was_searching()
+    {
+        var h = new Harness();
+        // A second queue (a 1v1 duel) that player A is searching alongside the 2v2 from the harness.
+        h.Engine.Queues.Register(
+            "duel",
+            new MatchShape(2, 1),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt2",
+            () => new KillCountEndPolicy(5));
+
+        h.Connect("A", "B", "C", "D");
+        h.Enqueue("A", "B", "C", "D");                       // all four searching 2v2
+        h.Engine.TryEnqueue(K("A"), "duel", h.Clock.UtcNow); // A is also searching the duel queue
+
+        h.Engine.Tick(T0); // 2v2 fills and forms; the duel can't (only A is in it)
+
+        // Every removal is reason=Matched (nobody cancelled or disconnected)...
+        Assert.All(h.Telemetry.QueueRemovals, r => Assert.Equal(QueueRemovalReason.Matched, r.Reason));
+        // ...four for the 2v2 the match actually formed from...
+        Assert.Equal(4, h.Telemetry.QueueRemovals.Count(r => r.Queue == "2v2"));
+        // ...plus one for A's *other* queue, which previously went unreported to the event stream.
+        Assert.Contains(h.Telemetry.QueueRemovals, r => r.Player.Equals(K("A")) && r.Queue == "duel");
+        Assert.Equal(5, h.Telemetry.QueueRemovals.Count);
+    }
+
+    [Fact]
     public void Group_accept_reports_reason_group_change()
     {
         var h = new Harness();

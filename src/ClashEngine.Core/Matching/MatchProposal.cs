@@ -13,4 +13,16 @@ public sealed record MatchProposal(
     MatchShape Shape,
     IReadOnlyList<IReadOnlyList<PlayerKey>> Teams,
     double Quality,
-    DateTimeOffset ProposedAt);
+    DateTimeOffset ProposedAt,
+    IReadOnlyDictionary<PlayerKey, IReadOnlyList<string>> AlsoRemovedFrom)
+{
+    /// <summary>
+    /// Per-player list of the *other* queues each matched player was searching in besides
+    /// <see cref="QueueName"/> (the queue this match formed from). The matcher dequeued the player
+    /// from all of them; the engine surfaces a removal for <see cref="QueueName"/> directly and uses
+    /// this map to also surface the drops on those other queues. Players in only the proposal queue
+    /// are absent from the map (the common case), so it is empty for single-queue searches.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<PlayerKey, IReadOnlyList<string>> NoOtherQueues =
+        new Dictionary<PlayerKey, IReadOnlyList<string>>();
+}

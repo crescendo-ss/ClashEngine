@@ -894,15 +894,18 @@ public sealed class MatchmakingEngine
         _matchQueue[matchId] = def;
 
         // The matcher already dequeued these players from every queue they were searching; surface
-        // a removal (reason=Matched) for the queue this match formed from so the event stream's
-        // queue board reflects the drop. Removals from any *other* queues they were searching are
-        // not surfaced in v1 (the next join/leave/near-full on that queue corrects its count).
+        // a removal (reason=Matched) for the queue this match formed from AND for any other queues
+        // they were searching (carried on proposal.AlsoRemovedFrom) so the event stream's queue board
+        // reflects every drop, not just the one on the queue this match formed from.
         for (int t = 0; t < proposal.Teams.Count; t++)
             for (int j = 0; j < proposal.Teams[t].Count; j++)
             {
                 var p = proposal.Teams[t][j];
                 _matchOf[p] = matchId;
                 _telemetry.OnQueueRemoved(p, proposal.QueueName, at, QueueRemovalReason.Matched);
+                if (proposal.AlsoRemovedFrom.TryGetValue(p, out var otherQueues))
+                    for (int q = 0; q < otherQueues.Count; q++)
+                        _telemetry.OnQueueRemoved(p, otherQueues[q], at, QueueRemovalReason.Matched);
             }
 
         _telemetry.OnMatchProposed(proposal);

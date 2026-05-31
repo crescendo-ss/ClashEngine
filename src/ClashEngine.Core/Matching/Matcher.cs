@@ -175,11 +175,27 @@ public sealed class Matcher
             var chosen = held.Result;
             _held.Remove(def.UniqueId);
 
+            // Dequeue every matched player from all queues they were searching. DequeueEverywhere
+            // returns each player's full set of queues, which always includes this proposal's queue;
+            // carry the *other* queues out so the engine can surface those drops too (the proposal
+            // queue's removal it emits itself).
+            Dictionary<PlayerKey, IReadOnlyList<string>>? alsoRemovedFrom = null;
             for (int t = 0; t < chosen.Teams.Count; t++)
                 for (int j = 0; j < chosen.Teams[t].Count; j++)
-                    DequeueEverywhere(chosen.Teams[t][j]);
+                {
+                    var p = chosen.Teams[t][j];
+                    var removedFrom = DequeueEverywhere(p);
+                    if (removedFrom.Count <= 1) continue; // only the proposal queue -> nothing else
+                    var others = new List<string>(removedFrom.Count - 1);
+                    for (int k = 0; k < removedFrom.Count; k++)
+                        if (!string.Equals(removedFrom[k], def.UniqueId, StringComparison.Ordinal))
+                            others.Add(removedFrom[k]);
+                    if (others.Count > 0)
+                        (alsoRemovedFrom ??= new()).Add(p, others);
+                }
 
-            return new MatchProposal(def.UniqueId, def.Shape, chosen.Teams, chosen.Quality, now);
+            return new MatchProposal(def.UniqueId, def.Shape, chosen.Teams, chosen.Quality, now,
+                alsoRemovedFrom ?? MatchProposal.NoOtherQueues);
         }
 
         return null;
