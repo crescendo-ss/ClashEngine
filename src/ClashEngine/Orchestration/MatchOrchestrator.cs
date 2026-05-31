@@ -21,8 +21,9 @@ namespace ClashEngine.Orchestration;
 
 /// <summary>
 /// Conducts a single match physically: places players in the configured match arena, sets ship
-/// and freq, warps to per-team spawn, runs an idle-detection staging phase, then a countdown,
-/// and returns players to spec on completion. One instance per active match.
+/// and freq, warps to the per-team start location, overrides each client's in-match respawn box,
+/// runs an idle-detection staging phase, then a countdown, and returns players to spec on
+/// completion. One instance per active match.
 /// </summary>
 public sealed class MatchOrchestrator
 {
@@ -45,6 +46,15 @@ public sealed class MatchOrchestrator
     private readonly MatchStatsRegistry? _matchStats;
     private readonly IComponentBroker? _broker;
 
+    /// <summary>Applies/clears the per-player client-settings <c>[Spawn]</c> override that controls
+    /// where the client respawns participants during the match. <see langword="null"/> in test
+    /// paths that construct the orchestrator without the SS client-settings edge.</summary>
+    private readonly SpawnSettingsApplier? _spawnApplier;
+
+    /// <summary>Participants who currently have a respawn override applied (tracked so we only send
+    /// the large client-settings packet to clear it for players we actually overrode).</summary>
+    private readonly HashSet<PlayerKey> _respawnOverridden = new();
+
     /// <summary>Per-player ship the participant was on at the moment they last specced themselves
     /// out. Populated by <see cref="OnPlayerSpecced"/>; consumed by <see cref="TryReturn"/> so the
     /// returner re-enters in the exact ship they left, preserving any post-death ship-change they
@@ -60,8 +70,8 @@ public sealed class MatchOrchestrator
     /// <summary>Staging-phase idle detection (per-player).</summary>
     private readonly IdleStateTracker _idleTracker = new();
 
-    /// <summary>Spawn pick + drift-back enforcement.</summary>
-    private readonly SpawnDriftEnforcer _drift;
+    /// <summary>Match-start pick + pre-GO drift-back enforcement.</summary>
+    private readonly StartDriftEnforcer _drift;
 
     /// <summary>RNG seam for spawn selection. Production uses
     /// <see cref="DefaultRandomSource.Instance"/>; tests pass a deterministic
@@ -77,7 +87,7 @@ public sealed class MatchOrchestrator
     /// <see cref="OnPlayerEnteredArena"/> after the SendToArena transfer completes).</summary>
     private readonly Dictionary<PlayerKey, PlacementInfo> _pendingPlacement = new();
 
-    private readonly record struct PlacementInfo(ShipType Ship, short Freq, short SpawnX, short SpawnY);
+    private readonly record struct PlacementInfo(ShipType Ship, short Freq, int TeamIdx, short StartX, short StartY);
 
     public MatchOrchestrator(
         Guid matchId,
@@ -96,7 +106,8 @@ public sealed class MatchOrchestrator
         MatchFreqAllocator? freqAllocator = null,
         IRandomSource? rng = null,
         MatchStatsRegistry? matchStats = null,
-        IComponentBroker? broker = null)
+        IComponentBroker? broker = null,
+        SpawnSettingsApplier? spawnApplier = null)
     {
         _matchId = matchId;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -115,7 +126,8 @@ public sealed class MatchOrchestrator
         _rng = rng ?? DefaultRandomSource.Instance;
         _matchStats = matchStats;
         _broker = broker;
-        _drift = new SpawnDriftEnforcer(_queue, _proposal);
+        _spawnApplier = spawnApplier;
+        _drift = new StartDriftEnforcer(_queue, _proposal);
 
         for (int t = 0; t < _proposal.Teams.Count; t++)
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
@@ -154,7 +166,7 @@ public sealed class MatchOrchestrator
     {
         string? arenaName = string.IsNullOrEmpty(_queue.MatchArenaName) ? null : _queue.MatchArenaName;
 
-        _drift.ChooseSpawnForEachTeam(_proposal, _rng);
+        _drift.ChooseStartForEachTeam(_proposal, _rng);
 
         // Reserve a rotating freq base for this match so concurrent matches in the same arena
         // don't all stack their teams on freqs 100/200. Falls back to the static convention when
@@ -165,7 +177,7 @@ public sealed class MatchOrchestrator
         for (int t = 0; t < _proposal.Teams.Count; t++)
         {
             short freq = (short)(_freqBase + t * MatchFreqAllocator.FreqStep);
-            var spawn = _drift.ChosenSpawn(t);
+            var start = _drift.ChosenStart(t);
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
                 var key = _proposal.Teams[t][j];
@@ -178,16 +190,16 @@ public sealed class MatchOrchestrator
                 }
 
                 var ship = ShipType.Warbird;
-                _pendingPlacement[key] = new PlacementInfo(ship, freq, spawn.X, spawn.Y);
+                _pendingPlacement[key] = new PlacementInfo(ship, freq, t, start.X, start.Y);
 
                 if (arenaName is not null && !IsInArena(player, arenaName))
                 {
                     // Different arena (or no arena yet): transfer asynchronously. The placement
                     // (ship + freq + warp + lock) finishes when EnterArena fires for them, via
                     // the registry's PlayerActionCallback dispatcher -> OnPlayerEnteredArena.
-                    // SendToArena's spawn args are tile coords (and it silently ignores any >=
-                    // 1024); SpawnPoint is pixels, so hand it the tile form.
-                    _arenaManager.SendToArena(player, arenaName, spawn.TileX, spawn.TileY);
+                    // SendToArena's start args are tile coords (and it silently ignores any >=
+                    // 1024); StartPoint is pixels, so hand it the tile form.
+                    _arenaManager.SendToArena(player, arenaName, start.TileX, start.TileY);
                     if (_verbose.IsDebug)
                         _verbose.Debug(LogCategory,
                             $"Match {_matchId:N}: sending {key.Name} to arena '{arenaName}'; placement deferred.");
@@ -254,18 +266,24 @@ public sealed class MatchOrchestrator
     {
         if (!_pendingPlacement.Remove(key, out var info)) return;
 
+        // Push the client-settings respawn override BEFORE the ship-up so the client already has
+        // the match's [Spawn] box when it spawns the ship. For the initial placement the WarpTo
+        // below moves them onto the exact start location regardless; the override governs every
+        // subsequent respawn after a death.
+        ApplyRespawnOverride(key, info.TeamIdx, player);
+
         _game.SetShipAndFreq(player, info.Ship, info.Freq);
-        if (info.SpawnX != 0 || info.SpawnY != 0)
+        if (info.StartX != 0 || info.StartY != 0)
         {
-            // SpawnX/Y are pixels (the documented Team<t>Spawns contract); IGame.WarpTo takes
+            // StartX/Y are pixels (the documented Team<t>Starts contract); IGame.WarpTo takes
             // tile coords, so shift down by 4 (16 px/tile).
-            _game.WarpTo(player, (short)(info.SpawnX >> 4), (short)(info.SpawnY >> 4));
+            _game.WarpTo(player, (short)(info.StartX >> 4), (short)(info.StartY >> 4));
             // Anchor the idle tracker at the warp destination so stale pre-warp position
             // packets (in-flight when WarpTo went out) don't seed the tracker at the old
             // position and trigger a false-positive "moved" detection on the first post-warp
-            // packet. The anchor lives in position-packet pixel space -- which SpawnX/Y
+            // packet. The anchor lives in position-packet pixel space -- which StartX/Y
             // already are -- so pass them straight through.
-            _idleTracker.AnchorAt(key, info.SpawnX, info.SpawnY);
+            _idleTracker.AnchorAt(key, info.StartX, info.StartY);
         }
         // No SS-Core IGame.Lock during setup -- the MatchFreqAdvisor enforces freq lock from
         // proposal time and opens a ship-change window for the staging duration so participants
@@ -273,7 +291,44 @@ public sealed class MatchOrchestrator
 
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
-                $"Match {_matchId:N}: placed {key.Name} on {info.Ship} freq {info.Freq} at ({info.SpawnX},{info.SpawnY}).");
+                $"Match {_matchId:N}: placed {key.Name} on {info.Ship} freq {info.Freq} at ({info.StartX},{info.StartY}).");
+    }
+
+    /// <summary>
+    /// Apply the queue's per-team respawn box for <paramref name="teamIdx"/> to
+    /// <paramref name="player"/> via the client-settings <c>[Spawn]</c> override, recording that we
+    /// did so. No-op when no override is configured for that team (or the applier is absent), so a
+    /// player who needs no override never gets a client-settings packet.
+    /// </summary>
+    private void ApplyRespawnOverride(PlayerKey key, int teamIdx, Player player)
+    {
+        if (_spawnApplier is null) return;
+        if (_queue.SpawnByTeam is not { } byTeam) return;
+        if (teamIdx < 0 || teamIdx >= byTeam.Count) return;
+        if (byTeam[teamIdx] is not { } area) return;
+
+        _spawnApplier.Apply(player, area);
+        _respawnOverridden.Add(key);
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"Match {_matchId:N}: applied respawn override for {key.Name} -> " +
+                $"({area.Center.X},{area.Center.Y}) r{area.RadiusTiles}t.");
+    }
+
+    /// <summary>
+    /// Clear any respawn override previously applied to <paramref name="key"/>, reverting them to
+    /// the arena's default spawn. No-op if we never applied one (so no redundant client-settings
+    /// packet). Resolves the player fresh so it works from the spec / cleanup paths.
+    /// </summary>
+    private void ClearRespawnOverride(PlayerKey key)
+    {
+        if (_spawnApplier is null) return;
+        if (!_respawnOverridden.Remove(key)) return;
+        if (_resolver.Resolve(key) is not { } player) return;
+
+        _spawnApplier.Clear(player);
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"Match {_matchId:N}: cleared respawn override for {key.Name}.");
     }
 
     private static bool IsInArena(Player player, string arenaName) =>
@@ -336,6 +391,10 @@ public sealed class MatchOrchestrator
         var ship = _shipAtLeave.TryGetValue(key, out var savedShip) && savedShip != ShipType.Spec
             ? savedShip
             : ShipType.Warbird;
+        // Re-apply the client-settings respawn override BEFORE the ship-up: a returning player is
+        // not warped to the start location, so the client must already hold the match's [Spawn]
+        // box when it spawns the ship for them to come back inside the match arena.
+        ApplyRespawnOverride(key, teamIdx, player);
         _game.SetShipAndFreq(player, ship, freq);
 
         // Apply the game type's items policy to the freshly-respawned loadout.
@@ -444,6 +503,12 @@ public sealed class MatchOrchestrator
         if (!OwnsPlayer(key)) return;
         if (prevShip == ShipType.Spec) return;
         _shipAtLeave[key] = prevShip;
+
+        // A ship->spec transition (self-spec or a knockout ForceSpec, both of which funnel through
+        // here) takes the player out of the match's respawn flow, so drop their [Spawn] override.
+        // A normal mid-match death does NOT fire this (Continuum respawns the ship without a spec
+        // transition), so the override correctly persists across respawns. ?return re-applies it.
+        ClearRespawnOverride(key);
         if (_matchStats is not null
             && _matchStats.ActiveRecorders.TryGetValue(_matchId, out var recorder))
         {
@@ -518,24 +583,24 @@ public sealed class MatchOrchestrator
     /// Called by the registry on every position packet from a player participating in this match.
     /// Drives two things during pre-GO: (1) idle detection during Staging (used to fail the match
     /// if a player never moves), and (2) drift enforcement during Staging or Countdown -- if the
-    /// player has wandered more than <see cref="QueueDefinition.MaxSpawnDriftTiles"/> tiles from
-    /// their team's chosen spawn, they're warped back. Both are no-ops once the match goes Live.
+    /// player has wandered more than <see cref="QueueDefinition.MaxStartDriftTiles"/> tiles from
+    /// their team's chosen start, they're warped back. Both are no-ops once the match goes Live.
     /// </summary>
     public void OnPositionPacket(PlayerKey key, sbyte rotation, short x, short y, WeaponCodes weapon)
     {
         if (Phase != MatchPhase.Staging && Phase != MatchPhase.Countdown) return;
 
-        if (_drift.ShouldWarpBack(key, x, y, out var spawn) && _resolver.Resolve(key) is { } drifter)
+        if (_drift.ShouldWarpBack(key, x, y, out var start) && _resolver.Resolve(key) is { } drifter)
         {
-            // spawn is pixels; WarpTo takes tiles.
-            _game.WarpTo(drifter, spawn.TileX, spawn.TileY);
+            // start is pixels; WarpTo takes tiles.
+            _game.WarpTo(drifter, start.TileX, start.TileY);
             if (_verbose.IsDebug)
             {
-                // Position packet x/y and spawn are both pixels; report drift in tiles (16 px each).
-                int dxPixels = x - spawn.X, dyPixels = y - spawn.Y;
+                // Position packet x/y and start are both pixels; report drift in tiles (16 px each).
+                int dxPixels = x - start.X, dyPixels = y - start.Y;
                 int driftTiles = (int)(Math.Sqrt((long)dxPixels * dxPixels + (long)dyPixels * dyPixels) / 16);
                 _verbose.Debug(LogCategory,
-                    $"Match {_matchId:N}: warped {key.Name} back to spawn ({spawn.X},{spawn.Y}) -- " +
+                    $"Match {_matchId:N}: warped {key.Name} back to start ({start.X},{start.Y}) -- " +
                     $"drift {driftTiles}t.");
             }
         }
@@ -686,6 +751,14 @@ public sealed class MatchOrchestrator
         // match-end spec below (TState-typed and untyped variants are tracked separately).
         _timer.ClearTimer<PlayerKey>(OnDeferredKnockoutSpec, this);
         _pendingKnockoutSpec.Clear();
+
+        // Revert any still-active respawn overrides so departing participants don't keep the
+        // match's [Spawn] box if they ship up elsewhere later. Snapshot the set since
+        // ClearRespawnOverride mutates it. (Most participants were already cleared when they were
+        // specced; this catches the rest -- e.g. winners still in their ships at match end.)
+        if (_spawnApplier is not null && _respawnOverridden.Count > 0)
+            foreach (var k in new List<PlayerKey>(_respawnOverridden))
+                ClearRespawnOverride(k);
 
         // Free the freq slot back to the rotating pool so a future match in the same arena can
         // pick it up after we've cycled past it. Symmetric with the BeginSetup allocate.

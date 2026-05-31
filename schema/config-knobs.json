@@ -165,27 +165,43 @@
           "source": "src/ClashEngine/Config/GameTypeParser.cs:88"
         },
         {
-          "key": "GameType<i>WarpOnSpawn",
+          "key": "GameType<i>UseStartLocation",
           "type": "bool",
           "default": 0,
-          "description": "Master switch for deterministic spawn warping. Off -> all Team<t>Spawns / MaxSpawnDrift coordinates are silently ignored and arena defaults apply.",
+          "description": "Master switch for the match-start warp. Off -> all Team<t>Starts / MaxStartDrift coordinates are silently ignored and arena defaults apply. Does not gate the respawn-box override.",
           "source": "src/ClashEngine/Config/GameTypeParser.cs:108"
         },
         {
-          "key": "GameType<i>Team<t>Spawns",
+          "key": "GameType<i>Team<t>Starts",
           "type": "spawnSet",
           "format": "x,y; x,y; ...",
           "default": null,
-          "description": "Per-team candidate spawn coordinates in pixels for t in 1..TeamCount. The orchestrator picks one entry uniformly at random per match and warps the whole team there. Gated by WarpOnSpawn.",
-          "source": "src/ClashEngine/Config/GameTypeParser.cs:101 (SpawnSetParser.Read)"
+          "description": "Per-team candidate match-start coordinates in pixels for t in 1..TeamCount. The orchestrator picks one entry uniformly at random per match and warps the whole team there. Gated by UseStartLocation.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:101 (StartSetParser.Read)"
         },
         {
-          "key": "GameType<i>MaxSpawnDrift",
+          "key": "GameType<i>MaxStartDrift",
           "type": "int",
           "constraint": ">= 0 (tiles; 1 tile = 16px)",
           "default": null,
-          "description": "Max drift from the chosen spawn during Staging/Countdown before a player is warped back. null or 0 disables drift enforcement. Negative -> ignored.",
+          "description": "Max drift from the chosen start during Staging/Countdown before a player is warped back. null or 0 disables drift enforcement. Negative -> ignored.",
           "source": "src/ClashEngine/Config/GameTypeParser.cs:102"
+        },
+        {
+          "key": "GameType<i>Team<t>SpawnCenter",
+          "type": "point",
+          "format": "x,y",
+          "default": null,
+          "description": "Per-team in-match respawn box center in pixels for t in 1..TeamCount. When set, overrides the team's players' native [Spawn] client settings so the client respawns them here after every death. Self-gating; independent of UseStartLocation.",
+          "source": "src/ClashEngine/Config/SpawnAreaParser.cs"
+        },
+        {
+          "key": "GameType<i>Team<t>SpawnRadius",
+          "type": "int",
+          "constraint": "0..511 (tiles; native [Spawn] radius is 9-bit)",
+          "default": 0,
+          "description": "Per-team respawn box radius in tiles; the client spawns at a random point within it. 0 = respawn exactly at the center. Ignored without a matching SpawnCenter.",
+          "source": "src/ClashEngine/Config/SpawnAreaParser.cs"
         },
         {
           "key": "GameType<i>StagingDuration",

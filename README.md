@@ -171,17 +171,21 @@ Game-type **names are a single, zone-wide namespace** and are **globally referen
 
 `KillTarget` and `TimeLimit` may both be set, in which case whichever fires first ends the match.
 
-#### Spawns and warp behavior
+#### Match start locations and respawn boxes
 
-These keys move the match's pre-GO physical setup off the arena's default spawn into something deterministic. All spawn behavior is gated by `WarpOnSpawn`; with the gate off, the configured coordinates are silently ignored and players use the arena's normal spawn points.
+Two independent concerns share this group. **Start locations** move the match's pre-GO physical setup off the arena's default spawn into something deterministic (a one-time server warp), gated by `UseStartLocation`; with the gate off, the configured start coordinates are silently ignored and players use the arena's normal spawn points. **Respawn boxes** override each client's native `[Spawn]` settings so the *client* respawns players inside a per-team box after every death during the match (a port of SubspaceServer's `SendSpawnOverrides`); they are self-gating — configuring a team's `SpawnCenter` turns them on for that team.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `GameType<i>WarpOnSpawn` | 0/1 | 0 (off) | Master switch. Off → no warp; arena defaults apply. |
-| `GameType<i>Team<t>Spawns` | `x,y; x,y; ...` | (unset) | Per-team **set** of candidate spawn coordinates in pixels. At setup the orchestrator picks one entry uniformly at random and warps every player on that team to it. Multiple coords give a team a rotating spawn-point pool; a single coord is fine too. |
-| `GameType<i>MaxSpawnDrift` | int ≥ 0 (tiles) | (unset) | Maximum drift in tiles (1 tile = 16 px) a player may travel from the team's chosen spawn during Staging and Countdown. Drifters get warped back. `null` or `0` disables drift enforcement. |
+| `GameType<i>UseStartLocation` | 0/1 | 0 (off) | Master switch for start locations. Off → no start warp; arena defaults apply. Does not affect respawn boxes. |
+| `GameType<i>Team<t>Starts` | `x,y; x,y; ...` | (unset) | Per-team **set** of candidate match-start coordinates in pixels. At setup the orchestrator picks one entry uniformly at random and warps every player on that team to it. Multiple coords give a team a rotating start-point pool; a single coord is fine too. |
+| `GameType<i>MaxStartDrift` | int ≥ 0 (tiles) | (unset) | Maximum drift in tiles (1 tile = 16 px) a player may travel from the team's chosen start during Staging and Countdown. Drifters get warped back. `null` or `0` disables drift enforcement. |
+| `GameType<i>Team<t>SpawnCenter` | `x,y` | (unset) | Per-team **respawn** box center, in pixels. When set, the orchestrator overrides that team's players' native `[Spawn]` client settings so the client respawns them here after every death (and on `?return`). Self-gating; independent of `UseStartLocation`. |
+| `GameType<i>Team<t>SpawnRadius` | int 0–511 (tiles) | 0 | Radius in tiles of the respawn box; the client spawns at a random point within it. `0` = respawn exactly at the center. Ignored without a matching `SpawnCenter`. |
 
-**Pre-GO drift enforcement.** While `WarpOnSpawn = 1`, every position packet during Staging and Countdown is checked against the team's chosen spawn; players past the threshold are warped back to that spawn. Enforcement stops at GO — players are not re-warped when the match goes live, so any sub-threshold drift accumulated during the countdown is where the match starts from.
+**Pre-GO drift enforcement.** While `UseStartLocation = 1`, every position packet during Staging and Countdown is checked against the team's chosen start; players past the threshold are warped back to that start. Enforcement stops at GO — players are not re-warped when the match goes live, so any sub-threshold drift accumulated during the countdown is where the match starts from.
+
+**Start vs respawn.** The start location is a one-time server warp at match setup (and the drift-back target before GO). The respawn box is a client-settings override that governs where the client spawns the ship — on the initial spawn *and* every respawn after a death — and is cleared when a player leaves the match. An elimination game type (1 life) effectively only uses the start location; a multi-life or kill-target game type uses the respawn box on each death.
 
 #### Match-flow timings (warmup / countdown / spec grace)
 
@@ -273,10 +277,14 @@ GameType1PlayersPerTeam = 1
 GameType1KillTarget     = 3
 ;GameType1TimeLimit     = 0:10:00          ; uncomment to add a time cap
 GameType1Lives          = 0
-GameType1WarpOnSpawn       = 1
-GameType1Team1Spawns       = 7680,4096; 7680,4112; 7680,4128
-GameType1Team2Spawns       = 8704,4096; 8704,4112; 8704,4128
-GameType1MaxSpawnDrift     = 6             ; tiles
+GameType1UseStartLocation  = 1
+GameType1Team1Starts       = 7680,4096; 7680,4112; 7680,4128
+GameType1Team2Starts       = 8704,4096; 8704,4112; 8704,4128
+GameType1MaxStartDrift     = 6             ; tiles
+GameType1Team1SpawnCenter  = 7680,4096     ; respawn box center (pixels)
+GameType1Team1SpawnRadius  = 4             ; tiles (random spread on each respawn)
+GameType1Team2SpawnCenter  = 8704,4096
+GameType1Team2SpawnRadius  = 4
 GameType1StagingDuration   = 8             ; seconds, upper bound (default 10)
 GameType1CountdownDuration = 10            ; seconds (min 5, default 10; ships lock 5s before GO)
 
@@ -311,8 +319,9 @@ This shows off:
 - **Multiple queues sharing a game type.** Both `1v1` and `casual_1v1` run under `elimination_1v1`, so they share the same rules (and rating bucket, keyed by the game type). They differ only in matchmaking strictness, which `Preset = casual` packages as a one-line opt-in for the lenient bundle.
 - **Arena scope, global names.** Both the game type and the queues live in `arena.conf` — game types and queues are not parsed from `global.conf` (only plug-in tuning is). A hypothetical second 1v1 arena that wants the same rules does **not** redeclare `elimination_1v1` (that would collide) — it just references the name from its own queues, since game-type names are globally referenceable and sticky. Only the plug-in-tuning keys belong in `global.conf`.
 - **Lookup name vs display label.** `Queue<i>Name` is what `?play` resolves against; `Queue<i>Label` is the pretty string shown in chat and the JSON payload. Decoupling them means you can rename one without disturbing the other.
-- **Per-team spawn pools.** Three candidate spawn points per team — the orchestrator picks one at random for each match, so consecutive games don't always start in identical positions.
-- **Drift enforcement.** `MaxSpawnDrift = 6` warps anyone who wanders more than 6 tiles from the chosen spawn back during Staging and Countdown.
+- **Per-team start pools.** Three candidate start points per team — the orchestrator picks one at random for each match, so consecutive games don't always start in identical positions.
+- **Drift enforcement.** `MaxStartDrift = 6` warps anyone who wanders more than 6 tiles from the chosen start back during Staging and Countdown.
+- **Respawn boxes.** `Team<t>SpawnCenter` + `SpawnRadius` override each client's `[Spawn]` settings so post-death respawns land back in the team's area instead of the arena default.
 - **Explicit matchmaker tuning.** `LookAhead`, `HoldWindow`, and `QualityCeiling` are spelled out for both queues; the standard queue holds out for balance, casual takes whatever it can get fast.
 
 Add `1v1comp` to `PermanentArenas` and grant the chat commands in `groupdef.dir/default`. That's the full setup.
@@ -323,7 +332,7 @@ Add `1v1comp` to `PermanentArenas` and grant the chat commands in `groupdef.dir/
 
 A match progresses through five orchestrator phases:
 
-1. **Setup.** Players are warped into the configured `MatchArena`, set to their assigned ship + freq, freq-locked, and (if `WarpOnSpawn`) warped to the team's chosen spawn. Ship changes are unrestricted through the end of Staging.
+1. **Setup.** Players are warped into the configured `MatchArena`, set to their assigned ship + freq, freq-locked, and (if `UseStartLocation`) warped to the team's chosen start location. If the game type configures respawn boxes, each player's `[Spawn]` client settings are overridden so post-death respawns land in their team's box. Ship changes are unrestricted through the end of Staging.
 2. **Staging** (up to `StagingDuration`, default 10 s). Idle detection: each player must demonstrate non-idleness via rotation, movement, or weapon fire. The first detected movement DMs the player `Got it -- you're ready. Standby for the countdown.` Staging ends early as soon as every participant has flipped non-idle; if anyone is still idle at the time limit the match is cancelled and idle players are flagged AFK. Players may change ships freely during this phase. Drift enforcement runs here.
 3. **Countdown** (`CountdownDuration`, default 10 s, min 5 s). Broadcasts `All set! Pick your final ship -- Ns until lock, then GO.` up-front (or just `All set!` for countdowns at the 5 s minimum), then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ships lock 5 s before GO; the seconds before that remain a free ship-pick window. Drift enforcement still active, and stops at `GO!` (players are not re-warped when the match goes live).
 4. **Live.** Engine FSM runs end-policy, kill counting, lives tracking, team-collapse detection (if a team has no live members for the team-collapse grace window, they forfeit; surviving teams hear a 10 s warning). After each non-fatal death the player is DMed `You have Ns to change ships before being locked back to your current ship.` (`N` = `ShipChangeGracePeriod`); knockouts (last life) skip this since they go straight to spec.

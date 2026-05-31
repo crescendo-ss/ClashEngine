@@ -952,6 +952,7 @@ function newGameType() {
     warpOnSpawn: false,
     teamSpawns: [[], []],
     maxSpawnDriftTiles: 0,
+    teamSpawnBoxes: [null, null],
     stagingDurationSec: null,
     countdownDurationSec: null,
     knockoutSpecDelaySec: null,
@@ -1545,6 +1546,9 @@ function renderGameTypeCard(gt, index) {
         gt.teamCount = v;
         while (gt.teamSpawns.length < v) gt.teamSpawns.push([]);
         gt.teamSpawns.length = v;
+        if (!gt.teamSpawnBoxes) gt.teamSpawnBoxes = [];
+        while (gt.teamSpawnBoxes.length < v) gt.teamSpawnBoxes.push(null);
+        gt.teamSpawnBoxes.length = v;
         render();
       },
       onCommit: () => rerenderCardBody(card, gt),
@@ -1597,8 +1601,8 @@ function renderGameTypeCard(gt, index) {
   ));
 
   // --- Spawns subgroup ---
-  const spawnGroup = el("div", { class: "subgroup" }, el("h4", {}, "Spawns and warp"));
-  spawnGroup.appendChild(simpleField("WarpOnSpawn", "Master switch: warp every team member to a chosen team spawn at setup/GO.",
+  const spawnGroup = el("div", { class: "subgroup" }, el("h4", {}, "Start locations & respawn boxes"));
+  spawnGroup.appendChild(simpleField("UseStartLocation", "Master switch: warp every team member to a chosen team start location at setup. Drift-back enforced before GO.",
     el("label", { class: "checkbox-row" },
       el("input", {
         type: "checkbox", checked: gt.warpOnSpawn,
@@ -1622,7 +1626,7 @@ function renderGameTypeCard(gt, index) {
     for (let t = 0; t < gt.teamCount; t++) {
       spawnGroup.appendChild(spawnTeamRow(gt, t));
     }
-    spawnGroup.appendChild(simpleField("MaxSpawnDrift", "Max tiles a player may drift from the chosen spawn during Staging/Countdown. 1 tile = 16px. 0 = disabled.",
+    spawnGroup.appendChild(simpleField("MaxStartDrift", "Max tiles a player may drift from the chosen start during Staging/Countdown. 1 tile = 16px. 0 = disabled.",
       sliderField({
         value: gt.maxSpawnDriftTiles, min: 0, max: 25, step: 1,
         onChange: v => { gt.maxSpawnDriftTiles = v; render(); },
@@ -1630,6 +1634,47 @@ function renderGameTypeCard(gt, index) {
       })
     ));
   }
+  // Respawn boxes: per-team client-settings [Spawn] override. Self-gating (independent of the
+  // start-location warp). Center is pixels (like starts); radius is tiles (0-511).
+  if (!gt.teamSpawnBoxes) gt.teamSpawnBoxes = [];
+  while (gt.teamSpawnBoxes.length < gt.teamCount) gt.teamSpawnBoxes.push(null);
+  for (let t = 0; t < gt.teamCount; t++) {
+    const box = gt.teamSpawnBoxes[t];
+    const control = el("div");
+    control.appendChild(el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: !!box,
+        onchange: e => {
+          gt.teamSpawnBoxes[t] = e.target.checked ? { x: 0, y: 0, radius: 0 } : null;
+          rerenderCardBody(card, gt);
+          render();
+        }
+      }),
+      "Enabled"
+    ));
+    if (box) {
+      control.appendChild(el("div", { class: "spawn-pair" },
+        el("input", {
+          type: "number", min: -32768, max: 32767, step: 1, value: box.x,
+          oninput: e => { box.x = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+        }),
+        el("span", { class: "sep" }, ","),
+        el("input", {
+          type: "number", min: -32768, max: 32767, step: 1, value: box.y,
+          oninput: e => { box.y = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+        }),
+        el("span", { class: "sep" }, "radius"),
+        el("input", {
+          type: "number", min: 0, max: 511, step: 1, value: box.radius,
+          oninput: e => { const r = parseInt(e.target.value, 10) || 0; box.radius = r < 0 ? 0 : (r > 511 ? 511 : r); render(); }
+        })
+      ));
+    }
+    spawnGroup.appendChild(simpleField(`Team ${t + 1} respawn box`,
+      t === 0 ? "Overrides this team's <code>[Spawn]</code> client settings so the client respawns players inside the box after a death. Center in pixels, radius in tiles (0–511)." : "",
+      control));
+  }
+
   body.appendChild(spawnGroup);
 
   // --- Match-flow timings ---
@@ -2051,10 +2096,10 @@ function validate() {
         errors.push(`${label}: if any team has spawns, all teams must — ${empty} team(s) currently empty.`);
       }
       if (gt.teamSpawns.slice(0, gt.teamCount).every(s => s.length === 0)) {
-        warnings.push(`${label}: WarpOnSpawn is on but no team spawns are configured — engine will skip the override.`);
+        warnings.push(`${label}: UseStartLocation is on but no team start locations are configured — engine will skip the override.`);
       }
     } else if (gt.maxSpawnDriftTiles > 0) {
-      warnings.push(`${label}: MaxSpawnDrift only takes effect when WarpOnSpawn is on.`);
+      warnings.push(`${label}: MaxStartDrift only takes effect when UseStartLocation is on.`);
     }
     if (gt.killTarget === 0 && gt.timeLimitSec === null) {
       warnings.push(`${label}: no KillTarget and no TimeLimit — engine falls back to 30 kills.`);
@@ -2196,14 +2241,23 @@ function emitGameType(out, gt, idx) {
   if (gt.shipChangeGraceSec !== null) out.push(line(`${p}ShipChangeGracePeriod`, formatTime(gt.shipChangeGraceSec)));
   if (gt.returnItemsAction !== "full") out.push(line(`${p}ReturnItemsAction`, gt.returnItemsAction));
   if (gt.warpOnSpawn) {
-    out.push(line(`${p}WarpOnSpawn`, "1"));
+    out.push(line(`${p}UseStartLocation`, "1"));
     for (let t = 0; t < gt.teamCount; t++) {
       const team = gt.teamSpawns[t] || [];
       if (team.length > 0) {
-        out.push(line(`${p}Team${t + 1}Spawns`, team.map(pt => `${pt.x},${pt.y}`).join("; ")));
+        out.push(line(`${p}Team${t + 1}Starts`, team.map(pt => `${pt.x},${pt.y}`).join("; ")));
       }
     }
-    if (gt.maxSpawnDriftTiles > 0) out.push(line(`${p}MaxSpawnDrift`, String(gt.maxSpawnDriftTiles)));
+    if (gt.maxSpawnDriftTiles > 0) out.push(line(`${p}MaxStartDrift`, String(gt.maxSpawnDriftTiles)));
+  }
+
+  // Respawn boxes (client-settings [Spawn] override) -- self-gating, independent of UseStartLocation.
+  for (let t = 0; t < gt.teamCount; t++) {
+    const box = (gt.teamSpawnBoxes || [])[t];
+    if (box && Number.isFinite(box.x) && Number.isFinite(box.y)) {
+      out.push(line(`${p}Team${t + 1}SpawnCenter`, `${box.x},${box.y}`));
+      if (box.radius > 0) out.push(line(`${p}Team${t + 1}SpawnRadius`, String(box.radius)));
+    }
   }
   if (gt.stagingDurationSec !== null) out.push(line(`${p}StagingDuration`, formatTime(gt.stagingDurationSec)));
   if (gt.countdownDurationSec !== null) out.push(line(`${p}CountdownDuration`, formatTime(gt.countdownDurationSec)));

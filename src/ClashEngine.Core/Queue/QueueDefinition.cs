@@ -24,9 +24,10 @@ public sealed class QueueDefinition
         TimeSpan? vetoWindow = null,
         double ratingWeight = 1.0,
         string? matchArenaName = null,
-        IReadOnlyList<IReadOnlyList<SpawnPoint>>? spawnSetByTeam = null,
-        int? maxSpawnDriftTiles = null,
-        bool warpOnSpawn = false,
+        IReadOnlyList<IReadOnlyList<StartPoint>>? startSetByTeam = null,
+        int? maxStartDriftTiles = null,
+        bool useStartLocation = false,
+        IReadOnlyList<SpawnArea?>? spawnByTeam = null,
         TimeSpan? stagingDuration = null,
         TimeSpan? countdownDuration = null,
         int? lookAheadWindow = null,
@@ -81,21 +82,33 @@ public sealed class QueueDefinition
             throw new ArgumentOutOfRangeException(nameof(afkDwellCull),
                 "Must be >= afkDwellWarning when both are positive.");
 
-        if (spawnSetByTeam is not null)
+        if (startSetByTeam is not null)
         {
-            if (spawnSetByTeam.Count != shape.TeamCount)
+            if (startSetByTeam.Count != shape.TeamCount)
                 throw new ArgumentException(
-                    $"spawnSetByTeam must have one entry per team ({shape.TeamCount}); got {spawnSetByTeam.Count}.",
-                    nameof(spawnSetByTeam));
-            for (int t = 0; t < spawnSetByTeam.Count; t++)
-                if (spawnSetByTeam[t] is null || spawnSetByTeam[t].Count == 0)
+                    $"startSetByTeam must have one entry per team ({shape.TeamCount}); got {startSetByTeam.Count}.",
+                    nameof(startSetByTeam));
+            for (int t = 0; t < startSetByTeam.Count; t++)
+                if (startSetByTeam[t] is null || startSetByTeam[t].Count == 0)
                     throw new ArgumentException(
-                        $"spawnSetByTeam[{t}] must contain at least one spawn point.",
-                        nameof(spawnSetByTeam));
+                        $"startSetByTeam[{t}] must contain at least one start point.",
+                        nameof(startSetByTeam));
         }
 
-        if (maxSpawnDriftTiles is { } drift && drift < 0)
-            throw new ArgumentOutOfRangeException(nameof(maxSpawnDriftTiles), "Must be non-negative.");
+        if (maxStartDriftTiles is { } drift && drift < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxStartDriftTiles), "Must be non-negative.");
+
+        if (spawnByTeam is not null)
+        {
+            if (spawnByTeam.Count != shape.TeamCount)
+                throw new ArgumentException(
+                    $"spawnByTeam must have one entry per team ({shape.TeamCount}); got {spawnByTeam.Count}.",
+                    nameof(spawnByTeam));
+            for (int t = 0; t < spawnByTeam.Count; t++)
+                if (spawnByTeam[t] is { } area && (area.RadiusTiles < 0 || area.RadiusTiles > 511))
+                    throw new ArgumentOutOfRangeException(nameof(spawnByTeam),
+                        $"spawnByTeam[{t}].RadiusTiles must be in [0, 511] (native client radius is a 9-bit field).");
+        }
 
         if (stagingDuration is { } sd && sd <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(stagingDuration), "Must be positive.");
@@ -117,9 +130,10 @@ public sealed class QueueDefinition
         VetoWindow = vetoWindow ?? TimeSpan.FromSeconds(60);
         RatingWeight = ratingWeight;
         MatchArenaName = matchArenaName;
-        SpawnSetByTeam = spawnSetByTeam;
-        MaxSpawnDriftTiles = maxSpawnDriftTiles;
-        WarpOnSpawn = warpOnSpawn;
+        StartSetByTeam = startSetByTeam;
+        MaxStartDriftTiles = maxStartDriftTiles;
+        UseStartLocation = useStartLocation;
+        SpawnByTeam = spawnByTeam;
         StagingDuration = stagingDuration ?? TimeSpan.FromSeconds(10);
         CountdownDuration = countdownDuration ?? TimeSpan.FromSeconds(10);
         LookAheadWindow = effectiveLookAhead;
@@ -210,29 +224,41 @@ public sealed class QueueDefinition
     public string? MatchArenaName { get; }
 
     /// <summary>
-    /// Per-team set of candidate spawn points. At setup the orchestrator picks one entry from
-    /// each team's list at random; every player on that team is warped to the chosen point.
-    /// <see langword="null"/> means no spawn override (players spawn wherever the arena's
-    /// default spawn places them).
+    /// Per-team set of candidate match <b>starting</b> locations (pixels). At setup the
+    /// orchestrator picks one entry from each team's list at random and server-side warps every
+    /// player on that team to the chosen point (a one-time teleport). <see langword="null"/> means
+    /// no start override (players are placed wherever the arena's default spawn puts them). This is
+    /// the match <em>start</em>; in-match respawns are governed by <see cref="SpawnByTeam"/>.
     /// </summary>
-    public IReadOnlyList<IReadOnlyList<SpawnPoint>>? SpawnSetByTeam { get; }
+    public IReadOnlyList<IReadOnlyList<StartPoint>>? StartSetByTeam { get; }
 
     /// <summary>
     /// Maximum drift (in tiles, where 1 tile = 16 pixels) a player may travel from their team's
-    /// chosen spawn during Staging and Countdown before the orchestrator forces a warp back.
-    /// <see langword="null"/> or 0 disables drift enforcement.
+    /// chosen start location during Staging and Countdown before the orchestrator forces a warp
+    /// back. <see langword="null"/> or 0 disables drift enforcement.
     /// </summary>
-    public int? MaxSpawnDriftTiles { get; }
+    public int? MaxStartDriftTiles { get; }
 
     /// <summary>
-    /// Master switch for the spawn-warp behavior. When <see langword="true"/>, the orchestrator
-    /// picks one entry from each team's <see cref="SpawnSetByTeam"/> at setup, warps the team to
-    /// it, enforces <see cref="MaxSpawnDriftTiles"/> during Staging/Countdown, and re-warps the
-    /// team to that spawn at GO. When <see langword="false"/> (default), all spawn-related warps
-    /// are suppressed and the configured spawn coordinates are ignored, leaving players at the
-    /// arena's default spawn.
+    /// Master switch for the match-start warp behavior. When <see langword="true"/>, the
+    /// orchestrator picks one entry from each team's <see cref="StartSetByTeam"/> at setup, warps
+    /// the team to it, and enforces <see cref="MaxStartDriftTiles"/> during Staging/Countdown. When
+    /// <see langword="false"/> (default), all start-related warps are suppressed and the configured
+    /// start coordinates are ignored, leaving players at the arena's default spawn. Does not gate
+    /// <see cref="SpawnByTeam"/> (respawn overrides are self-gating).
     /// </summary>
-    public bool WarpOnSpawn { get; }
+    public bool UseStartLocation { get; }
+
+    /// <summary>
+    /// Per-team in-match <b>respawn</b> box (center in pixels, radius in tiles). When a team's
+    /// entry is non-null, the orchestrator overrides each of that team's players' native
+    /// Continuum <c>[Spawn]</c> client settings via <c>IClientSettings</c> so the client respawns
+    /// them inside the box after every death (a port of SS's
+    /// <c>TeamVersusMatch.SendSpawnOverrides</c>). <see langword="null"/> (whole list) means no
+    /// respawn override; a null per-team entry means that team has none. Self-gating -- independent
+    /// of <see cref="UseStartLocation"/>. Cleared when a player leaves the match.
+    /// </summary>
+    public IReadOnlyList<SpawnArea?>? SpawnByTeam { get; }
 
     /// <summary>
     /// Length of the staging (warmup / readiness-check) window between match formation and the

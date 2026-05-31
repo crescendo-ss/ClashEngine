@@ -98,14 +98,18 @@ internal static class GameTypeParser
             timeLimit = null;
         }
 
-        var spawnSetByTeam = SpawnSetParser.Read(config, handle, p, teamCount, log);
-        int? maxDrift = ConfigReadHelpers.TryReadInt(config, handle, p + "MaxSpawnDrift");
+        var startSetByTeam = StartSetParser.Read(config, handle, p, teamCount, log);
+        int? maxDrift = ConfigReadHelpers.TryReadInt(config, handle, p + "MaxStartDrift");
         if (maxDrift is { } mdr && mdr < 0)
         {
-            log?.Warn(ConfigConstants.LogCategory, $"{p}MaxSpawnDrift={mdr} must be >=0; ignored.");
+            log?.Warn(ConfigConstants.LogCategory, $"{p}MaxStartDrift={mdr} must be >=0; ignored.");
             maxDrift = null;
         }
-        bool warpOnSpawn = config.GetInt(handle, ConfigConstants.Section, p + "WarpOnSpawn", 0) != 0;
+        bool useStartLocation = config.GetInt(handle, ConfigConstants.Section, p + "UseStartLocation", 0) != 0;
+
+        // In-match respawn boxes (client-settings [Spawn] override). Self-gating and independent
+        // of UseStartLocation: a team gets an override iff it configured a SpawnCenter.
+        var spawnByTeam = SpawnAreaParser.Read(config, handle, p, teamCount, log);
 
         TimeSpan? stagingDuration = ReadOptionalPositiveTimeSpan(config, handle, p + "StagingDuration", p, log);
         TimeSpan? countdownDuration = ReadOptionalPositiveTimeSpan(config, handle, p + "CountdownDuration", p, log);
@@ -127,7 +131,7 @@ internal static class GameTypeParser
         return new GameTypeDef(
             name, label!, description, metadata,
             teamCount, perTeam, killTarget, lives, timeLimit,
-            spawnSetByTeam, maxDrift, warpOnSpawn,
+            startSetByTeam, maxDrift, useStartLocation, spawnByTeam,
             stagingDuration, countdownDuration, knockoutSpecDelay,
             teamCollapseGrace, shipChangeGracePeriod,
             returnItemsAction, eliminationCooldown);
@@ -176,17 +180,21 @@ internal static class GameTypeParser
     {
         if (log is not { IsDebug: true }) return;
 
-        string spawnDesc = def.SpawnSetByTeam is null
+        string startDesc = def.StartSetByTeam is null
             ? "(none)"
-            : string.Join(", ", SpawnSetParser.Describe(def.SpawnSetByTeam));
+            : string.Join(", ", StartSetParser.Describe(def.StartSetByTeam));
+        string respawnDesc = def.SpawnByTeam is null
+            ? "(none)"
+            : string.Join(", ", SpawnAreaParser.Describe(def.SpawnByTeam));
 
         log.Debug(ConfigConstants.LogCategory,
             $"GameType '{def.Name}' parsed: Label='{def.Label}', TeamCount={def.TeamCount}, PlayersPerTeam={def.PlayersPerTeam}, " +
             $"KillTarget={(def.KillTarget > 0 ? def.KillTarget.ToString() : "0 (unset)")}, " +
             $"TimeLimit={(def.TimeLimit is { } tl ? tl.ToString() : "(unset)")}, " +
             $"Lives={(def.Lives > 0 ? def.Lives.ToString() : "0 (unlimited)")}, " +
-            $"WarpOnSpawn={def.WarpOnSpawn}, Spawns={spawnDesc}, " +
-            $"MaxSpawnDrift={(def.MaxSpawnDriftTiles is { } md ? md + "t" : "(unset)")}, " +
+            $"UseStartLocation={def.UseStartLocation}, Starts={startDesc}, " +
+            $"MaxStartDrift={(def.MaxStartDriftTiles is { } md ? md + "t" : "(unset)")}, " +
+            $"Respawn={respawnDesc}, " +
             $"StagingDuration={(def.StagingDuration is { } sd ? sd.ToString() : "(default 10s)")}, " +
             $"CountdownDuration={(def.CountdownDuration is { } cd ? cd.ToString() : "(default 5s)")}, " +
             $"KnockoutSpecDelay={(def.KnockoutSpecDelay is { } ks ? ks.ToString() : "(default 0)")}, " +

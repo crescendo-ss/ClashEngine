@@ -57,6 +57,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private INetwork? _network;
     private ISecuritySeedSync? _securitySeedSync;
     private IWatchDamage? _watchDamage;
+    private IClientSettings? _clientSettings;
     private MatchRecorder? _matchRecorder;
 
     private MatchmakingEngine? _engine;
@@ -296,9 +297,18 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // for the ?return loadout-restore path.
         _matchStats = new MatchStatsRegistry(new DamageDecay());
 
+        // Client-settings edge for the in-match respawn-box override (a port of SS's
+        // SendSpawnOverrides). Optional: if the interface (or the [Spawn] identifiers) can't be
+        // resolved, the applier reports not-ready and respawn overrides degrade to the arena
+        // default with a one-time warning.
+        _clientSettings = broker.GetInterface<IClientSettings>();
+        var spawnApplier = _clientSettings is not null
+            ? new SpawnSettingsApplier(_clientSettings, _log)
+            : null;
+
         _orchestrators = new MatchOrchestratorRegistry(
             broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
-            matchAudience, freqAllocator, matchStats: _matchStats);
+            matchAudience, freqAllocator, matchStats: _matchStats, spawnApplier: spawnApplier);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 
@@ -639,6 +649,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         if (_network is not null) broker.ReleaseInterface(ref _network);
         if (_mapData is not null) broker.ReleaseInterface(ref _mapData);
         if (_watchDamage is not null) broker.ReleaseInterface(ref _watchDamage);
+        if (_clientSettings is not null) broker.ReleaseInterface(ref _clientSettings);
 
         if (_persist is not null)
             broker.ReleaseInterface(ref _persist);

@@ -108,67 +108,102 @@ public class QueueDefinitionTests
     }
 
     [Fact]
-    public void SpawnSetByTeam_accepts_per_team_lists()
+    public void StartSetByTeam_accepts_per_team_lists()
     {
-        var spawns = new IReadOnlyList<SpawnPoint>[]
+        var spawns = new IReadOnlyList<StartPoint>[]
         {
-            new[] { new SpawnPoint(100, 200), new SpawnPoint(150, 200) },
-            new[] { new SpawnPoint(800, 200) },
+            new[] { new StartPoint(100, 200), new StartPoint(150, 200) },
+            new[] { new StartPoint(800, 200) },
         };
-        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), spawnSetByTeam: spawns);
-        Assert.NotNull(def.SpawnSetByTeam);
-        Assert.Equal(2, def.SpawnSetByTeam!.Count);
-        Assert.Equal(2, def.SpawnSetByTeam[0].Count);
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), startSetByTeam: spawns);
+        Assert.NotNull(def.StartSetByTeam);
+        Assert.Equal(2, def.StartSetByTeam!.Count);
+        Assert.Equal(2, def.StartSetByTeam[0].Count);
     }
 
     [Fact]
-    public void SpawnSetByTeam_rejects_wrong_team_count()
+    public void StartSetByTeam_rejects_wrong_team_count()
     {
-        var spawns = new IReadOnlyList<SpawnPoint>[]
+        var spawns = new IReadOnlyList<StartPoint>[]
         {
-            new[] { new SpawnPoint(100, 200) },
-        };
-        Assert.Throws<ArgumentException>(() =>
-            new QueueDefinition("q", new MatchShape(2, 2), Policy(), spawnSetByTeam: spawns));
-    }
-
-    [Fact]
-    public void SpawnSetByTeam_rejects_empty_inner_list()
-    {
-        var spawns = new IReadOnlyList<SpawnPoint>[]
-        {
-            new[] { new SpawnPoint(100, 200) },
-            Array.Empty<SpawnPoint>(),
+            new[] { new StartPoint(100, 200) },
         };
         Assert.Throws<ArgumentException>(() =>
-            new QueueDefinition("q", new MatchShape(2, 2), Policy(), spawnSetByTeam: spawns));
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(), startSetByTeam: spawns));
     }
 
     [Fact]
-    public void MaxSpawnDriftTiles_rejects_negative()
+    public void StartSetByTeam_rejects_empty_inner_list()
+    {
+        var spawns = new IReadOnlyList<StartPoint>[]
+        {
+            new[] { new StartPoint(100, 200) },
+            Array.Empty<StartPoint>(),
+        };
+        Assert.Throws<ArgumentException>(() =>
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(), startSetByTeam: spawns));
+    }
+
+    [Fact]
+    public void MaxStartDriftTiles_rejects_negative()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new QueueDefinition("q", new MatchShape(2, 2), Policy(), maxSpawnDriftTiles: -1));
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(), maxStartDriftTiles: -1));
     }
 
     [Fact]
-    public void WarpOnSpawn_defaults_off()
+    public void UseStartLocation_defaults_off()
     {
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
-        Assert.False(def.WarpOnSpawn);
+        Assert.False(def.UseStartLocation);
     }
 
     [Fact]
-    public void WarpOnSpawn_can_be_enabled()
+    public void UseStartLocation_can_be_enabled()
     {
-        var spawns = new IReadOnlyList<SpawnPoint>[]
+        var spawns = new IReadOnlyList<StartPoint>[]
         {
-            new[] { new SpawnPoint(100, 200) },
-            new[] { new SpawnPoint(800, 200) },
+            new[] { new StartPoint(100, 200) },
+            new[] { new StartPoint(800, 200) },
         };
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(),
-            spawnSetByTeam: spawns, warpOnSpawn: true);
-        Assert.True(def.WarpOnSpawn);
+            startSetByTeam: spawns, useStartLocation: true);
+        Assert.True(def.UseStartLocation);
+    }
+
+    [Fact]
+    public void SpawnByTeam_accepts_per_team_boxes_with_null_entries()
+    {
+        var boxes = new SpawnArea?[]
+        {
+            new SpawnArea(new StartPoint(480, 256), 8),
+            null,
+        };
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), spawnByTeam: boxes);
+        Assert.NotNull(def.SpawnByTeam);
+        Assert.Equal(2, def.SpawnByTeam!.Count);
+        Assert.Equal(8, def.SpawnByTeam[0]!.Value.RadiusTiles);
+        Assert.Null(def.SpawnByTeam[1]);
+    }
+
+    [Fact]
+    public void SpawnByTeam_rejects_wrong_team_count()
+    {
+        var boxes = new SpawnArea?[] { new SpawnArea(new StartPoint(480, 256), 8) };
+        Assert.Throws<ArgumentException>(() =>
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(), spawnByTeam: boxes));
+    }
+
+    [Fact]
+    public void SpawnByTeam_rejects_radius_above_native_max()
+    {
+        var boxes = new SpawnArea?[]
+        {
+            new SpawnArea(new StartPoint(480, 256), 512),
+            null,
+        };
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new QueueDefinition("q", new MatchShape(2, 2), Policy(), spawnByTeam: boxes));
     }
 
     [Fact]

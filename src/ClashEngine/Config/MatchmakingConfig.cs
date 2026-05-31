@@ -45,9 +45,9 @@ namespace ClashEngine.Config;
 /// GameType1KillTarget     = 30
 /// GameType1TimeLimit      = 0:20:00
 /// GameType1Lives          = 5
-/// GameType1WarpOnSpawn    = 1
-/// GameType1Team1Spawns    = 480,256;480,257
-/// GameType1Team2Spawns    = 544,256;544,257
+/// GameType1UseStartLocation = 1
+/// GameType1Team1Starts      = 480,256;480,257
+/// GameType1Team2Starts      = 544,256;544,257
 ///
 /// QueueCount = 2
 /// Queue1Name              = 3v3comp

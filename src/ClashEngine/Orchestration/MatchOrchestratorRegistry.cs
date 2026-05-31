@@ -37,6 +37,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     private readonly MatchAudience? _audience;
     private readonly MatchFreqAllocator? _freqAllocator;
     private readonly MatchStatsRegistry? _matchStats;
+    private readonly ClashEngine.Adapter.SpawnSettingsApplier? _spawnApplier;
     private bool _registeredCallback;
 
     public MatchOrchestratorRegistry(
@@ -52,7 +53,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         ClashLog verbose,
         MatchAudience? audience = null,
         MatchFreqAllocator? freqAllocator = null,
-        MatchStatsRegistry? matchStats = null)
+        MatchStatsRegistry? matchStats = null,
+        ClashEngine.Adapter.SpawnSettingsApplier? spawnApplier = null)
     {
         _broker = broker;
         _engine = engine;
@@ -67,6 +69,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         _audience = audience;
         _freqAllocator = freqAllocator;
         _matchStats = matchStats;
+        _spawnApplier = spawnApplier;
     }
 
     public void Register()
@@ -101,7 +104,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
 
         var orchestrator = new MatchOrchestrator(
             matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log,
-            _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats, broker: _broker);
+            _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats, broker: _broker,
+            spawnApplier: _spawnApplier);
         _orchestrators[matchId] = orchestrator;
 
         // Track players for position-packet routing during staging.

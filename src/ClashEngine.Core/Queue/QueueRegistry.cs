@@ -37,9 +37,10 @@ public sealed class QueueRegistry
         TimeSpan? vetoWindow = null,
         double ratingWeight = 1.0,
         string? matchArenaName = null,
-        IReadOnlyList<IReadOnlyList<SpawnPoint>>? spawnSetByTeam = null,
-        int? maxSpawnDriftTiles = null,
-        bool warpOnSpawn = false,
+        IReadOnlyList<IReadOnlyList<StartPoint>>? startSetByTeam = null,
+        int? maxStartDriftTiles = null,
+        bool useStartLocation = false,
+        IReadOnlyList<SpawnArea?>? spawnByTeam = null,
         TimeSpan? stagingDuration = null,
         TimeSpan? countdownDuration = null,
         int? lookAheadWindow = null,
@@ -66,7 +67,7 @@ public sealed class QueueRegistry
             name, shape, qualityPolicy, gameType,
             endPolicyFactory, griefingHeuristicFactory,
             vetoesRequired, vetoWindow, ratingWeight,
-            matchArenaName, spawnSetByTeam, maxSpawnDriftTiles, warpOnSpawn,
+            matchArenaName, startSetByTeam, maxStartDriftTiles, useStartLocation, spawnByTeam,
             stagingDuration, countdownDuration,
             lookAheadWindow, promoteWinnersToFront, maxConsecutiveDefenses,
             holdWindow, qualityCeiling, knockoutSpecDelay,
@@ -310,8 +311,8 @@ public sealed class QueueRegistry
         if (a.ShipChangeGracePeriod != b.ShipChangeGracePeriod) return false;
         if (a.TimeLimit != b.TimeLimit) return false;
         if (a.ReturnItemsAction != b.ReturnItemsAction) return false;
-        if (a.WarpOnSpawn != b.WarpOnSpawn) return false;
-        if (a.MaxSpawnDriftTiles != b.MaxSpawnDriftTiles) return false;
+        if (a.UseStartLocation != b.UseStartLocation) return false;
+        if (a.MaxStartDriftTiles != b.MaxStartDriftTiles) return false;
         if (a.AfkDwellWarning != b.AfkDwellWarning) return false;
         if (a.AfkDwellCull != b.AfkDwellCull) return false;
         return true;
