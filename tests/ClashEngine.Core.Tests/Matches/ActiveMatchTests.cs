@@ -630,28 +630,61 @@ public class ActiveMatchTests
     }
 
     [Fact]
-    public void Leaving_during_Forming_immediately_abandons_no_grace()
+    public void Leaving_during_Forming_moves_player_to_grace_not_abandoned()
     {
-        // No grace before match start: a player who joins and then bails strands the rest of the
-        // lobby waiting for the join-timeout, so they're flagged as an abandoner immediately.
-        // They can still recover via OnPlayerReturned (e.g. ?return), but the abandon flag is
-        // sticky -- they're still recorded as an abandoner at match end.
-        var m = BuildMatch(joinTimeout: TimeSpan.FromMinutes(1));
+        // A placed player who specs before GO! (still Forming) gets the same per-player grace as
+        // an in-progress departure -- not immediate abandonment. This is what lets them ?return
+        // into the match instead of being stranded out of it (Abandoned blocks MarkLive).
+        var m = BuildMatch();
         m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
         m.OnPlayerLeft(K("A"), T0.AddSeconds(2));
 
-        Assert.Equal(PlayerStatus.Abandoned, m.GetStatus(K("A")));
+        Assert.Equal(PlayerStatus.InGrace, m.GetStatus(K("A")));
+    }
 
-        // Return flips A back to Active so they can keep playing.
+    [Fact]
+    public void Returning_before_GO_forgives_a_Forming_departure()
+    {
+        // The headline behavior: a player specs during the countdown and returns before GO!. They
+        // are forgiven (dropped from the candidate set, never marked Abandoned), the match starts
+        // normally, and they are NOT recorded as an abandoner at match end.
+        var m = BuildMatch(endPolicy: new KillCountEndPolicy(1));
+        foreach (var p in new[] { K("A"), K("B"), K("C"), K("D") })
+            m.OnPlayerJoined(p, T0.AddSeconds(1));
+
+        m.OnPlayerLeft(K("A"), T0.AddSeconds(2));
+        Assert.Equal(PlayerStatus.InGrace, m.GetStatus(K("A")));
         m.OnPlayerReturned(K("A"), T0.AddSeconds(3));
         Assert.Equal(PlayerStatus.Active, m.GetStatus(K("A")));
+        Assert.False(m.IsCandidateAbandoner(K("A")));
 
-        // Match never goes Live (only A and not B/C/D readied), so the join-timeout cancels it.
-        Assert.Equal(MatchState.Forming, m.State);
+        // GO! now succeeds (everyone Active again); the match plays out to completion.
+        Assert.True(m.MarkLive(T0.AddSeconds(4)));
+        m.OnKill(K("A"), K("C"), T0.AddSeconds(10));
+
+        Assert.Equal(MatchState.Completed, m.State);
+        Assert.DoesNotContain(K("A"), m.Outcome!.AbandonedBy);
+    }
+
+    [Fact]
+    public void Forming_departure_that_never_returns_is_still_an_abandoner()
+    {
+        // Strand-protection is preserved: a placed player who bails before GO! and never comes
+        // back has their grace expire (Tick flips them Abandoned), and the join-timeout
+        // cancellation records them as an abandoner -- teammate B was still viable.
+        var m = BuildMatch(joinTimeout: TimeSpan.FromMinutes(1), graceWindow: TimeSpan.FromSeconds(30));
+        m.OnPlayerJoined(K("A"), T0.AddSeconds(1));
+        m.OnPlayerJoined(K("B"), T0.AddSeconds(1));
+        // C/D never join; A bails during Forming and never returns.
+        m.OnPlayerLeft(K("A"), T0.AddSeconds(2));
+
+        // Grace expires before the join-timeout -> A flips to Abandoned.
+        m.Tick(T0.AddSeconds(40));
+        Assert.Equal(PlayerStatus.Abandoned, m.GetStatus(K("A")));
+
+        // Join-timeout cancels the match; A is recorded as an abandoner.
         m.Tick(T0.AddMinutes(1).AddSeconds(1));
         Assert.Equal(MatchState.Cancelled, m.State);
-
-        // Sticky abandon flag: A is still recorded as an abandoner despite being Active at end.
         Assert.Contains(K("A"), m.Outcome!.AbandonedBy);
     }
 

@@ -363,6 +363,17 @@ public sealed class MatchOrchestrator
             returnNotice += $" [Lives: {lives}]";
         BroadcastToAll(returnNotice);
 
+        // If this player specced before the countdown's GO! tick, the engine refused the
+        // Forming->Live flip at GO! -- MarkLive requires every rostered player Active, and a
+        // pre-GO spec marks them Abandoned immediately (no pre-match grace). Without a retry the
+        // engine sits in Forming until its join-timeout fires FinalizeCancellation, yanking BOTH
+        // teams to spec with no explanation even though everyone is back on their ships. Now that
+        // SetShipAndFreq has driven this player back to Active, re-attempt the transition.
+        // MarkMatchLive is idempotent: a no-op once the match is already Live, or if some other
+        // rostered player is still in spec (in which case their own ?return retries it).
+        if (Phase == MatchPhase.Live)
+            _engine.MarkMatchLive(_matchId, _clock.UtcNow);
+
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
                 $"Match {_matchId:N}: returned {key.Name} to {ship} freq {freq} " +

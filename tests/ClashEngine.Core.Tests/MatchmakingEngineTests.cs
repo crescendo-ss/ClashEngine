@@ -133,6 +133,54 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
+    public void Spec_before_GO_strands_the_match_until_the_returner_re_enables_MarkMatchLive()
+    {
+        // Regression for the "specced during countdown" stranding. A player who is placed and then
+        // specs while the match is still Forming (before the orchestrator's GO! tick) goes into
+        // grace -- but they're no longer Active, so MarkMatchLive refuses the Forming->Live flip
+        // (the roster isn't all-Active) and the engine sits in Forming until the join-timeout
+        // cancels it, dragging both teams to spec for no apparent reason. Once the specced player
+        // returns to their ship the transition must succeed, which is what
+        // MatchOrchestrator.TryReturn now retries.
+        var h = new Harness(joinTimeout: TimeSpan.FromSeconds(30));
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+        var match = h.Engine.ActiveMatches[matchId];
+
+        // Setup/Staging: everyone is placed onto their ship (Pending -> Active).
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+
+        // Countdown (still Forming): 'A' specs -> InGrace (recoverable), and GO! can't fire while
+        // a rostered player isn't Active.
+        h.Clock.Advance(TimeSpan.FromSeconds(3));
+        h.Engine.OnPlayerSpecced(K("A"), h.Clock.UtcNow);
+        Assert.Equal(PlayerStatus.InGrace, match.GetStatus(K("A")));
+        Assert.False(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
+        Assert.Equal(MatchState.Forming, match.State);
+
+        // 'A' returns to their ship (the orchestrator's ?return) before the join-timeout.
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.Engine.OnPlayerReturned(K("A"), h.Clock.UtcNow);
+        Assert.Equal(PlayerStatus.Active, match.GetStatus(K("A")));
+
+        // The retried GO! now succeeds: the match goes Live instead of stranding until the
+        // join-timeout cancels it.
+        Assert.True(h.Engine.MarkMatchLive(matchId, h.Clock.UtcNow));
+        Assert.Equal(MatchState.Live, match.State);
+        Assert.Single(h.Telemetry.Started);
+
+        // And the join-timeout, had it arrived, no longer cancels a now-Live match.
+        h.Clock.Advance(TimeSpan.FromSeconds(40));
+        h.Engine.Tick(h.Clock.UtcNow);
+        Assert.Equal(MatchState.Live, match.State);
+    }
+
+    [Fact]
     public void End_to_end_completes_match_updates_ratings_and_releases_players()
     {
         var h = new Harness(killTarget: 3);

@@ -294,30 +294,24 @@ public sealed class ActiveMatch
 
     /// <summary>
     /// Player left the arena, switched to spec, or disconnected. The server cannot reliably tell
-    /// these apart, so every departure is treated uniformly. During Live the player goes into
-    /// grace and has <see cref="GraceWindow"/> to return -- failure to return is recorded as
-    /// abandonment (subject to the candidate rule: lives remaining + at least one viable
-    /// teammate). During Forming there is no grace: leaving before the match starts is immediate
-    /// abandonment, since pre-match bailers strand their teammates waiting for the join-timeout.
+    /// these apart, so every departure is treated uniformly. A placed (Active) player who leaves --
+    /// whether the match is still Forming (pre-GO!: they were placed during Setup/Staging/Countdown)
+    /// or already Live -- goes into <see cref="PlayerStatus.InGrace"/> with <see cref="GraceWindow"/>
+    /// to return. Returning in time forgives them (see <see cref="OnPlayerReturned"/>); failing to
+    /// return lets <see cref="Tick"/> flip them to <see cref="PlayerStatus.Abandoned"/>, which the
+    /// candidate rule (lives remaining + at least one viable teammate) records as abandonment.
+    /// <para>
+    /// Granting pre-GO! departures the same grace as in-progress ones is deliberate: it lets a
+    /// player spec during the countdown and <c>?return</c> without being permanently stranded out
+    /// of the match (a no-longer-Active player blocks <see cref="MarkLive"/>) or eating an abandon
+    /// penalty for a lapse they recovered from. A pre-GO! bailer who never comes back is still
+    /// caught -- their grace expires and the join-timeout cancellation collects them all the same.
+    /// </para>
     /// </summary>
     public void OnPlayerLeft(PlayerKey player, DateTimeOffset at)
     {
         if (!_status.TryGetValue(player, out var s)) return;
-
-        if (State == MatchState.Forming)
-        {
-            if (s == PlayerStatus.Active)
-            {
-                _status[player] = PlayerStatus.Abandoned;
-                _everAbandoned.Add(player);
-                CloseParticipation(player, at);
-                if (IsAbandonmentCandidateAt(player))
-                    _candidateAbandoners.Add(player);
-            }
-            return;
-        }
-
-        if (State != MatchState.Live) return;
+        if (State != MatchState.Forming && State != MatchState.Live) return;
         if (s != PlayerStatus.Active) return;
 
         _status[player] = PlayerStatus.InGrace;
