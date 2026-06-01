@@ -77,6 +77,10 @@ internal static class QueueParser
         var (vetoWindow, vetoWindowDefaulted) = ReadVetoWindow(config, handle, p, log);
         var (promoteWinners, effectiveMaxDef, maxDefDefaulted) = ReadKoth(config, handle, p, log);
         var (afkWarn, afkCull) = ReadAfkDwell(config, handle, p, log);
+        // Default true: pin the longest waiter into every candidate set (strict FIFO fairness).
+        // Off lets the matcher pass the head over for a better-balanced subset from the pool.
+        bool alwaysChooseLongestWaiter = config.GetBool(
+            handle, ConfigConstants.Section, p + "AlwaysChooseLongestWaiter", defaultValue: true);
 
         // Preset defaults (only used when the corresponding explicit key wasn't set). Each row
         // is overridable -- explicit Queue<i><Key> always wins.
@@ -115,6 +119,7 @@ internal static class QueueParser
                 stagingDuration: gt.StagingDuration,
                 countdownDuration: gt.CountdownDuration,
                 lookAheadWindow: lookAhead.EffectiveTotal,
+                alwaysChooseLongestWaiter: alwaysChooseLongestWaiter,
                 promoteWinnersToFront: promoteWinners,
                 maxConsecutiveDefenses: effectiveMaxDef,
                 holdWindow: effectiveHold,
@@ -147,6 +152,7 @@ internal static class QueueParser
                 $"Label='{def.Label}', " +
                 $"MatchArena={(string.IsNullOrWhiteSpace(arenaName) ? "(none)" : arenaName)}, " +
                 $"LookAhead=+{lookAhead.Extra}{Note(lookAhead.Defaulted)} (pool={lookAhead.EffectiveTotal}), " +
+                $"AlwaysChooseLongestWaiter={alwaysChooseLongestWaiter}, " +
                 $"RelaxTime={effectiveRelax}{Note(relaxDefaulted)}, " +
                 $"HoldWindow={effectiveHold}{Note(holdDefaulted)}, " +
                 $"QualityCeiling={effectiveQc:F2}{Note(qcDefaulted)}, " +

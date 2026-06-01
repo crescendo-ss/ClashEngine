@@ -8,9 +8,11 @@ namespace ClashEngine.Core.Matching;
 
 /// <summary>
 /// Pure team-balancing algorithm. Given an ordered list of candidates (typically longest-waiting
-/// first), enumerates every distinct subset of size <see cref="MatchShape.TotalPlayers"/> that
-/// includes the longest waiter (index 0), enumerates partitions of each subset, scores them,
-/// and returns the highest-scoring partition.
+/// first), enumerates distinct subsets of size <see cref="MatchShape.TotalPlayers"/>, enumerates
+/// partitions of each subset, scores them, and returns the highest-scoring partition. By default
+/// every considered subset includes the longest waiter (index 0) for FIFO fairness; pass
+/// <c>requireLongestWaiter: false</c> to let the search pass the head over in favor of a
+/// better-balanced subset (see <see cref="ClashEngine.Core.Queue.QueueDefinition.AlwaysChooseLongestWaiter"/>).
 /// </summary>
 /// <remarks>
 /// Pool size at the call site is bounded by <see cref="QueueDefinition.LookAheadWindow"/>. With
@@ -25,7 +27,8 @@ public sealed class TeamBalancer
         MatchShape shape,
         IMatchQualityFunction quality,
         bool requireGroupsTogether = false,
-        IReadOnlyDictionary<GroupId, int>? fullGroupSizes = null)
+        IReadOnlyDictionary<GroupId, int>? fullGroupSizes = null,
+        bool requireLongestWaiter = true)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(shape);
@@ -43,13 +46,18 @@ public sealed class TeamBalancer
         for (int t = 0; t < shape.TeamCount; t++)
             teamRatingsBuffer.Add(new List<Rating>(shape.PlayersPerTeam));
 
-        // Pre-allocated subset buffer; index 0 is the longest waiter (always included).
+        // Subset buffer. When requireLongestWaiter is set, index 0 (the longest waiter) is pinned
+        // into every subset and we pick the other needed-1 from [1, poolSize); otherwise we pick
+        // all needed freely from [0, poolSize), letting the head be passed over for better balance.
         var subset = new int[needed];
-        subset[0] = 0;
+        int comboStart = requireLongestWaiter ? 1 : 0;
+        int comboCount = requireLongestWaiter ? needed - 1 : needed;
+        int subsetOffset = requireLongestWaiter ? 1 : 0;
+        if (requireLongestWaiter) subset[0] = 0;
 
-        foreach (var combo in CombinationsFromRange(1, poolSize, needed - 1))
+        foreach (var combo in CombinationsFromRange(comboStart, poolSize, comboCount))
         {
-            for (int i = 0; i < combo.Length; i++) subset[i + 1] = combo[i];
+            for (int i = 0; i < combo.Length; i++) subset[subsetOffset + i] = combo[i];
 
             // Per-subset MaxOrdinalSpread check.
             if (shape.MaxOrdinalSpread is double cap && SubsetSpread(pool, subset) > cap)

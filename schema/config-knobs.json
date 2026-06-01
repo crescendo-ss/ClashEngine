@@ -311,8 +311,15 @@
           "type": "int",
           "constraint": ">= 0",
           "default": 0,
-          "description": "Extra candidates above the minimum (TotalPlayers) the matcher considers for the best partition. 0 = strict FIFO. Negative -> coerced to 0. The engine's pool size is TotalPlayers + this.",
+          "description": "Extra candidates above the minimum (TotalPlayers) the matcher considers for the best partition. 0 = strict FIFO. Negative -> coerced to 0. The engine's pool size is TotalPlayers + this. The pool is the front of the queue, so players past it aren't evaluated until they move up.",
           "source": "src/ClashEngine/Config/QueueParser.cs:185 (ReadLookAhead)"
+        },
+        {
+          "key": "Queue<i>AlwaysChooseLongestWaiter",
+          "type": "bool",
+          "default": 1,
+          "description": "When 1 (default), the longest-waiting candidate (queue head) is pinned into every partition the balancer evaluates, so the head is never passed over (strict FIFO fairness). When 0, the balancer may exclude the head in favor of a better-balanced subset from the look-ahead pool -- avoids one outlier-rated head stalling the queue, at the cost of that head potentially waiting longer.",
+          "source": "src/ClashEngine/Config/QueueParser.cs (config.GetBool)"
         },
         {
           "key": "Queue<i>RelaxTime",

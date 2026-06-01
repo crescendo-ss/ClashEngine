@@ -259,13 +259,15 @@ public sealed class Matcher
         IReadOnlyList<QueueEntry> snapshot, QueueDefinition def, double minQuality,
         IReadOnlyDictionary<GroupId, int>? fullGroupSizes)
     {
-        var grouped = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: true, fullGroupSizes);
+        var grouped = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: true, fullGroupSizes,
+            requireLongestWaiter: def.AlwaysChooseLongestWaiter);
         if (grouped is not null && grouped.Quality >= minQuality) return (grouped, grouped);
 
         // The split search is strictly less constrained than the grouped one, so its best is the
         // true ceiling on achievable quality; it is null only when even unconstrained no subset
         // survives the spread/liability/party filters (then grouped is null too).
-        var split = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: false, fullGroupSizes);
+        var split = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: false, fullGroupSizes,
+            requireLongestWaiter: def.AlwaysChooseLongestWaiter);
         var bestEffort = split ?? grouped;
         if (split is not null && split.Quality >= minQuality) return (split, bestEffort);
         return (null, bestEffort);

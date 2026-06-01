@@ -969,6 +969,7 @@ function newQueue() {
     preset: "",
     matchArena: "",
     lookAhead: null,
+    alwaysChooseLongestWaiter: true,
     relaxTimeSec: null,
     holdWindowSec: null,
     qualityCeiling: null,
@@ -2012,7 +2013,7 @@ function renderQueueCard(q, index) {
       v => v === "" ? "(none)" : v)
   ));
 
-  body.appendChild(simpleField("LookAhead", "Extra candidates above the minimum the matcher considers. 0 = strict FIFO.",
+  body.appendChild(simpleField("LookAhead", "Extra candidates above the minimum the matcher considers, taken from the <strong>front</strong> of the queue. 0 = strict FIFO. Anyone past <code>TotalPlayers + LookAhead</code> isn't evaluated until they move up.",
     el("input", {
       type: "number", min: 0, step: 1,
       value: q.lookAhead === null ? "" : q.lookAhead, placeholder: "0",
@@ -2022,6 +2023,16 @@ function renderQueueCard(q, index) {
         render();
       }
     })
+  ));
+
+  body.appendChild(simpleField("AlwaysChooseLongestWaiter", "On (default): the longest-waiting player is always included in the match — strict FIFO fairness. Off: the matcher may pass them over for a better-balanced subset from the look-ahead pool (handy when one outlier-rated head stalls the queue).",
+    el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: q.alwaysChooseLongestWaiter !== false,
+        onchange: e => { q.alwaysChooseLongestWaiter = e.target.checked; render(); }
+      }),
+      "Enabled"
+    )
   ));
 
   const relaxDefaultHint = q.preset === "casual" ? "default 0:00:45 (casual)" : "default 0:02:00";
@@ -2420,6 +2431,7 @@ function emitQueue(out, q, idx) {
   if (q.preset) out.push(line(`${p}Preset`, q.preset));
   if (q.matchArena) out.push(line(`${p}MatchArena`, q.matchArena));
   if (q.lookAhead !== null) out.push(line(`${p}LookAhead`, String(q.lookAhead)));
+  if (q.alwaysChooseLongestWaiter === false) out.push(line(`${p}AlwaysChooseLongestWaiter`, "0"));
   if (q.relaxTimeSec !== null) out.push(line(`${p}RelaxTime`, formatTime(q.relaxTimeSec)));
   if (q.holdWindowSec !== null) out.push(line(`${p}HoldWindow`, formatTime(q.holdWindowSec)));
   if (q.qualityCeiling !== null) out.push(line(`${p}QualityCeiling`, formatFloat(q.qualityCeiling)));

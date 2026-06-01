@@ -466,11 +466,23 @@ public sealed class MatchmakingCommands
         {
             int more = needed - snap.Count;
             _chat.SendMessage(player, $"Need {more} more player{(more == 1 ? "" : "s")} to start.");
+            return;
         }
-        else if (_engine.TryGetQueueBlockStatus(def.UniqueId, out var status))
-        {
+
+        // Be explicit about which waiters the matcher is actually evaluating: it slices the front
+        // LookAheadWindow of the queue (= TotalPlayers + the Queue<i>LookAhead extra), so anyone
+        // past that isn't being considered yet. The player list above is in queue order, so "the
+        // first N" names them.
+        int extra = def.LookAheadWindow - needed;
+        int pool = Math.Min(snap.Count, def.LookAheadWindow);
+        _chat.SendMessage(player, pool < snap.Count
+            ? $"Only considering the first {pool} of {snap.Count} players for matchmaking (LookAhead={extra}). Raise LookAhead to widen the pool."
+            : $"Considering all {snap.Count} players for matchmaking (LookAhead={extra}).");
+        if (!def.AlwaysChooseLongestWaiter)
+            _chat.SendMessage(player, "The longest-waiting player may be passed over for a better-balanced match (AlwaysChooseLongestWaiter=0).");
+
+        if (_engine.TryGetQueueBlockStatus(def.UniqueId, out var status))
             _chat.SendMessage(player, QueueBlockMessage.Format(status, now));
-        }
     }
 
     // ---- ?rating

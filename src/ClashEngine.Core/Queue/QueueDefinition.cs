@@ -45,7 +45,8 @@ public sealed class QueueDefinition
         string? label = null,
         TimeSpan? afkDwellWarning = null,
         TimeSpan? afkDwellCull = null,
-        TimeSpan? eliminationCooldown = null)
+        TimeSpan? eliminationCooldown = null,
+        bool alwaysChooseLongestWaiter = true)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -150,6 +151,7 @@ public sealed class QueueDefinition
         AfkDwellWarning = afkDwellWarning;
         AfkDwellCull = afkDwellCull;
         EliminationCooldown = eliminationCooldown;
+        AlwaysChooseLongestWaiter = alwaysChooseLongestWaiter;
         OwnerArenaName = ownerArenaName;
 
         // BaseName is the structural part of UniqueId without the arena prefix. Used as the
@@ -385,6 +387,16 @@ public sealed class QueueDefinition
     /// >= <see cref="AfkDwellWarning"/> when both are positive.
     /// </summary>
     public TimeSpan? AfkDwellCull { get; }
+
+    /// <summary>
+    /// When <see langword="true"/> (default), the matcher pins the longest-waiting candidate (the
+    /// queue head) into every partition it evaluates, so the head is never passed over -- strict
+    /// FIFO fairness. When <see langword="false"/>, the balancer may exclude the head in favor of a
+    /// better-balanced subset drawn from the look-ahead pool; this avoids one low- or high-rated
+    /// head stalling the whole queue, at the cost of that head potentially waiting longer (quality
+    /// relaxation still applies to whoever is at the head, but no longer guarantees they are picked).
+    /// </summary>
+    public bool AlwaysChooseLongestWaiter { get; }
 
     /// <summary>Conventional team-index -> freq number (100, 200, 300, ...).</summary>
     public static short FreqOf(int teamIndex) => (short)(100 * (teamIndex + 1));
