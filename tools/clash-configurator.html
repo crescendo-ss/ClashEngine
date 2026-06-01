@@ -1175,17 +1175,25 @@ function sliderField({ value, min, max, step = 1, onChange, onCommit = null, for
 }
 
 /* ----------------- LVL visual spawn-editor modal -----------------
-   Loads a .lvl, renders it at 1024×1024 (1 css-px per tile), lets the user
-   click to place tile-center-snapped spawns. Bidirectional with the existing
-   (x,y) input list: keyed-in spawns show as markers, modal clicks update
-   gt.teamSpawns directly. Cached map persists across opens. */
+   Loads a .lvl, renders it at 1024×1024 (1 canvas-unit per tile). Two modes:
+   - "starts": left-click to place tile-snapped team start locations.
+   - "box": drag a square to set a team's respawn box; center + radius (tiles)
+     are inferred from the drawn box.
+   All coordinates are TILES (matching the post-82f7672 engine contract). The
+   editor is bidirectional with the keyed-in inputs: typed values show as
+   markers, modal edits write straight into gt.teamSpawns / gt.teamSpawnBoxes.
+   Cached map persists across opens. */
 
 let lvlModalEl = null;
 let lvlModalCanvas = null;
 let lvlModalTeamPick = null;
+let lvlModalModePick = null;
+let lvlModalInstructions = null;
 let lvlModalHover = null;
 let lvlModalFileLabel = null;
 let lvlModalActiveTeam = 0;
+let lvlModalMode = "starts";
+let lvlBoxDrag = null;
 let lvlModalGt = null;
 let lvlLastBytes = null;
 let lvlLastTiles = null;
@@ -1198,16 +1206,18 @@ function buildLvlModal() {
   fileInput.addEventListener("change", handleLvlFileChange);
 
   lvlModalFileLabel = el("span", { class: "file-label" }, "no file loaded");
+  lvlModalModePick = el("div", { class: "team-pick" });
   lvlModalTeamPick = el("div", { class: "team-pick" });
   lvlModalCanvas = el("canvas", { class: "lvl-canvas", width: 1024, height: 1024 });
   lvlModalCanvas.addEventListener("click", handleLvlCanvasClick);
   lvlModalCanvas.addEventListener("contextmenu", handleLvlCanvasContextMenu);
+  lvlModalCanvas.addEventListener("mousedown", handleLvlCanvasMouseDown);
   lvlModalCanvas.addEventListener("mousemove", handleLvlCanvasMove);
-  lvlModalCanvas.addEventListener("mouseleave", () => { lvlModalHover.textContent = ""; });
+  lvlModalCanvas.addEventListener("mouseleave", () => { if (!lvlBoxDrag) lvlModalHover.textContent = ""; });
   lvlModalHover = el("div", { class: "lvl-hover" });
 
   const header = el("div", { class: "lvl-modal-header" },
-    el("h2", {}, "Place spawns visually"),
+    el("h2", {}, "Place starts & respawn boxes visually"),
     el("button", { class: "close-x", title: "Close", onclick: closeLvlModal }, "×")
   );
 
@@ -1216,13 +1226,13 @@ function buildLvlModal() {
     fileInput,
     lvlModalFileLabel,
     el("span", { style: "flex:1" }),
-    el("span", {}, "Place for: "),
+    el("span", {}, "Mode: "),
+    lvlModalModePick,
+    el("span", {}, "Team: "),
     lvlModalTeamPick
   );
 
-  const instructions = el("p", { class: "lvl-modal-instructions" },
-    "Left-click a tile to add a spawn for the active team. Right-click near a spawn to remove it. Other teams' spawns are dimmed for reference."
-  );
+  lvlModalInstructions = el("p", { class: "lvl-modal-instructions" });
 
   const canvasWrap = el("div", { class: "lvl-canvas-wrap" }, lvlModalCanvas);
 
@@ -1237,7 +1247,7 @@ function buildLvlModal() {
     )
   );
 
-  const modal = el("div", { class: "lvl-modal" }, header, toolbar, instructions, canvasWrap, actions);
+  const modal = el("div", { class: "lvl-modal" }, header, toolbar, lvlModalInstructions, canvasWrap, actions);
   const backdrop = el("div", { class: "lvl-modal-backdrop" }, modal);
   // Click on backdrop (outside the modal card) closes.
   backdrop.addEventListener("click", e => { if (e.target === backdrop) closeLvlModal(); });
@@ -1248,14 +1258,20 @@ function buildLvlModal() {
   return backdrop;
 }
 
-function openLvlModal(gt) {
+function openLvlModal(gt, mode = "starts") {
   if (!lvlModalEl) lvlModalEl = buildLvlModal();
   lvlModalGt = gt;
+  lvlModalMode = mode;
+  lvlBoxDrag = null;
+  if (!gt.teamSpawnBoxes) gt.teamSpawnBoxes = [];
+  while (gt.teamSpawnBoxes.length < gt.teamCount) gt.teamSpawnBoxes.push(null);
   lvlModalActiveTeam = Math.min(lvlModalActiveTeam, gt.teamCount - 1);
   if (lvlModalActiveTeam < 0) lvlModalActiveTeam = 0;
   document.body.appendChild(lvlModalEl);
   lvlModalFileLabel.textContent = lvlLastName || "no file loaded";
+  rebuildModePick();
   rebuildTeamPick();
+  updateModalInstructions();
   drawLvlCanvas();
 }
 
@@ -1272,10 +1288,14 @@ function closeLvlModal() {
 function rebuildTeamPick() {
   clear(lvlModalTeamPick);
   if (!lvlModalGt) return;
+  const boxes = lvlModalGt.teamSpawnBoxes || [];
   for (let t = 0; t < lvlModalGt.teamCount; t++) {
-    const team = lvlModalGt.teamSpawns[t] || [];
-    const count = team.length;
     const isActive = t === lvlModalActiveTeam;
+    // In box mode the badge shows whether this team has a respawn box; in starts
+    // mode it shows the start-point count.
+    const tag = lvlModalMode === "box"
+      ? (boxes[t] ? "■" : "·")
+      : String((lvlModalGt.teamSpawns[t] || []).length);
     const btn = el("button", {
       class: isActive ? "active" : "",
       onclick: () => {
@@ -1285,7 +1305,7 @@ function rebuildTeamPick() {
       }
     },
       el("span", { class: "swatch", style: `background:${teamColor(t)}` }),
-      ` Team ${t + 1} · ${count}`
+      ` Team ${t + 1} · ${tag}`
     );
     lvlModalTeamPick.appendChild(btn);
   }
@@ -1306,14 +1326,28 @@ function drawLvlCanvas() {
     ctx.fillText("Choose a .lvl file to render the map.", 512, 512);
   }
   if (!lvlModalGt) return;
-  // Draw inactive teams first so the active team's markers paint on top.
+  const boxes = lvlModalGt.teamSpawnBoxes || [];
+  // Draw inactive teams first so the active team's markers paint on top. Spawns
+  // are stored in tiles, which is exactly the canvas coordinate space.
   for (let t = 0; t < lvlModalGt.teamCount; t++) {
     if (t === lvlModalActiveTeam) continue;
     const team = lvlModalGt.teamSpawns[t] || [];
-    for (const p of team) drawSpawnCross(ctx, Math.floor(p.x / 16), Math.floor(p.y / 16), teamColor(t), false);
+    for (const p of team) drawSpawnCross(ctx, p.x, p.y, teamColor(t), false);
+    drawSpawnBox(ctx, boxes[t], teamColor(t), false);
   }
   const activeTeam = lvlModalGt.teamSpawns[lvlModalActiveTeam] || [];
-  for (const p of activeTeam) drawSpawnCross(ctx, Math.floor(p.x / 16), Math.floor(p.y / 16), teamColor(lvlModalActiveTeam), true);
+  for (const p of activeTeam) drawSpawnCross(ctx, p.x, p.y, teamColor(lvlModalActiveTeam), true);
+  drawSpawnBox(ctx, boxes[lvlModalActiveTeam], teamColor(lvlModalActiveTeam), true);
+  // Live drag preview while drawing a respawn box.
+  if (lvlModalMode === "box" && lvlBoxDrag) {
+    const b = boxFromDrag(lvlBoxDrag);
+    const r = b.radius, x0 = b.x - r, y0 = b.y - r, size = Math.max(1, r * 2);
+    ctx.globalAlpha = 1.0;
+    ctx.setLineDash([8, 6]);
+    ctx.lineWidth = 2; ctx.strokeStyle = "#ffffff"; ctx.strokeRect(x0, y0, size, size);
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1; ctx.strokeStyle = teamColor(lvlModalActiveTeam); ctx.strokeRect(x0, y0, size, size);
+  }
   ctx.globalAlpha = 1.0;
 }
 
@@ -1349,14 +1383,12 @@ function eventToTile(e) {
 
 function handleLvlCanvasClick(e) {
   e.preventDefault();
-  if (!lvlModalGt) return;
+  if (!lvlModalGt || lvlModalMode !== "starts") return;
   const { tx, ty } = eventToTile(e);
   if (!lvlModalGt.teamSpawns[lvlModalActiveTeam]) lvlModalGt.teamSpawns[lvlModalActiveTeam] = [];
   const team = lvlModalGt.teamSpawns[lvlModalActiveTeam];
-  const px = tx * 16 + 8;
-  const py = ty * 16 + 8;
-  if (team.some(p => p.x === px && p.y === py)) return;
-  team.push({ x: px, y: py });
+  if (team.some(p => p.x === tx && p.y === ty)) return;
+  team.push({ x: tx, y: ty });
   drawLvlCanvas();
   rebuildTeamPick();
   render();
@@ -1365,13 +1397,18 @@ function handleLvlCanvasClick(e) {
 function handleLvlCanvasContextMenu(e) {
   e.preventDefault();
   if (!lvlModalGt) return;
+  if (lvlModalMode === "box") {
+    if (lvlModalGt.teamSpawnBoxes) lvlModalGt.teamSpawnBoxes[lvlModalActiveTeam] = null;
+    drawLvlCanvas();
+    rebuildTeamPick();
+    render();
+    return;
+  }
   const { tx, ty } = eventToTile(e);
   const team = lvlModalGt.teamSpawns[lvlModalActiveTeam] || [];
   let bestIdx = -1, bestDist = Infinity;
   for (let i = 0; i < team.length; i++) {
-    const stx = Math.floor(team[i].x / 16);
-    const sty = Math.floor(team[i].y / 16);
-    const d = Math.abs(stx - tx) + Math.abs(sty - ty);
+    const d = Math.abs(team[i].x - tx) + Math.abs(team[i].y - ty);
     if (d < bestDist) { bestDist = d; bestIdx = i; }
   }
   if (bestIdx !== -1 && bestDist <= 5) {
@@ -1383,9 +1420,9 @@ function handleLvlCanvasContextMenu(e) {
 }
 
 function handleLvlCanvasMove(e) {
-  if (!lvlModalCanvas) return;
+  if (!lvlModalCanvas || lvlBoxDrag) return;
   const { tx, ty } = eventToTile(e);
-  lvlModalHover.textContent = `tile (${tx}, ${ty}) · pixel (${tx * 16 + 8}, ${ty * 16 + 8})`;
+  lvlModalHover.textContent = `tile (${tx}, ${ty})`;
 }
 
 function handleLvlFileChange(e) {
@@ -1413,7 +1450,12 @@ function handleLvlFileChange(e) {
 
 function clearActiveTeamSpawns() {
   if (!lvlModalGt) return;
-  lvlModalGt.teamSpawns[lvlModalActiveTeam] = [];
+  if (lvlModalMode === "box") {
+    if (!lvlModalGt.teamSpawnBoxes) lvlModalGt.teamSpawnBoxes = [];
+    lvlModalGt.teamSpawnBoxes[lvlModalActiveTeam] = null;
+  } else {
+    lvlModalGt.teamSpawns[lvlModalActiveTeam] = [];
+  }
   drawLvlCanvas();
   rebuildTeamPick();
   render();
@@ -1421,10 +1463,111 @@ function clearActiveTeamSpawns() {
 
 function clearAllTeamSpawns() {
   if (!lvlModalGt) return;
-  for (let t = 0; t < lvlModalGt.teamCount; t++) lvlModalGt.teamSpawns[t] = [];
+  if (lvlModalMode === "box") {
+    lvlModalGt.teamSpawnBoxes = [];
+    for (let t = 0; t < lvlModalGt.teamCount; t++) lvlModalGt.teamSpawnBoxes.push(null);
+  } else {
+    for (let t = 0; t < lvlModalGt.teamCount; t++) lvlModalGt.teamSpawns[t] = [];
+  }
   drawLvlCanvas();
   rebuildTeamPick();
   render();
+}
+
+/* ----------------- Respawn-box draw mode -----------------
+   Drag a square on the rendered map to define a team's respawn box. The native
+   [Spawn] region is square (a single radius drives both axes), so the drag is
+   snapped to a square and the center + radius are inferred in tile units. */
+
+function rebuildModePick() {
+  if (!lvlModalModePick) return;
+  clear(lvlModalModePick);
+  const modes = [["starts", "✛ Place starts"], ["box", "▭ Draw box"]];
+  for (const [m, label] of modes) {
+    lvlModalModePick.appendChild(el("button", {
+      class: lvlModalMode === m ? "active" : "",
+      onclick: () => {
+        if (lvlModalMode === m) return;
+        lvlModalMode = m;
+        lvlBoxDrag = null;
+        rebuildModePick();
+        rebuildTeamPick();
+        updateModalInstructions();
+        drawLvlCanvas();
+      }
+    }, label));
+  }
+}
+
+function updateModalInstructions() {
+  if (!lvlModalInstructions) return;
+  lvlModalInstructions.textContent = lvlModalMode === "box"
+    ? "Drag to draw a respawn box for the active team — it snaps to a square, and the center & radius (tiles) are filled in automatically. Right-click clears the active team's box."
+    : "Left-click a tile to add a start for the active team. Right-click near a start to remove it. Other teams are dimmed for reference.";
+}
+
+// Square-snap a drag (start corner → current) into an integer-tile {x,y,radius}
+// box. Locks to the larger drag dimension, then derives the center and half-side.
+// Radius caps at the native 9-bit client max (511 tiles); center is clamped on-map.
+function boxFromDrag(d) {
+  const dx = d.cx - d.sx, dy = d.cy - d.sy;
+  const side = Math.max(Math.abs(dx), Math.abs(dy));
+  const ex = d.sx + Math.sign(dx || 1) * side;
+  const ey = d.sy + Math.sign(dy || 1) * side;
+  const x = clampTile(Math.round((d.sx + ex) / 2));
+  const y = clampTile(Math.round((d.sy + ey) / 2));
+  const radius = Math.min(511, Math.round(side / 2));
+  return { x, y, radius };
+}
+
+function handleLvlCanvasMouseDown(e) {
+  if (lvlModalMode !== "box" || !lvlModalGt || e.button !== 0) return;
+  e.preventDefault();
+  const { tx, ty } = eventToTile(e);
+  lvlBoxDrag = { sx: tx, sy: ty, cx: tx, cy: ty };
+  // Track on window so a release outside the canvas still commits the box.
+  window.addEventListener("mousemove", handleBoxDragMove);
+  window.addEventListener("mouseup", handleBoxDragUp);
+  drawLvlCanvas();
+}
+
+function handleBoxDragMove(e) {
+  if (!lvlBoxDrag) return;
+  const { tx, ty } = eventToTile(e);
+  lvlBoxDrag.cx = tx;
+  lvlBoxDrag.cy = ty;
+  const b = boxFromDrag(lvlBoxDrag);
+  lvlModalHover.textContent = `box: center (${b.x}, ${b.y}) · radius ${b.radius}`;
+  drawLvlCanvas();
+}
+
+function handleBoxDragUp() {
+  window.removeEventListener("mousemove", handleBoxDragMove);
+  window.removeEventListener("mouseup", handleBoxDragUp);
+  if (!lvlBoxDrag || !lvlModalGt) { lvlBoxDrag = null; return; }
+  const b = boxFromDrag(lvlBoxDrag);
+  lvlBoxDrag = null;
+  if (!lvlModalGt.teamSpawnBoxes) lvlModalGt.teamSpawnBoxes = [];
+  lvlModalGt.teamSpawnBoxes[lvlModalActiveTeam] = b;
+  drawLvlCanvas();
+  rebuildTeamPick();
+  render();
+}
+
+function drawSpawnBox(ctx, box, color, isActive) {
+  if (!box) return;
+  const r = box.radius;
+  const x0 = box.x - r, y0 = box.y - r;
+  const size = Math.max(1, r * 2);
+  ctx.globalAlpha = isActive ? 0.95 : 0.4;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = isActive ? 2 : 1;
+  ctx.strokeRect(x0, y0, size, size);
+  // Center dot so a zero/small-radius box is still visible.
+  ctx.globalAlpha = 1.0;
+  ctx.fillStyle = color;
+  ctx.fillRect(box.x - 1, box.y - 1, 3, 3);
+  ctx.globalAlpha = 1.0;
 }
 
 /* ----------------- Plug-in tuning bindings ----------------- */
@@ -1618,10 +1761,10 @@ function renderGameTypeCard(gt, index) {
   if (gt.warpOnSpawn) {
     const loadLvlBtn = el("button", {
       class: "load-lvl-btn",
-      onclick: () => openLvlModal(gt)
+      onclick: () => openLvlModal(gt, "starts")
     }, "🗺  Load .lvl to place visually…");
     spawnGroup.appendChild(simpleField("Visual editor",
-      "Optional: load the arena's <code>.lvl</code> to click spawn points on the rendered map. Equivalent to typing (x,y) below.",
+      "Optional: load the arena's <code>.lvl</code> to click start points on the rendered map. Coordinates are tiles; equivalent to typing (x,y) below.",
       loadLvlBtn));
     for (let t = 0; t < gt.teamCount; t++) {
       spawnGroup.appendChild(spawnTeamRow(gt, t));
@@ -1635,9 +1778,12 @@ function renderGameTypeCard(gt, index) {
     ));
   }
   // Respawn boxes: per-team client-settings [Spawn] override. Self-gating (independent of the
-  // start-location warp). Center is pixels (like starts); radius is tiles (0-511).
+  // start-location warp). Center is tiles (like starts); radius is tiles (0-511).
   if (!gt.teamSpawnBoxes) gt.teamSpawnBoxes = [];
   while (gt.teamSpawnBoxes.length < gt.teamCount) gt.teamSpawnBoxes.push(null);
+  spawnGroup.appendChild(simpleField("Visual editor",
+    "Optional: load the arena's <code>.lvl</code> and drag a square to set a team's respawn box — center &amp; radius (tiles) are inferred from the drawn box. Equivalent to typing center/radius below.",
+    el("button", { class: "load-lvl-btn", onclick: () => openLvlModal(gt, "box") }, "🗺  Draw respawn boxes on the map…")));
   for (let t = 0; t < gt.teamCount; t++) {
     const box = gt.teamSpawnBoxes[t];
     const control = el("div");
@@ -1655,13 +1801,13 @@ function renderGameTypeCard(gt, index) {
     if (box) {
       control.appendChild(el("div", { class: "spawn-pair" },
         el("input", {
-          type: "number", min: -32768, max: 32767, step: 1, value: box.x,
-          oninput: e => { box.x = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+          type: "number", min: 0, max: 1023, step: 1, value: box.x,
+          oninput: e => { box.x = clampTile(parseInt(e.target.value, 10) || 0); render(); }
         }),
         el("span", { class: "sep" }, ","),
         el("input", {
-          type: "number", min: -32768, max: 32767, step: 1, value: box.y,
-          oninput: e => { box.y = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+          type: "number", min: 0, max: 1023, step: 1, value: box.y,
+          oninput: e => { box.y = clampTile(parseInt(e.target.value, 10) || 0); render(); }
         }),
         el("span", { class: "sep" }, "radius"),
         el("input", {
@@ -1671,7 +1817,7 @@ function renderGameTypeCard(gt, index) {
       ));
     }
     spawnGroup.appendChild(simpleField(`Team ${t + 1} respawn box`,
-      t === 0 ? "Overrides this team's <code>[Spawn]</code> client settings so the client respawns players inside the box after a death. Center in pixels, radius in tiles (0–511)." : "",
+      t === 0 ? "Overrides this team's <code>[Spawn]</code> client settings so the client respawns players inside the box after a death. Center in tiles, radius in tiles (0–511)." : "",
       control));
   }
 
@@ -1772,13 +1918,13 @@ function spawnPairRow(gt, t, i) {
   const p = team[i];
   return el("div", { class: "spawn-pair" },
     el("input", {
-      type: "number", min: -32768, max: 32767, step: 1, value: p.x,
-      oninput: e => { p.x = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+      type: "number", min: 0, max: 1023, step: 1, value: p.x,
+      oninput: e => { p.x = clampTile(parseInt(e.target.value, 10) || 0); render(); }
     }),
     el("span", { class: "sep" }, ","),
     el("input", {
-      type: "number", min: -32768, max: 32767, step: 1, value: p.y,
-      oninput: e => { p.y = clampInt16(parseInt(e.target.value, 10) || 0); render(); }
+      type: "number", min: 0, max: 1023, step: 1, value: p.y,
+      oninput: e => { p.y = clampTile(parseInt(e.target.value, 10) || 0); render(); }
     }),
     el("button", {
       class: "danger", style: "margin-left:4px;",
@@ -1791,7 +1937,8 @@ function spawnPairRow(gt, t, i) {
   );
 }
 
-function clampInt16(v) { return Math.max(-32768, Math.min(32767, v)); }
+// Coordinates are tiles on a 1024×1024 map, so valid values are 0..1023.
+function clampTile(v) { return Math.max(0, Math.min(1023, v)); }
 
 /* ----------------- Queue card ----------------- */
 
