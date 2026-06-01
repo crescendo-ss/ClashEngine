@@ -230,6 +230,15 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         }
     }
 
+    public void OnQueueMatchmakingBlocked(string queueName, QueueBlockStatus status, DateTimeOffset at)
+    {
+        // Verbose-only diagnostic: explain why a full-enough queue isn't starting. Fired on change
+        // (see the matcher), so this is one line per transition, not per tick. No chat -- the same
+        // explanation is available on demand via ?queue.
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"QueueMatchmakingBlocked: {queueName} -- {QueueBlockMessage.Format(status, at)}");
+    }
+
     public void OnQueueHoldStarted(string queueName, IReadOnlyList<PlayerKey> candidates, double currentQuality, TimeSpan holdWindow)
     {
         if (_verbose.IsDebug)

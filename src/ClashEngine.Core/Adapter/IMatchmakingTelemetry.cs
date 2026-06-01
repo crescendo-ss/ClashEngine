@@ -110,6 +110,16 @@ public interface IMatchmakingTelemetry
     /// </summary>
     void OnQueueHoldImproved(string queueName, IReadOnlyList<PlayerKey> candidates, double oldQuality, double newQuality) { }
 
+    /// <summary>
+    /// A queue has enough waiters to form a match (<see cref="Matching.MatchShape.TotalPlayers"/> or
+    /// more) but the matcher did not produce one this tick. <paramref name="status"/> says why
+    /// (imbalance below threshold, no viable teams, or intentionally holding for better arrivals).
+    /// Fired on <em>change</em> only -- when a queue first becomes blocked, when its reason changes,
+    /// or when the best achievable quality shifts notably -- not every tick, so the Verbose log
+    /// stays readable. The same status is cached and pulled live by <c>?queue</c>.
+    /// </summary>
+    void OnQueueMatchmakingBlocked(string queueName, QueueBlockStatus status, DateTimeOffset at) { }
+
     /// <summary>A new group invitation was just accepted by the registry. Fired only on the
     /// successful (<see cref="Groups.InviteResult.Sent"/>) path; the adapter typically translates
     /// this into a DM to <paramref name="invitee"/> so they know to <c>?accept</c>.</summary>

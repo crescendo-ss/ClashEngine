@@ -453,7 +453,23 @@ public sealed class MatchmakingCommands
         {
             var entry = snap[i];
             var wait = now - entry.EnqueuedAt;
-            _chat.SendMessage(player, $"  {entry.Player.Name} ({Format(wait)})");
+            // Rating is the ordinal snapshot taken at enqueue (what the matcher balances on),
+            // scaled x10 to match the ?rating display convention.
+            int rating = (int)Math.Round(entry.Rating.Ordinal * 10.0, MidpointRounding.AwayFromZero);
+            _chat.SendMessage(player, $"  {entry.Player.Name} (rating {rating}, {Format(wait)})");
+        }
+
+        // Explain why a full-enough queue hasn't started yet: either it's short of players, or the
+        // matcher cached a reason this tick (imbalance, no viable teams, or holding for arrivals).
+        int needed = def.Shape.TotalPlayers;
+        if (snap.Count < needed)
+        {
+            int more = needed - snap.Count;
+            _chat.SendMessage(player, $"Need {more} more player{(more == 1 ? "" : "s")} to start.");
+        }
+        else if (_engine.TryGetQueueBlockStatus(def.UniqueId, out var status))
+        {
+            _chat.SendMessage(player, QueueBlockMessage.Format(status, now));
         }
     }
 

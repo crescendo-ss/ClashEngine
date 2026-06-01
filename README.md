@@ -377,7 +377,7 @@ v1 emits:
 | Command | Group | Notes |
 |---|---|---|
 | `?play <queue name>` | player | Queue for the next match. Multiple space-separated tokens are joined with `_` before lookup (so `?play casual 4v4` looks up `casual_4v4`). Without a name, falls back to the arena's `DefaultQueue`. |
-| `?queue [name]` | player | List queues defined for the current arena, or show who's queued and how long they've been waiting in `<name>`. Same multi-word lookup as `?play`. |
+| `?queue [name]` | player | List queues defined for the current arena, or show who's queued and how long they've been waiting in `<name>`. Same multi-word lookup as `?play`. When a queue has enough players but no match has started, the reply explains why: too few players (how many more are needed), teams too imbalanced to meet the quality threshold (with the best achievable quality), no viable team assignment, or matchmaking succeeded and is holding for better arrivals (with the remaining seconds). The same explanation is logged at `Verbose` whenever the reason changes. |
 | `?cancel` | player | Leave every queue you're in. |
 | `?return` | player | Rejoin the match you were specced from. Bypasses the per-match freq lock by placing you directly on your assigned ship and team freq. |
 | `?party` / `?party <p1>[,<p2>,...]` | player | List your current party's members, or invite one or more players to your party. |

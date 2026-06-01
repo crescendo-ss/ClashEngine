@@ -97,6 +97,14 @@ public sealed class MatchmakingEngine
 
     public QueueRegistry Queues => _queues;
     public GameTypeRegistry GameTypes => _gameTypes;
+
+    /// <summary>
+    /// Why a full-enough queue (<paramref name="queueUniqueId"/>) has not been turned into a match,
+    /// for the <c>?queue</c> diagnostic line. Returns <see langword="false"/> when the queue is
+    /// under-filled, just popped a match, or is unknown -- i.e. there is nothing to explain.
+    /// </summary>
+    public bool TryGetQueueBlockStatus(string queueUniqueId, out Matching.QueueBlockStatus status) =>
+        _matcher.TryGetBlockStatus(queueUniqueId, out status);
     public PenaltyTracker Penalties => _penalties;
     public GroupRegistry Groups => _groups;
     public IReadOnlyDictionary<(Guid MatchId, PlayerKey Target), PendingGriefingPenalty> PendingGriefingPenalties => _pendingGriefs;
