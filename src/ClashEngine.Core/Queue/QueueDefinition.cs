@@ -226,7 +226,7 @@ public sealed class QueueDefinition
     public string? MatchArenaName { get; }
 
     /// <summary>
-    /// Per-team set of candidate match <b>starting</b> locations (pixels). At setup the
+    /// Per-team set of candidate match <b>starting</b> locations (tiles). At setup the
     /// orchestrator picks one entry from each team's list at random and server-side warps every
     /// player on that team to the chosen point (a one-time teleport). <see langword="null"/> means
     /// no start override (players are placed wherever the arena's default spawn puts them). This is
@@ -252,7 +252,7 @@ public sealed class QueueDefinition
     public bool UseStartLocation { get; }
 
     /// <summary>
-    /// Per-team in-match <b>respawn</b> box (center in pixels, radius in tiles). When a team's
+    /// Per-team in-match <b>respawn</b> box (center in tiles, radius in tiles). When a team's
     /// entry is non-null, the orchestrator overrides each of that team's players' native
     /// Continuum <c>[Spawn]</c> client settings via <c>IClientSettings</c> so the client respawns
     /// them inside the box after every death (a port of SS's

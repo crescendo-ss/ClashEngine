@@ -297,7 +297,7 @@
           "values": ["casual"],
           "default": null,
           "description": "Opt-in lenient bundle: qStart/qFloor 0.4/0.10 (vs 0.6/0.30), no MaxLiabilityGap cap, RelaxTime 45s, RatingWeight 0.5, griefing teamkill threshold 3 (vs 2). Each knob is still individually overridable. Unrecognized -> ignored (standard defaults apply).",
-          "source": "src/ClashEngine/Config/QueueParser.cs:169 (ReadPreset)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:176 (ReadPreset)"
         },
         {
           "key": "Queue<i>MatchArena",
@@ -312,14 +312,14 @@
           "constraint": ">= 0",
           "default": 0,
           "description": "Extra candidates above the minimum (TotalPlayers) the matcher considers for the best partition. 0 = strict FIFO. Negative -> coerced to 0. The engine's pool size is TotalPlayers + this. The pool is the front of the queue, so players past it aren't evaluated until they move up.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:185 (ReadLookAhead)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:192 (ReadLookAhead)"
         },
         {
           "key": "Queue<i>AlwaysChooseLongestWaiter",
           "type": "bool",
           "default": 1,
           "description": "When 1 (default), the longest-waiting candidate (queue head) is pinned into every partition the balancer evaluates, so the head is never passed over (strict FIFO fairness). When 0, the balancer may exclude the head in favor of a better-balanced subset from the look-ahead pool -- avoids one outlier-rated head stalling the queue, at the cost of that head potentially waiting longer.",
-          "source": "src/ClashEngine/Config/QueueParser.cs (config.GetBool)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:82 (config.GetBool)"
         },
         {
           "key": "Queue<i>RelaxTime",
@@ -327,7 +327,7 @@
           "constraint": "> 0",
           "default": "120s standard / 45s with Preset=casual",
           "description": "How fast the quality threshold decays from qStart to qFloor. Longer = stricter early; shorter = accepts weaker matches sooner. <= 0 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:199 (ReadRelaxTime)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:206 (ReadRelaxTime)"
         },
         {
           "key": "Queue<i>HoldWindow",
@@ -335,7 +335,7 @@
           "constraint": ">= 0",
           "default": "10s",
           "description": "Once a viable partition is found, how long the matcher waits for a better one. 0 pops immediately. Negative -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:210 (ReadHoldWindow)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:217 (ReadHoldWindow)"
         },
         {
           "key": "Queue<i>QualityCeiling",
@@ -343,7 +343,7 @@
           "constraint": "[0, 1]",
           "default": 0.9,
           "description": "If a held candidate's quality reaches this, pop without waiting out the hold window. Out of range -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:221 (ReadQualityCeiling)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:228 (ReadQualityCeiling)"
         },
         {
           "key": "Queue<i>VetoesRequired",
@@ -351,7 +351,7 @@
           "constraint": ">= 1",
           "default": 2,
           "description": "Distinct match participants who must ?forgive a pending griefing penalty within VetoWindow to rescind it. Below 1 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:232 (ReadVetoesRequired)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:239 (ReadVetoesRequired)"
         },
         {
           "key": "Queue<i>VetoWindow",
@@ -359,14 +359,14 @@
           "constraint": "> 0",
           "default": "60s (engine default)",
           "description": "Open period for vetos after a griefing flag fires; the penalty becomes final at the end if the threshold wasn't reached. <= 0 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:243 (ReadVetoWindow)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:250 (ReadVetoWindow)"
         },
         {
           "key": "Queue<i>PromoteWinners",
           "type": "bool",
           "default": 0,
           "description": "KOTH mode: the winning team auto-re-enqueues at the head of this queue after a Completed match.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:257 (ReadKoth)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:264 (ReadKoth)"
         },
         {
           "key": "Queue<i>MaxConsecutiveDefenses",
@@ -374,21 +374,21 @@
           "constraint": ">= 1",
           "default": 3,
           "description": "Max consecutive wins a champion can defend before going to the back of the queue. Only meaningful with PromoteWinners=1. Below 1 -> dropped to default.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:257 (ReadKoth)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:264 (ReadKoth)"
         },
         {
           "key": "Queue<i>AfkWarn",
           "type": "duration",
           "default": 900,
           "description": "In-queue dwell time (seconds or HH:MM:SS) before a one-time 'still there?' AFK warning fires (queue.dwell_warning event + in-game DM). 0 disables both the warning AND the cull for this queue. Re-queuing resets the timer.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:280 (ReadAfkDwell)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:287 (ReadAfkDwell)"
         },
         {
           "key": "Queue<i>AfkCull",
           "type": "duration",
           "default": 1200,
           "description": "In-queue dwell time (seconds or HH:MM:SS) before the player is auto-dequeued (queue.left reason=afk_cull). 0 keeps the warning but never culls. A value below AfkWarn is raised to AfkWarn.",
-          "source": "src/ClashEngine/Config/QueueParser.cs:280 (ReadAfkDwell)"
+          "source": "src/ClashEngine/Config/QueueParser.cs:287 (ReadAfkDwell)"
         }
       ]
     },

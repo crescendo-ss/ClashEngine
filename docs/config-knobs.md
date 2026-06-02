@@ -51,9 +51,9 @@ Read **only** from `global.conf`. Flat keys, not indexed.
 | `GameType<i>TimeLimit` | duration | unset | |
 | `GameType<i>Lives` | int ≥ 0 | `0` | 0 = unlimited |
 | `GameType<i>UseStartLocation` | 0/1 | `0` | gate for the start-location keys below |
-| `GameType<i>Team<t>Starts` | `x,y; x,y; …` | unset | **double-indexed**: `t` = `1 … TeamCount` (pixels) |
+| `GameType<i>Team<t>Starts` | `x,y; x,y; …` | unset | **double-indexed**: `t` = `1 … TeamCount` (tiles) |
 | `GameType<i>MaxStartDrift` | int ≥ 0 (tiles) | unset | |
-| `GameType<i>Team<t>SpawnCenter` | `x,y` | unset | **double-indexed** respawn box center (pixels); self-gating |
+| `GameType<i>Team<t>SpawnCenter` | `x,y` | unset | **double-indexed** respawn box center (tiles); self-gating |
 | `GameType<i>Team<t>SpawnRadius` | int 0–511 (tiles) | `0` | per-team respawn box radius |
 | `GameType<i>StagingDuration` | duration > 0 | 10s | |
 | `GameType<i>CountdownDuration` | duration > 0 (min 5s) | 10s | |
@@ -72,7 +72,8 @@ Read **only** from `global.conf`. Flat keys, not indexed.
 | `Queue<i>Label` | string | = Name | |
 | `Queue<i>Preset` | enum: `casual` | unset | shifts several defaults below |
 | `Queue<i>MatchArena` | string | unset | |
-| `Queue<i>LookAhead` | int ≥ 0 | `0` | |
+| `Queue<i>LookAhead` | int ≥ 0 | `0` | extra candidates above `TotalPlayers`, from the front of the queue |
+| `Queue<i>AlwaysChooseLongestWaiter` | 0/1 | `1` | off lets the matcher pass the queue head over for better balance |
 | `Queue<i>RelaxTime` | duration > 0 | 120s (45s casual) | |
 | `Queue<i>HoldWindow` | duration ≥ 0 | 10s | |
 | `Queue<i>QualityCeiling` | float 0–1 | `0.9` | |
@@ -98,4 +99,4 @@ Read **only** from `global.conf`. Flat keys, not indexed.
    patterns:
    - `^GameType\d+(Name|Label|Description|TeamCount|PlayersPerTeam|KillTarget|TimeLimit|Lives|UseStartLocation|MaxStartDrift|StagingDuration|CountdownDuration|KnockoutSpecDelay|EliminationCooldown|TeamCollapseGrace|ShipChangeGracePeriod|ReturnItemsAction)$`
    - `^GameType\d+Team\d+(Starts|SpawnCenter|SpawnRadius)$`
-   - `^Queue\d+(Name|GameType|Label|Preset|MatchArena|LookAhead|RelaxTime|HoldWindow|QualityCeiling|VetoesRequired|VetoWindow|PromoteWinners|MaxConsecutiveDefenses|AfkWarn|AfkCull)$`
+   - `^Queue\d+(Name|GameType|Label|Preset|MatchArena|LookAhead|AlwaysChooseLongestWaiter|RelaxTime|HoldWindow|QualityCeiling|VetoesRequired|VetoWindow|PromoteWinners|MaxConsecutiveDefenses|AfkWarn|AfkCull)$`
