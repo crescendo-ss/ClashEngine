@@ -83,6 +83,7 @@ public sealed class MatchRecorder
         PlayerActionCallback.Register(_broker, Callback_PlayerAction);
         ShipFreqChangeCallback.Register(_broker, Callback_ShipFreqChange);
         KillCallback.Register(_broker, Callback_Kill);
+        BricksPlacedCallback.Register(_broker, Callback_BricksPlaced);
         ChatMessageCallback.Register(_broker, Callback_ChatMessage);
         CrownToggledCallback.Register(_broker, Callback_CrownToggled);
         AttachCallback.Register(_broker, Callback_Attach);
@@ -100,6 +101,7 @@ public sealed class MatchRecorder
         PlayerActionCallback.Unregister(_broker, Callback_PlayerAction);
         ShipFreqChangeCallback.Unregister(_broker, Callback_ShipFreqChange);
         KillCallback.Unregister(_broker, Callback_Kill);
+        BricksPlacedCallback.Unregister(_broker, Callback_BricksPlaced);
         ChatMessageCallback.Unregister(_broker, Callback_ChatMessage);
         CrownToggledCallback.Unregister(_broker, Callback_CrownToggled);
         AttachCallback.Unregister(_broker, Callback_Attach);
@@ -238,6 +240,34 @@ public sealed class MatchRecorder
             if (!session.ContainsPlayerInternal(killer) || !session.ContainsPlayerInternal(killed)) continue;
             if (session.RecorderQueue.IsAddingCompleted) continue;
             ReplayEventEncoder.EncodeKill(session, killer, killed, points, flagCount);
+        }
+    }
+
+    private void Callback_BricksPlaced(Arena arena, Player? player, IReadOnlyList<BrickData> bricks)
+    {
+        Debug.Assert(_mainloop.IsMainloop);
+
+        // Only record bricks placed by a player tracked in a session. A brick belongs to the
+        // match its placer is in, so this keeps a per-match recording scoped to its own
+        // participants (same rule the other player-driven callbacks follow). Non-player bricks
+        // (player is null) have no session to attribute to and are skipped -- attributing them
+        // to every session would leak across concurrent matches sharing the arena.
+        if (arena is null || player is null) return;
+        if (!_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            Session session = list[i];
+            if (!session.ContainsPlayerInternal(player)) continue;
+            if (session.RecorderQueue.IsAddingCompleted) continue;
+
+            // The callback can carry several bricks at once; the format's Brick event holds one,
+            // so fan out (index, not enumerator, to avoid boxing the IReadOnlyList).
+            for (int b = 0; b < bricks.Count; b++)
+            {
+                BrickData brickData = bricks[b];
+                ReplayEventEncoder.EncodeBrick(session, in brickData);
+            }
         }
     }
 
@@ -507,6 +537,14 @@ public sealed class MatchRecorder
                         ref Enter enter = ref MemoryMarshal.AsRef<Enter>(eventBytes);
                         if (enter.PlayerId > maxPlayerId)
                             maxPlayerId = enter.PlayerId;
+                    }
+                    else if (eventHeader.Type == EventType.Brick)
+                    {
+                        // The brick carries its own StartTime (absolute server ticks); normalize it
+                        // to the recording start like the position-packet times above, so the replay
+                        // module's playback re-base (started + StartTime) lands at the right tick.
+                        ref Brick brick = ref MemoryMarshal.AsRef<Brick>(eventBytes);
+                        brick.BrickData.StartTime = (ServerTick)(brick.BrickData.StartTime - started);
                     }
 
                     gzStream.Write(eventBytes);

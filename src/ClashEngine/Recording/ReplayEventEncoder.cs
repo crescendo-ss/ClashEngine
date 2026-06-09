@@ -92,6 +92,19 @@ internal static class ReplayEventEncoder
         session.RecorderQueue.Add(new MatchRecorder.RecordBuffer(buffer, totalLength));
     }
 
+    /// <summary>
+    /// Encode a single placed brick. The Afluxion format's <see cref="Brick"/> event carries one
+    /// <see cref="BrickData"/>; callers fanning out a multi-brick placement call this once per
+    /// brick. On playback the replay module re-drops the brick via its <c>IBrickManager</c>.
+    /// </summary>
+    public static void EncodeBrick(MatchRecorder.Session session, ref readonly BrickData brickData)
+    {
+        byte[] buffer = Pool.Rent(Brick.Length);
+        ref Brick brick = ref MemoryMarshal.AsRef<Brick>(buffer.AsSpan(0, Brick.Length));
+        brick = new(ServerTick.Now, in brickData);
+        session.RecorderQueue.Add(new MatchRecorder.RecordBuffer(buffer, Brick.Length));
+    }
+
     public static void EncodeCrownToggle(MatchRecorder.Session session, Player player, bool on)
     {
         byte[] buffer = Pool.Rent(CrownToggle.Length);
