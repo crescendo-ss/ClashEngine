@@ -59,7 +59,9 @@ public sealed class QueueRegistry
         TimeSpan? afkDwellWarning = null,
         TimeSpan? afkDwellCull = null,
         TimeSpan? eliminationCooldown = null,
-        bool alwaysChooseLongestWaiter = true)
+        bool alwaysChooseLongestWaiter = true,
+        SpawnArea? presenceZone = null,
+        TimeSpan? presenceZoneTimeout = null)
     {
         if (_byName.ContainsKey(name))
             throw new ArgumentException($"Queue '{name}' already registered.", nameof(name));
@@ -74,7 +76,8 @@ public sealed class QueueRegistry
             holdWindow, qualityCeiling, knockoutSpecDelay,
             livesPerPlayer, teamCollapseGrace, shipChangeGracePeriod,
             timeLimit, returnItemsAction, ownerArenaName, label,
-            afkDwellWarning, afkDwellCull, eliminationCooldown, alwaysChooseLongestWaiter);
+            afkDwellWarning, afkDwellCull, eliminationCooldown, alwaysChooseLongestWaiter,
+            presenceZone: presenceZone, presenceZoneTimeout: presenceZoneTimeout);
         _byName[name] = def;
         return def;
     }

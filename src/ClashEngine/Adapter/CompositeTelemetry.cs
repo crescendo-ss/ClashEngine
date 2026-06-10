@@ -93,6 +93,14 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnTeamRecovered(m, teamIdx);
     }
+    public void OnZoneVacated(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
+    {
+        foreach (var l in _listeners) l.OnZoneVacated(m, teamIdx, since, forfeitAt);
+    }
+    public void OnZoneReclaimed(ActiveMatch m, int teamIdx)
+    {
+        foreach (var l in _listeners) l.OnZoneReclaimed(m, teamIdx);
+    }
     public void OnGriefingFlagged(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil)
     {
         foreach (var l in _listeners) l.OnGriefingFlagged(pending, timeoutUntil);

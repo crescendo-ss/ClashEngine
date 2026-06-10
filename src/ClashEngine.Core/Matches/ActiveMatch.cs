@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ClashEngine.Core.Identity;
+using ClashEngine.Core.Queue;
 
 namespace ClashEngine.Core.Matches;
 
@@ -36,6 +37,23 @@ public sealed class ActiveMatch
     private readonly int[] _killsByTeam;
     private readonly IMatchEndPolicy _endPolicy;
 
+    /// <summary>Per-team wall-clock of the last position sample seen inside the presence zone
+    /// from an Active, non-knocked-out member. Seeded to the GO! time by <see cref="MarkLive"/>
+    /// (every team starts "present" and must enter the zone within the timeout). Null when the
+    /// match has no presence zone.</summary>
+    private readonly DateTimeOffset[]? _zoneLastPresence;
+
+    /// <summary>Teams currently flagged zone-vacant (absent past the detection threshold but not
+    /// yet past <see cref="PresenceZoneTimeout"/>), keyed to the moment they were last present.
+    /// Maintained by <see cref="Tick"/>; cleared by an inside sample. The engine diffs this across
+    /// ticks to emit vacated/reclaimed telemetry, mirroring <see cref="TeamCollapsedSince"/>.</summary>
+    private readonly Dictionary<int, DateTimeOffset> _zoneVacantSince = new();
+
+    /// <summary>How long a team must be sample-absent from the zone before it's flagged vacant
+    /// (and the warning telemetry fires). Comfortably above the client position-packet cadence so
+    /// ordinary packet gaps from a stationary-but-present team don't flap the warning.</summary>
+    private static readonly TimeSpan ZoneVacancyDetection = TimeSpan.FromSeconds(2);
+
     public ActiveMatch(
         Guid matchId,
         string gameType,
@@ -46,7 +64,9 @@ public sealed class ActiveMatch
         DateTimeOffset proposedAt,
         int? livesPerPlayer = null,
         TimeSpan? teamCollapseGrace = null,
-        TimeSpan? eliminationCooldown = null)
+        TimeSpan? eliminationCooldown = null,
+        SpawnArea? presenceZone = null,
+        TimeSpan? presenceZoneTimeout = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(gameType);
         ArgumentNullException.ThrowIfNull(teams);
@@ -63,6 +83,10 @@ public sealed class ActiveMatch
             throw new ArgumentOutOfRangeException(nameof(teamCollapseGrace), "Must be non-negative.");
         if (eliminationCooldown is { } ecd && ecd < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(eliminationCooldown), "Must be non-negative.");
+        if (presenceZone is { } pz && pz.RadiusTiles < 1)
+            throw new ArgumentOutOfRangeException(nameof(presenceZone), "RadiusTiles must be >= 1.");
+        if (presenceZoneTimeout is { } pzt && pzt <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(presenceZoneTimeout), "Must be positive.");
 
         MatchId = matchId;
         GameType = gameType;
@@ -74,8 +98,11 @@ public sealed class ActiveMatch
         LivesPerPlayer = livesPerPlayer;
         TeamCollapseGrace = teamCollapseGrace ?? TimeSpan.FromSeconds(10);
         EliminationCooldown = eliminationCooldown;
+        PresenceZone = presenceZone;
+        PresenceZoneTimeout = presenceZoneTimeout ?? TimeSpan.FromSeconds(30);
         State = MatchState.Forming;
         _killsByTeam = new int[teams.Count];
+        _zoneLastPresence = presenceZone is null ? null : new DateTimeOffset[teams.Count];
 
         for (int t = 0; t < teams.Count; t++)
         {
@@ -135,6 +162,23 @@ public sealed class ActiveMatch
     /// </summary>
     public TimeSpan? EliminationCooldown { get; }
 
+    /// <summary>
+    /// The game type's "stay in the zone" box (tiles), or <see langword="null"/> when this match
+    /// has no zone-presence rule. While Live, every team must keep at least one Active,
+    /// non-knocked-out player inside this box: a team sample-absent for
+    /// <see cref="PresenceZoneTimeout"/> forfeits (ranked last,
+    /// <see cref="MatchOutcomeReason.ZoneForfeit"/>). Presence is fed by the host adapter via
+    /// <see cref="OnPositionSample"/>.
+    /// </summary>
+    public SpawnArea? PresenceZone { get; }
+
+    /// <summary>
+    /// How long a team may go without any member inside <see cref="PresenceZone"/> before
+    /// forfeiting. The clock starts at GO! (a team must also <em>enter</em> the zone within this
+    /// window) and resets on every inside sample. Default 30s; only meaningful with a zone set.
+    /// </summary>
+    public TimeSpan PresenceZoneTimeout { get; }
+
     public IReadOnlyList<int> KillsByTeam => _killsByTeam;
     public IReadOnlyDictionary<PlayerKey, int> KillsByPlayer => _killsByPlayer;
     public IReadOnlyDictionary<PlayerKey, int> DeathsByPlayer => _deathsByPlayer;
@@ -159,6 +203,15 @@ public sealed class ActiveMatch
     /// any teammate returns. Useful for surfacing forfeit warnings to participants.
     /// </summary>
     public IReadOnlyDictionary<int, DateTimeOffset> TeamCollapsedSince => _teamCollapsedSince;
+
+    /// <summary>
+    /// Per-team timestamp of the last confirmed zone presence for teams currently flagged
+    /// zone-vacant: nobody from the team has been sampled inside <see cref="PresenceZone"/> since
+    /// that moment (and the absence has exceeded the detection threshold). The team forfeits at
+    /// <c>value + PresenceZoneTimeout</c> unless an inside sample clears the flag first. Always
+    /// empty when no zone is configured. Useful for surfacing forfeit warnings to participants.
+    /// </summary>
+    public IReadOnlyDictionary<int, DateTimeOffset> ZoneVacantSince => _zoneVacantSince;
 
     /// <summary>
     /// How long this player meaningfully participated: from <see cref="StartedAt"/> until
@@ -289,7 +342,32 @@ public sealed class ActiveMatch
         if (!AllActive()) return false;
         State = MatchState.Live;
         StartedAt = at;
+        // Every team starts the zone-presence clock at GO!: they must enter (and then hold) the
+        // zone within PresenceZoneTimeout of the match going live.
+        if (_zoneLastPresence is not null)
+            for (int t = 0; t < Teams.Count; t++) _zoneLastPresence[t] = at;
         return true;
+    }
+
+    /// <summary>
+    /// A position report for <paramref name="player"/> (tile coordinates), fed by the host
+    /// adapter while the match is Live. Only samples from Active, non-knocked-out participants
+    /// inside <see cref="PresenceZone"/> count: they refresh the player's team's presence clock
+    /// and clear any pending zone-vacant flag. Returns the team index that just reclaimed the
+    /// zone (was flagged vacant, now present) so the caller can emit reclaim telemetry, or
+    /// <see langword="null"/> for every other case. No-op without a configured zone.
+    /// </summary>
+    public int? OnPositionSample(PlayerKey player, int tileX, int tileY, DateTimeOffset at)
+    {
+        if (PresenceZone is not { } zone) return null;
+        if (State != MatchState.Live) return null;
+        if (!_teamOf.TryGetValue(player, out var teamIdx)) return null;
+        if (_status[player] != PlayerStatus.Active) return null;
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return null;
+        if (!zone.Contains(tileX, tileY)) return null;
+
+        _zoneLastPresence![teamIdx] = at;
+        return _zoneVacantSince.Remove(teamIdx) ? teamIdx : null;
     }
 
     /// <summary>
@@ -539,7 +617,72 @@ public sealed class ActiveMatch
         if (State == MatchState.Live && TryForfeitOrAbandon(at))
             return;
 
+        // Zone presence: a team sample-absent from the presence zone past the timeout forfeits.
+        if (State == MatchState.Live && TryZoneForfeit(at))
+            return;
+
         TryFinish(at);
+    }
+
+    /// <summary>
+    /// Maintain the per-team zone-presence state and forfeit teams whose absence from
+    /// <see cref="PresenceZone"/> has exceeded <see cref="PresenceZoneTimeout"/>. Teams with no
+    /// live member are the collapse machinery's concern -- their presence clock is kept fresh so
+    /// a team recovering from a full disconnect isn't instantly zone-forfeited on stale data.
+    /// Returns true when the match was finalized.
+    /// </summary>
+    private bool TryZoneForfeit(DateTimeOffset at)
+    {
+        if (PresenceZone is null) return false;
+
+        List<int>? violators = null;
+        for (int t = 0; t < Teams.Count; t++)
+        {
+            if (!HasLiveMember(t))
+            {
+                _zoneLastPresence![t] = at;
+                _zoneVacantSince.Remove(t);
+                continue;
+            }
+
+            var absent = at - _zoneLastPresence![t];
+            if (absent >= PresenceZoneTimeout)
+                (violators ??= new List<int>()).Add(t);
+            else if (absent >= ZoneVacancyDetection && !_zoneVacantSince.ContainsKey(t))
+                _zoneVacantSince[t] = _zoneLastPresence[t];
+        }
+
+        if (violators is null) return false;
+        if (violators.Count == Teams.Count)
+        {
+            // Nobody is contesting the zone: no team earned a win over the others, so the
+            // match ends as a draw -- every team shares rank 1 (OpenSkill treats equal ranks
+            // as a tie).
+            FinalizeAsZoneDraw(at);
+            return true;
+        }
+        FinalizeAsZoneForfeit(at, violators);
+        return true;
+    }
+
+    /// <summary>
+    /// Finalize as a zone draw: every team abandoned the presence zone past the timeout, so
+    /// nobody wins and nobody loses. All teams share rank 1; the outcome still carries
+    /// <see cref="MatchOutcomeReason.ZoneForfeit"/> so adapters can announce why it ended.
+    /// </summary>
+    private void FinalizeAsZoneDraw(DateTimeOffset at)
+    {
+        var ranked = new RankedTeam[Teams.Count];
+        for (int t = 0; t < Teams.Count; t++)
+            ranked[t] = new RankedTeam(1, Teams[t], _killsByTeam[t]);
+
+        State = MatchState.Completed;
+        EndedAt = at;
+        CloseAllOpenParticipations(at);
+        Outcome = Enrich(
+            new MatchOutcome(MatchId, GameType, ranked, CollectAbandoners(), MatchState.Completed, at,
+                EndReason: MatchOutcomeReason.ZoneForfeit),
+            at);
     }
 
     /// <summary>
@@ -744,6 +887,36 @@ public sealed class ActiveMatch
         CloseAllOpenParticipations(at);
         Outcome = Enrich(
             new MatchOutcome(MatchId, GameType, ranked, CollectAbandoners(), MatchState.Completed, at),
+            at);
+    }
+
+    /// <summary>
+    /// Finalize as a zone forfeit: every team in <paramref name="violators"/> failed to hold the
+    /// presence zone. Zone-holding teams rank above violators; within each group, by kill count.
+    /// The outcome carries <see cref="MatchOutcomeReason.ZoneForfeit"/> so adapters can announce why.
+    /// </summary>
+    private void FinalizeAsZoneForfeit(DateTimeOffset at, List<int> violators)
+    {
+        var order = new (int teamIdx, int score, bool held)[Teams.Count];
+        for (int t = 0; t < Teams.Count; t++)
+            order[t] = (t, _killsByTeam[t], !violators.Contains(t));
+        Array.Sort(order, (a, b) =>
+        {
+            if (a.held != b.held) return b.held.CompareTo(a.held);
+            int byScore = b.score.CompareTo(a.score);
+            return byScore != 0 ? byScore : a.teamIdx.CompareTo(b.teamIdx);
+        });
+
+        var ranked = new RankedTeam[Teams.Count];
+        for (int i = 0; i < order.Length; i++)
+            ranked[i] = new RankedTeam(i + 1, Teams[order[i].teamIdx], order[i].score);
+
+        State = MatchState.Completed;
+        EndedAt = at;
+        CloseAllOpenParticipations(at);
+        Outcome = Enrich(
+            new MatchOutcome(MatchId, GameType, ranked, CollectAbandoners(), MatchState.Completed, at,
+                EndReason: MatchOutcomeReason.ZoneForfeit),
             at);
     }
 

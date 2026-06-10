@@ -47,7 +47,9 @@ public sealed class QueueDefinition
         TimeSpan? afkDwellCull = null,
         TimeSpan? eliminationCooldown = null,
         bool alwaysChooseLongestWaiter = true,
-        bool disallowItems = false)
+        bool disallowItems = false,
+        SpawnArea? presenceZone = null,
+        TimeSpan? presenceZoneTimeout = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -112,6 +114,12 @@ public sealed class QueueDefinition
                         $"spawnByTeam[{t}].RadiusTiles must be in [0, 511] (native client radius is a 9-bit field).");
         }
 
+        if (presenceZone is { } pz && pz.RadiusTiles < 1)
+            throw new ArgumentOutOfRangeException(nameof(presenceZone),
+                "RadiusTiles must be >= 1 (a zero-radius presence zone is a single tile nobody could hold).");
+        if (presenceZoneTimeout is { } pzt && pzt <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(presenceZoneTimeout), "Must be positive.");
+
         if (stagingDuration is { } sd && sd <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(stagingDuration), "Must be positive.");
         if (countdownDuration is { } cd && cd < TimeSpan.FromSeconds(5))
@@ -154,6 +162,8 @@ public sealed class QueueDefinition
         EliminationCooldown = eliminationCooldown;
         AlwaysChooseLongestWaiter = alwaysChooseLongestWaiter;
         DisallowItems = disallowItems;
+        PresenceZone = presenceZone;
+        PresenceZoneTimeout = presenceZoneTimeout;
         OwnerArenaName = ownerArenaName;
 
         // BaseName is the structural part of UniqueId without the arena prefix. Used as the
@@ -409,6 +419,24 @@ public sealed class QueueDefinition
     /// type (<c>GameType&lt;i&gt;DisallowItems</c>). Cleared when a player leaves the match.
     /// </summary>
     public bool DisallowItems { get; }
+
+    /// <summary>
+    /// The game type's "stay in the zone" box (center + radius, tiles), or <see langword="null"/>
+    /// for no zone-presence rule. While a match of this queue is Live, every team must keep at
+    /// least one active player inside this box; a team absent for
+    /// <see cref="PresenceZoneTimeout"/> forfeits (ranked last). Inherited from the game type
+    /// (<c>GameType&lt;i&gt;ZoneCenter</c> / <c>ZoneRadius</c>).
+    /// </summary>
+    public SpawnArea? PresenceZone { get; }
+
+    /// <summary>
+    /// How long a team may go without any member inside <see cref="PresenceZone"/> before
+    /// forfeiting. The clock starts at GO! (teams must also <em>enter</em> the zone within this
+    /// window) and resets on every in-zone position sample. <see langword="null"/> = the engine's
+    /// 30s default. Inherited from <c>GameType&lt;i&gt;ZoneForfeitTimeout</c>; only meaningful
+    /// with <see cref="PresenceZone"/> set.
+    /// </summary>
+    public TimeSpan? PresenceZoneTimeout { get; }
 
     /// <summary>Conventional team-index -> freq number (100, 200, 300, ...).</summary>
     public static short FreqOf(int teamIndex) => (short)(100 * (teamIndex + 1));

@@ -86,7 +86,9 @@ internal static class SpawnAreaParser
         }
     }
 
-    private static bool TryParsePoint(string raw, out StartPoint point)
+    /// <summary>Parses an '<c>x,y</c>' tile coordinate. Shared with the presence-zone parsing in
+    /// <see cref="GameTypeParser"/> so all point-valued conf keys accept the same format.</summary>
+    internal static bool TryParsePoint(string raw, out StartPoint point)
     {
         point = default;
         var parts = raw.Split(',', StringSplitOptions.TrimEntries);

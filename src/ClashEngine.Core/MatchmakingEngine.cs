@@ -297,6 +297,22 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
+    /// A position report for an in-match player, in tile coordinates. Feeds the match's
+    /// zone-presence tracking (<see cref="ActiveMatch.OnPositionSample"/>): an inside sample
+    /// refreshes the player's team's presence clock, and one that clears a pending zone-vacant
+    /// flag emits <see cref="IMatchmakingTelemetry.OnZoneReclaimed"/> immediately. The host
+    /// adapter only needs to call this for matches whose queue has a presence zone configured;
+    /// it's a cheap no-op for any other (or unknown) player.
+    /// </summary>
+    public void OnPlayerPosition(PlayerKey player, int tileX, int tileY, DateTimeOffset at)
+    {
+        if (!_matchOf.TryGetValue(player, out var matchId)) return;
+        if (!_matches.TryGetValue(matchId, out var m)) return;
+        if (m.OnPositionSample(player, tileX, tileY, at) is int reclaimedTeam)
+            _telemetry.OnZoneReclaimed(m, reclaimedTeam);
+    }
+
+    /// <summary>
     /// Adds <paramref name="player"/> to <paramref name="queueName"/> if eligible. Returns
     /// <see langword="true"/> on success.
     /// </summary>
@@ -726,20 +742,22 @@ public sealed class MatchmakingEngine
     public void Tick(DateTimeOffset at)
     {
         List<ActiveMatch>? toFinalize = null;
-        List<(ActiveMatch Match, Dictionary<int, DateTimeOffset> Prev, HashSet<PlayerKey> PrevAbandoned)>? collapseSnapshots = null;
+        List<(ActiveMatch Match, Dictionary<int, DateTimeOffset> Prev, Dictionary<int, DateTimeOffset> PrevZoneVacant, HashSet<PlayerKey> PrevAbandoned)>? collapseSnapshots = null;
         foreach (var m in _matches.Values)
         {
-            // Snapshot collapse map and the already-abandoned set before Tick so we can emit
-            // collapse/recovery and free-to-leave events for the transitions this tick produces.
-            (collapseSnapshots ??= new()).Add((m, SnapshotCollapsed(m), SnapshotAbandoned(m)));
+            // Snapshot collapse/zone-vacancy maps and the already-abandoned set before Tick so we
+            // can emit collapse/recovery, zone-vacated, and free-to-leave events for the
+            // transitions this tick produces.
+            (collapseSnapshots ??= new()).Add((m, SnapshotCollapsed(m), SnapshotZoneVacant(m), SnapshotAbandoned(m)));
             m.Tick(at);
             if (HasFinished(m)) (toFinalize ??= new List<ActiveMatch>()).Add(m);
         }
         if (collapseSnapshots is not null)
-            foreach (var (m, prev, prevAbandoned) in collapseSnapshots)
+            foreach (var (m, prev, prevZoneVacant, prevAbandoned) in collapseSnapshots)
                 if (!HasFinished(m))
                 {
                     DiffCollapsedAndEmit(m, prev);
+                    DiffZoneVacantAndEmit(m, prevZoneVacant);
                     EmitFreeToLeaveTransitions(m, prevAbandoned, at);
                 }
         if (toFinalize is not null)
@@ -941,7 +959,9 @@ public sealed class MatchmakingEngine
             at,
             livesPerPlayer: def.LivesPerPlayer,
             teamCollapseGrace: def.TeamCollapseGrace,
-            eliminationCooldown: def.EliminationCooldown);
+            eliminationCooldown: def.EliminationCooldown,
+            presenceZone: def.PresenceZone,
+            presenceZoneTimeout: def.PresenceZoneTimeout);
         _matches[matchId] = match;
         _matchQueue[matchId] = def;
 
@@ -1231,6 +1251,29 @@ public sealed class MatchmakingEngine
         {
             if (!curr.ContainsKey(kvp.Key))
                 _telemetry.OnTeamRecovered(m, kvp.Key);
+        }
+    }
+
+    /// <summary>Captures the current per-team zone-vacancy timestamps so a follow-up call to
+    /// <see cref="DiffZoneVacantAndEmit"/> can emit telemetry for transitions.</summary>
+    private static Dictionary<int, DateTimeOffset> SnapshotZoneVacant(ActiveMatch m)
+    {
+        if (m.ZoneVacantSince.Count == 0) return EmptyCollapseSnapshot;
+        return new Dictionary<int, DateTimeOffset>(m.ZoneVacantSince);
+    }
+
+    /// <summary>
+    /// Emits <see cref="IMatchmakingTelemetry.OnZoneVacated"/> for any team that was newly flagged
+    /// zone-vacant this tick. Reclaims are NOT diffed here: a sample-driven reclaim is emitted at
+    /// sample time by <see cref="OnPlayerPosition"/>, and a vacancy cleared because the team lost
+    /// its last live member is the collapse machinery's story, not a reclaim.
+    /// </summary>
+    private void DiffZoneVacantAndEmit(ActiveMatch m, IReadOnlyDictionary<int, DateTimeOffset> prev)
+    {
+        foreach (var kvp in m.ZoneVacantSince)
+        {
+            if (!prev.ContainsKey(kvp.Key))
+                _telemetry.OnZoneVacated(m, kvp.Key, kvp.Value, kvp.Value + m.PresenceZoneTimeout);
         }
     }
 

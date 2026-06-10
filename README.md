@@ -188,6 +188,18 @@ Two independent concerns share this group. **Start locations** move the match's 
 
 **Start vs respawn.** The start location is a one-time server warp at match setup (and the drift-back target before GO). The respawn box is a client-settings override that governs where the client spawns the ship — on the initial spawn *and* every respawn after a death — and is cleared when a player leaves the match. An elimination game type (1 life) effectively only uses the start location; a multi-life or kill-target game type uses the respawn box on each death.
 
+#### Presence zone ("stay in the zone or lose")
+
+An optional extra end condition: one shared box that every team must keep **at least one** active player inside while the match is live. A team with nobody in the zone is warned in chat ("Team X has left the zone — back in Ns or they forfeit!"); if no one re-enters within `ZoneForfeitTimeout`, the team forfeits and is ranked last ("Match over! Team X failed to hold the zone — Team Y wins."). The clock starts at GO! — a team must also *enter* the zone within the timeout — and resets every time a team member is seen inside. If *every* team deserts the zone past the timeout, the match ends in a **draw** ("Match drawn — every team abandoned the zone."): all teams tie at rank 1, so ratings treat it as a tie rather than a win for anyone.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `GameType<i>ZoneCenter` | `x,y` (tiles) | (unset = no zone) | Center of the zone box. Setting this (plus a radius) enables the rule for every queue using this game type. |
+| `GameType<i>ZoneRadius` | int ≥ 1 (tiles) | required with center | Half-width of the box: the zone spans `center ± radius` on each axis (a square, like the respawn-box radius). Missing or `< 1` disables the zone with a warning. |
+| `GameType<i>ZoneForfeitTimeout` | seconds or `HH:MM:SS` | `30` | How long a team may be entirely absent from the zone before forfeiting. |
+
+Interactions worth knowing: presence is counted only from **active, in-ship** participants (spectating, in-grace, and eliminated players don't hold the zone); a team that has *no* active players at all is governed by `TeamCollapseGrace`, not the zone clock — the zone clock restarts fresh when they recover; and knocked-out/eliminated players ceasing to count can hand the zone burden to the survivors mid-match, which is the intended pressure in elimination game types.
+
 #### Match-flow timings (warmup / countdown / spec grace)
 
 | Key | Type | Default | Notes |

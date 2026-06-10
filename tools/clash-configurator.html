@@ -954,6 +954,8 @@ function newGameType() {
     teamSpawns: [[], []],
     maxSpawnDriftTiles: 0,
     teamSpawnBoxes: [null, null],
+    presenceZone: null,
+    zoneForfeitSec: null,
     stagingDurationSec: null,
     countdownDurationSec: null,
     knockoutSpecDelaySec: null,
@@ -1836,6 +1838,56 @@ function renderGameTypeCard(gt, index) {
 
   body.appendChild(spawnGroup);
 
+  // --- Presence zone (stay in the zone or forfeit) ---
+  const zoneGroup = el("div", { class: "subgroup" }, el("h4", {}, "Presence zone (stay in the zone or forfeit)"));
+  {
+    const zone = gt.presenceZone;
+    const control = el("div");
+    control.appendChild(el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: !!zone,
+        onchange: e => {
+          gt.presenceZone = e.target.checked ? { x: 512, y: 512, radius: 50 } : null;
+          rerenderCardBody(card, gt);
+          render();
+        }
+      }),
+      "Enabled"
+    ));
+    if (zone) {
+      control.appendChild(el("div", { class: "spawn-pair" },
+        el("input", {
+          type: "number", min: 0, max: 1023, step: 1, value: zone.x,
+          oninput: e => { zone.x = clampTile(parseInt(e.target.value, 10) || 0); render(); }
+        }),
+        el("span", { class: "sep" }, ","),
+        el("input", {
+          type: "number", min: 0, max: 1023, step: 1, value: zone.y,
+          oninput: e => { zone.y = clampTile(parseInt(e.target.value, 10) || 0); render(); }
+        }),
+        el("span", { class: "sep" }, "radius"),
+        el("input", {
+          type: "number", min: 1, max: 1023, step: 1, value: zone.radius,
+          oninput: e => { const r = parseInt(e.target.value, 10) || 1; zone.radius = r < 1 ? 1 : r; render(); }
+        })
+      ));
+    }
+    zoneGroup.appendChild(simpleField("Zone box",
+      "Every team must keep at least one active player inside this box (center + radius, tiles) or forfeit. One shared zone for all teams.",
+      control));
+    if (zone) {
+      zoneGroup.appendChild(simpleField("ZoneForfeitTimeout",
+        "How long a team may be entirely outside the zone (counted from GO! and from each re-entry) before forfeiting. Default 30s.",
+        durationWidget({
+          value: gt.zoneForfeitSec, min: 1, allowUnset: true, unsetLabel: "override",
+          presets: [10, 15, 30, 60, 120],
+          onChange: v => { gt.zoneForfeitSec = v; render(); }
+        })
+      ));
+    }
+  }
+  body.appendChild(zoneGroup);
+
   // --- Match-flow timings ---
   const timingGroup = el("div", { class: "subgroup" }, el("h4", {}, "Match-flow timings"));
   timingGroup.appendChild(simpleField("StagingDuration", "Warmup window for idle detection. Default 10s.",
@@ -2429,6 +2481,13 @@ function emitGameType(out, gt, idx) {
       out.push(line(`${p}Team${t + 1}SpawnCenter`, `${box.x},${box.y}`));
       if (box.radius > 0) out.push(line(`${p}Team${t + 1}SpawnRadius`, String(box.radius)));
     }
+  }
+  // Presence zone ("stay in the zone or lose") -- a team with no active player inside the box
+  // for ZoneForfeitTimeout forfeits.
+  if (gt.presenceZone && Number.isFinite(gt.presenceZone.x) && Number.isFinite(gt.presenceZone.y)) {
+    out.push(line(`${p}ZoneCenter`, `${gt.presenceZone.x},${gt.presenceZone.y}`));
+    out.push(line(`${p}ZoneRadius`, String(gt.presenceZone.radius)));
+    if (gt.zoneForfeitSec !== null) out.push(line(`${p}ZoneForfeitTimeout`, formatTime(gt.zoneForfeitSec)));
   }
   if (gt.stagingDurationSec !== null) out.push(line(`${p}StagingDuration`, formatTime(gt.stagingDurationSec)));
   if (gt.countdownDurationSec !== null) out.push(line(`${p}CountdownDuration`, formatTime(gt.countdownDurationSec)));

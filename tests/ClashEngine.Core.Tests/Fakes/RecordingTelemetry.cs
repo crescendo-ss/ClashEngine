@@ -24,6 +24,8 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public List<(PlayerKey Player, Guid MatchId, DateTimeOffset At)> PlayerReleases { get; } = new();
     public List<(Guid MatchId, int TeamIdx, DateTimeOffset Since, DateTimeOffset ForfeitAt)> TeamsCollapsing { get; } = new();
     public List<(Guid MatchId, int TeamIdx)> TeamsRecovered { get; } = new();
+    public List<(Guid MatchId, int TeamIdx, DateTimeOffset Since, DateTimeOffset ForfeitAt)> ZonesVacated { get; } = new();
+    public List<(Guid MatchId, int TeamIdx)> ZonesReclaimed { get; } = new();
     public List<PendingGriefingPenalty> GriefingFlagged { get; } = new();
     public List<(PendingGriefingPenalty Pending, PlayerKey Voter)> VetoesRecorded { get; } = new();
     public List<PendingGriefingPenalty> GriefingVetoed { get; } = new();
@@ -69,6 +71,9 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt) =>
         TeamsCollapsing.Add((m.MatchId, teamIdx, since, forfeitAt));
     public void OnTeamRecovered(ActiveMatch m, int teamIdx) => TeamsRecovered.Add((m.MatchId, teamIdx));
+    public void OnZoneVacated(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt) =>
+        ZonesVacated.Add((m.MatchId, teamIdx, since, forfeitAt));
+    public void OnZoneReclaimed(ActiveMatch m, int teamIdx) => ZonesReclaimed.Add((m.MatchId, teamIdx));
     public void OnGriefingFlagged(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil) =>
         GriefingFlagged.Add(pending);
     public void OnVetoRecorded(PendingGriefingPenalty pending, PlayerKey voter) =>

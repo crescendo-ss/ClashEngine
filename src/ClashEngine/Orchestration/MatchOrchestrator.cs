@@ -646,10 +646,22 @@ public sealed class MatchOrchestrator
     /// Drives two things during pre-GO: (1) idle detection during Staging (used to fail the match
     /// if a player never moves), and (2) drift enforcement during Staging or Countdown -- if the
     /// player has wandered more than <see cref="QueueDefinition.MaxStartDriftTiles"/> tiles from
-    /// their team's chosen start, they're warped back. Both are no-ops once the match goes Live.
+    /// their team's chosen start, they're warped back. Both are no-ops once the match goes Live;
+    /// during Live, packets feed the engine's zone-presence tracking instead (when the game type
+    /// has a presence zone).
     /// </summary>
     public void OnPositionPacket(PlayerKey key, sbyte rotation, short x, short y, WeaponCodes weapon)
     {
+        if (Phase == MatchPhase.Live)
+        {
+            // Zone-presence feed: packets are pixels, the engine's zone box is tiles (16 px/tile).
+            // Only forwarded when this match's game type actually has a zone, so games without
+            // one pay nothing per packet.
+            if (_queue.PresenceZone is not null)
+                _engine.OnPlayerPosition(key, x >> 4, y >> 4, _clock.UtcNow);
+            return;
+        }
+
         if (Phase != MatchPhase.Staging && Phase != MatchPhase.Countdown) return;
 
         if (_drift.ShouldWarpBack(key, x, y, out var start) && _resolver.Resolve(key) is { } drifter)
@@ -1121,6 +1133,27 @@ public sealed class MatchOrchestrator
         if (teamIdx < 0 || teamIdx >= _proposal.Teams.Count) return;
         if (Phase != MatchPhase.Live) return;
         BroadcastToAll($"Team {TeamLabel(teamIdx)} is back. Match continues.");
+    }
+
+    /// <summary>
+    /// Called when a team has nobody inside the game type's presence zone and the forfeit clock
+    /// is running. Mirrors <see cref="OnTeamCollapsing"/>: warn everyone so the absent team knows
+    /// to get back and the opponents know a forfeit may be coming.
+    /// </summary>
+    public void OnZoneVacated(int teamIdx, TimeSpan forfeitIn)
+    {
+        if (teamIdx < 0 || teamIdx >= _proposal.Teams.Count) return;
+        if (Phase != MatchPhase.Live) return;
+        BroadcastToAll(
+            $"Team {TeamLabel(teamIdx)} has left the zone -- back in {(int)forfeitIn.TotalSeconds}s or they forfeit!");
+    }
+
+    /// <summary>Called when a zone-vacant team got a player back inside the zone in time.</summary>
+    public void OnZoneReclaimed(int teamIdx)
+    {
+        if (teamIdx < 0 || teamIdx >= _proposal.Teams.Count) return;
+        if (Phase != MatchPhase.Live) return;
+        BroadcastToAll($"Team {TeamLabel(teamIdx)} is back in the zone.");
     }
 
     private string TeamLabel(int teamIdx)

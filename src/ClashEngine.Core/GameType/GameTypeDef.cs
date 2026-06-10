@@ -41,7 +41,9 @@ public sealed record GameTypeDef(
     TimeSpan? ShipChangeGracePeriod,
     ItemsAction ReturnItemsAction,
     TimeSpan? EliminationCooldown = null,
-    bool DisallowItems = false);
+    bool DisallowItems = false,
+    SpawnArea? PresenceZone = null,
+    TimeSpan? PresenceZoneTimeout = null);
 
 /// <summary>
 /// Auto-derived <c>metadata</c> blob attached to the gametype-registration POST. Follows the

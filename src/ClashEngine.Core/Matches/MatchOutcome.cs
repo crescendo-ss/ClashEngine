@@ -18,6 +18,22 @@ public sealed record RankedTeam(int Rank, IReadOnlyList<PlayerKey> Players, int 
 public sealed record PlayerOutcomeStats(int Kills, TimeSpan TimeAlive);
 
 /// <summary>
+/// How a Completed match's outcome was decided, beyond what <see cref="MatchState"/> can express.
+/// Engine-internal flavor used by adapters to tailor the end-of-match announcement; deliberately
+/// NOT part of the upload wire shape (<c>schema/match.schema.json</c> carries only the final
+/// state). (Named to avoid colliding with SS.Matchmaking's unrelated <c>MatchEndReason</c>.)
+/// </summary>
+public enum MatchOutcomeReason
+{
+    /// <summary>End policy fired (kill target / time limit) or a team-collapse forfeit.</summary>
+    Standard,
+
+    /// <summary>A team failed to keep at least one active player inside the game type's presence
+    /// zone for <see cref="ActiveMatch.PresenceZoneTimeout"/>; the violator is ranked last.</summary>
+    ZoneForfeit,
+}
+
+/// <summary>
 /// Final outcome of a match suitable for handing to a rating updater. Contains the ranked teams
 /// (in any order) plus the players who abandoned (for queue-timeout penalties).
 /// </summary>
@@ -39,4 +55,5 @@ public sealed record MatchOutcome(
     DateTimeOffset EndedAt,
     IReadOnlyDictionary<PlayerKey, PlayerOutcomeStats>? PlayerStats = null,
     int? LivesPerPlayer = null,
-    TimeSpan? Duration = null);
+    TimeSpan? Duration = null,
+    MatchOutcomeReason EndReason = MatchOutcomeReason.Standard);

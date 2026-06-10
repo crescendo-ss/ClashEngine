@@ -233,7 +233,7 @@
           "constraint": ">= 0 (0 disables)",
           "default": "60s (engine default)",
           "description": "Only meaningful for elimination matches (Lives > 0). When a player loses their last life they are released from the match roster and must wait this long before ?play re-queues them. Absent -> the engine's built-in 1-minute default; 0 -> no cooldown for this game type (the engine records no penalty, so eliminated players may requeue immediately); >0 -> that duration, applied as a per-event base override on the EliminationCooldown penalty. Auto-rescinded if the match ends before the cooldown elapses. Negative -> dropped to default.",
-          "source": "src/ClashEngine/Config/GameTypeParser.cs:125 (ReadOptionalNonNegativeTimeSpan)"
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:128 (ReadOptionalNonNegativeTimeSpan)"
         },
         {
           "key": "GameType<i>TeamCollapseGrace",
@@ -265,6 +265,30 @@
           "default": 0,
           "description": "No-items mode. While a match runs, every participant's per-ship item-max client settings (BurstMax/RepelMax/DecoyMax/BrickMax/ThorMax/RocketMax/PortalMax) are overridden to 0, so ships spawn item-free and greens can't grant items. Per-player override (same IClientSettings mechanism as the respawn boxes), applied at placement/?return and cleared when the player leaves the match.",
           "source": "src/ClashEngine/Config/GameTypeParser.cs:122"
+        },
+        {
+          "key": "GameType<i>ZoneCenter",
+          "type": "point",
+          "format": "x,y",
+          "default": null,
+          "description": "Presence zone ('stay in the zone or lose'): center of the shared box, in tiles. Setting this (plus ZoneRadius) enables the rule: while Live, every team must keep at least one active player inside the box or forfeit after ZoneForfeitTimeout (violator ranked last; ALL teams violating -> a draw, every team tied at rank 1). The forfeit clock starts at GO! and resets on every in-zone position sample. Unparseable -> zone disabled with a warning.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:154 (ReadPresenceZone)"
+        },
+        {
+          "key": "GameType<i>ZoneRadius",
+          "type": "int",
+          "constraint": ">= 1 (tiles)",
+          "default": null,
+          "description": "Half-width of the presence zone box: it spans center +/- radius on each axis (a square, like the respawn-box radius). Required when ZoneCenter is set; missing or < 1 disables the zone with a warning. Engine-side only (not a native client field), so no 511 cap.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:154 (ReadPresenceZone)"
+        },
+        {
+          "key": "GameType<i>ZoneForfeitTimeout",
+          "type": "duration",
+          "constraint": "> 0",
+          "default": "30s (engine default)",
+          "description": "How long a team may be entirely absent from the presence zone before forfeiting. A chat warning fires once the absence is detected (~2s) quoting the remaining time. Only meaningful with ZoneCenter/ZoneRadius set; <= 0 -> dropped to the 30s default.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs:154 (ReadPresenceZone)"
         }
       ]
     },
@@ -445,7 +469,7 @@
         "derivedFrom": "GameType<i>TeamCount, PlayersPerTeam, Lives",
         "value": "GameTypeMetadata.Uniform(teamCount, perTeam, lives)",
         "description": "Auto-derived stats-server metadata blob (teamCount/teamSizes/livesPerPlayer). There is intentionally no GameType<i>Metadata conf key.",
-        "source": "src/ClashEngine/Config/GameTypeParser.cs:132"
+        "source": "src/ClashEngine/Config/GameTypeParser.cs:135"
       }
     ]
   }

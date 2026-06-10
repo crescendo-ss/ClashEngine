@@ -138,6 +138,15 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         // they were specced. Surface a generic notice in that case.
         var summary = outcome.FinalState switch
         {
+            // All teams share rank 1 (the last-ranked entry is still rank 1) = a zone draw:
+            // every team abandoned the zone, nobody wins.
+            MatchState.Completed when outcome.EndReason == MatchOutcomeReason.ZoneForfeit
+                && outcome.RankedTeams.Count > 0 && outcome.RankedTeams[^1].Rank == 1 =>
+                "Match drawn -- every team abandoned the zone.",
+            MatchState.Completed when outcome.EndReason == MatchOutcomeReason.ZoneForfeit
+                && outcome.RankedTeams.Count > 0 =>
+                $"Match over! Team {string.Join("/", outcome.RankedTeams[^1].Players)} failed to hold the zone -- " +
+                $"Team {string.Join("/", outcome.RankedTeams[0].Players)} wins.",
             MatchState.Completed when outcome.RankedTeams.Count > 0 =>
                 $"Match over! Team {string.Join("/", outcome.RankedTeams[0].Players)} wins.",
             MatchState.Cancelled => orchestrator.HasAnnouncedCancellation
@@ -226,6 +235,21 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     {
         if (_orchestrators.TryGetValue(m.MatchId, out var orchestrator))
             orchestrator.OnTeamRecovered(teamIdx);
+    }
+
+    public void OnZoneVacated(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
+    {
+        if (!_orchestrators.TryGetValue(m.MatchId, out var orchestrator)) return;
+        // Quote the genuinely-remaining time: `since` is the team's LAST confirmed presence, so
+        // part of the timeout has already elapsed by the time the vacancy is detected.
+        var remaining = forfeitAt - _clock.UtcNow;
+        orchestrator.OnZoneVacated(teamIdx, remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
+    }
+
+    public void OnZoneReclaimed(ActiveMatch m, int teamIdx)
+    {
+        if (_orchestrators.TryGetValue(m.MatchId, out var orchestrator))
+            orchestrator.OnZoneReclaimed(teamIdx);
     }
 
     // Other IMatchmakingTelemetry events default to no-op via the interface.

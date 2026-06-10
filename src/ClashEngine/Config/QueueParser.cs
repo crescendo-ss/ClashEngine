@@ -131,6 +131,8 @@ internal static class QueueParser
                 timeLimit: gt.TimeLimit,
                 returnItemsAction: gt.ReturnItemsAction,
                 disallowItems: gt.DisallowItems,
+                presenceZone: gt.PresenceZone,
+                presenceZoneTimeout: gt.PresenceZoneTimeout,
                 ownerArenaName: ownerArenaName,
                 label: label,
                 afkDwellWarning: afkWarn,

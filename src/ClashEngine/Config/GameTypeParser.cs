@@ -120,6 +120,9 @@ internal static class GameTypeParser
         // No-items mode: the orchestrator zeroes every participant's per-ship item-max client
         // settings (BurstMax/RepelMax/DecoyMax/BrickMax/ThorMax/RocketMax/PortalMax) for the match.
         bool disallowItems = config.GetInt(handle, ConfigConstants.Section, p + "DisallowItems", 0) != 0;
+        // Presence zone ("stay in the zone or lose"): a team with no active player inside the box
+        // for ZoneForfeitTimeout forfeits the match.
+        var (presenceZone, presenceZoneTimeout) = ReadPresenceZone(config, handle, p, log);
         // Absent -> null (engine's built-in default cooldown); 0 -> disabled (eliminated players in
         // this game type requeue immediately); >0 -> that duration. Negative is warned and dropped.
         TimeSpan? eliminationCooldown = ReadOptionalNonNegativeTimeSpan(config, handle, p + "EliminationCooldown", p, log);
@@ -137,7 +140,57 @@ internal static class GameTypeParser
             startSetByTeam, maxDrift, useStartLocation, spawnByTeam,
             stagingDuration, countdownDuration, knockoutSpecDelay,
             teamCollapseGrace, shipChangeGracePeriod,
-            returnItemsAction, eliminationCooldown, disallowItems);
+            returnItemsAction, eliminationCooldown, disallowItems,
+            presenceZone, presenceZoneTimeout);
+    }
+
+    /// <summary>
+    /// Reads the presence-zone keys: <c>{prefix}ZoneCenter = x,y</c> (tiles; required to enable),
+    /// <c>{prefix}ZoneRadius = r</c> (tiles, >= 1; required with a center), and
+    /// <c>{prefix}ZoneForfeitTimeout</c> (duration > 0; absent = engine default 30s). A radius or
+    /// timeout without a center is warned and ignored; a center without a usable radius disables
+    /// the zone (warned) rather than guessing a box size.
+    /// </summary>
+    private static (SpawnArea? Zone, TimeSpan? Timeout) ReadPresenceZone(
+        IConfigManager config, ConfigHandle handle, string prefix, ClashLog? log)
+    {
+        string centerKey = prefix + "ZoneCenter";
+        string radiusKey = prefix + "ZoneRadius";
+        string timeoutKey = prefix + "ZoneForfeitTimeout";
+
+        var rawCenter = config.GetStr(handle, ConfigConstants.Section, centerKey);
+        int? rawRadius = ConfigReadHelpers.TryReadInt(config, handle, radiusKey);
+        TimeSpan? timeout = ConfigReadHelpers.TryReadTimeSpan(config, handle, timeoutKey, log, prefix);
+
+        if (string.IsNullOrWhiteSpace(rawCenter))
+        {
+            if (rawRadius is not null || timeout is not null)
+                log?.Warn(ConfigConstants.LogCategory,
+                    $"{radiusKey}/{timeoutKey} set but {centerKey} is not; presence zone disabled.");
+            return (null, null);
+        }
+
+        if (!SpawnAreaParser.TryParsePoint(rawCenter, out var center))
+        {
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{prefix}: could not parse '{rawCenter}' in {centerKey} as 'x,y'; presence zone disabled.");
+            return (null, null);
+        }
+
+        if (rawRadius is not { } radius || radius < 1)
+        {
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{centerKey} is set but {radiusKey} is {(rawRadius is null ? "missing" : $"{rawRadius} (must be >= 1)")}; presence zone disabled.");
+            return (null, null);
+        }
+
+        if (timeout is { } to && to <= TimeSpan.Zero)
+        {
+            log?.Warn(ConfigConstants.LogCategory, $"{timeoutKey}={to} must be > 0; using the 30s default.");
+            timeout = null;
+        }
+
+        return (new SpawnArea(center, radius), timeout);
     }
 
     /// <summary>Reads <c>GameType&lt;i&gt;ReturnItemsAction</c>. Accepts <c>full</c>, <c>restore</c>,
@@ -205,6 +258,8 @@ internal static class GameTypeParser
             $"ShipChangeGracePeriod={(def.ShipChangeGracePeriod is { } sg ? sg.ToString() : "(default 10s)")}, " +
             $"EliminationCooldown={(def.EliminationCooldown is { } ec ? (ec == TimeSpan.Zero ? "0 (disabled)" : ec.ToString()) : "(default 1m)")}, " +
             $"ReturnItemsAction={def.ReturnItemsAction}, " +
-            $"DisallowItems={def.DisallowItems}.");
+            $"DisallowItems={def.DisallowItems}, " +
+            $"PresenceZone={(def.PresenceZone is { } z ? $"({z.Center.X},{z.Center.Y}) r{z.RadiusTiles}t" : "(none)")}, " +
+            $"ZoneForfeitTimeout={(def.PresenceZoneTimeout is { } zt ? zt.ToString() : "(default 30s)")}.");
     }
 }

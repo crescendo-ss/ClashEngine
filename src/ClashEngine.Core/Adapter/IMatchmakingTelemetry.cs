@@ -171,6 +171,20 @@ public interface IMatchmakingTelemetry
     /// </summary>
     void OnTeamRecovered(ActiveMatch match, int teamIdx) { }
 
+    /// <summary>
+    /// A team has had no Active member inside the game type's presence zone since
+    /// <paramref name="since"/> (the team's last confirmed presence) and will forfeit at
+    /// <paramref name="forfeitAt"/> unless someone re-enters the zone first. The adapter
+    /// typically broadcasts a "return to the zone or forfeit" warning.
+    /// </summary>
+    void OnZoneVacated(ActiveMatch match, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt) { }
+
+    /// <summary>
+    /// A team that was previously flagged zone-vacant got a player back inside the presence zone
+    /// before the timeout. Pairs with a prior <see cref="OnZoneVacated"/> for the same team.
+    /// </summary>
+    void OnZoneReclaimed(ActiveMatch match, int teamIdx) { }
+
     /// <summary>A heuristic flagged a player as a griefer; the penalty is now active and the veto
     /// window is open. <paramref name="timeoutUntil"/> is when the player's queue-lock currently
     /// ends if the penalty stands (already includes any in-effect Abandonment timeout).</summary>

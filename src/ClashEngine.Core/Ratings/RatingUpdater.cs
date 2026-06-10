@@ -176,6 +176,10 @@ public sealed class RatingUpdater
         }
         if (teamSize <= 0) return 1.0;
 
+        // A draw (both teams rank 1, e.g. every team abandoned the presence zone) has no
+        // winner whose dominance could be measured -- no margin scaling.
+        if (winnerRank == loserRank) return 1.0;
+
         // bonus_kills measures how decisively the winner team avoided losses: the loser dealt so
         // few kills that the winner kept more than a full team's worth of "spare" lives. Below
         // that threshold (close match) we don't scale at all.
