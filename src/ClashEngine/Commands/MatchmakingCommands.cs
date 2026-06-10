@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,6 +6,7 @@ using ClashEngine.Adapter;
 using ClashEngine.Config;
 using ClashEngine.Core;
 using ClashEngine.Core.Adapter;
+using ClashEngine.Core.Commands;
 using ClashEngine.Core.Eligibility;
 using ClashEngine.Core.Groups;
 using ClashEngine.Core.Identity;
@@ -85,9 +86,9 @@ public sealed class MatchmakingCommands
             "bot can DM you about queues and matches. The alias is relayed to the bot service, " +
             "which performs the actual link -- ClashEngine itself stores nothing.");
         _commands.AddCommand("autoqueue", AutoQueue, helpText:
-            "?autoqueue [on|off] -- View or set auto-queue. When on, you're automatically put back " +
-            "into a match's queue when it ends. Persists across sessions. Auto-disabled if you're " +
-            "flagged AFK.");
+            "?autoqueue [on|off] -- Set auto-queue, or toggle it with no argument. When on, you're " +
+            "automatically put back into a match's queue when it ends. Persists across sessions. " +
+            "Auto-disabled if you're flagged AFK.");
     }
 
     public void UnregisterGlobal()
@@ -131,11 +132,14 @@ public sealed class MatchmakingCommands
             "?partymode [open|closed] -- View or change your party's mode. Closed parties have a leader who controls invites.");
         _commands.AddCommand("forgive", Veto, arena, helpText:
             "?forgive <player> -- Vote to overturn a pending griefing penalty for a match participant.");
+        _commands.AddCommand("penalties", Penalties, arena, helpText:
+            "?penalties -- List players serving a queue-timeout penalty: the reason, time remaining, " +
+            "and their escalation multiplier with when it resets.");
         _commands.AddCommand("clashlog", ClashLogCmd, arena, helpText:
             "?clashlog [off|normal|verbose|trace] -- Show or set ClashEngine debug verbosity. " +
             "Affects only ClashEngine's verbose/trace logging; the host's global level still gates Info/Warn/Error.");
-        _commands.AddCommand("clashreset", ClashReset, arena, helpText:
-            "?clashreset <player> [--keep-rating] -- Operator: wipe a player's matchmaking state " +
+        _commands.AddCommand("resetplayer", ResetPlayerCmd, arena, helpText:
+            "?resetplayer <player> [--keep-rating] -- Operator: wipe a player's matchmaking state " +
             "(penalties, queues, party, active match, pending griefing votes, and rating). " +
             "Pass --keep-rating to preserve their rating rows.");
         _commands.AddCommand("helpclash", HelpClash, arena, helpText:
@@ -153,8 +157,9 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("leaveparty", LeaveParty, arena);
         _commands.RemoveCommand("partymode", PartyMode, arena);
         _commands.RemoveCommand("forgive", Veto, arena);
+        _commands.RemoveCommand("penalties", Penalties, arena);
         _commands.RemoveCommand("clashlog", ClashLogCmd, arena);
-        _commands.RemoveCommand("clashreset", ClashReset, arena);
+        _commands.RemoveCommand("resetplayer", ResetPlayerCmd, arena);
         _commands.RemoveCommand("helpclash", HelpClash, arena);
     }
 
@@ -872,8 +877,13 @@ public sealed class MatchmakingCommands
 
         var arg = parameters.Trim().ToString().ToLowerInvariant();
 
-        // No arg => query and report the current (persisted) state. on/off => set, then report.
-        if (arg.Length != 0)
+        // No arg => toggle the persisted state. on/off => set explicitly. Either way, report.
+        bool enable;
+        if (arg.Length == 0)
+        {
+            enable = !_engine.AutoQueue.IsEnabled(k);
+        }
+        else
         {
             bool? requested = arg switch
             {
@@ -881,15 +891,16 @@ public sealed class MatchmakingCommands
                 "off" or "0" or "no" or "disable" => false,
                 _ => null,
             };
-            if (requested is not bool enable)
+            if (requested is not bool e)
             {
-                _chat.SendMessage(player, "Usage: ?autoqueue [on|off]");
+                _chat.SendMessage(player, "Usage: ?autoqueue [on|off] -- no argument toggles.");
                 return;
             }
-            _engine.AutoQueue.Set(k, enable);
-            if (_log.IsDebug)
-                _log.Debug(LogCategory, $"?autoqueue {k.Name} -> {(enable ? "on" : "off")}");
+            enable = e;
         }
+        _engine.AutoQueue.Set(k, enable);
+        if (_log.IsDebug)
+            _log.Debug(LogCategory, $"?autoqueue {k.Name} -> {(enable ? "on" : "off")}{(arg.Length == 0 ? " (toggled)" : "")}");
 
         // Always report the resulting state. The "is now ON" / "is now OFF" wording is the contract
         // the bot harness (ClashRig RegressionZone) keys on -- keep it intact when editing.
@@ -945,7 +956,65 @@ public sealed class MatchmakingCommands
         if (msg is not null) _chat.SendMessage(player, msg);
     }
 
-    // ---- ?clashreset <player> [--keep-rating]
+    // ---- ?penalties
+
+    /// <summary>
+    /// Lists every player with live queue-timeout penalty state: one line per (player, kind)
+    /// ladder. Players still serving a timeout come first (longest remaining first); players who
+    /// served theirs but whose escalation ladder is still armed (a repeat offense within the
+    /// memory window would escalate) follow, since their multiplier hasn't subsided yet.
+    /// </summary>
+    private void Penalties(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("penalties", player, parameters);
+        var now = _clock.UtcNow;
+
+        var statuses = new List<PenaltyStatus>(_engine.Penalties.ActiveStatuses(now));
+        if (statuses.Count == 0)
+        {
+            _chat.SendMessage(player, "No players have an active queue-timeout penalty.");
+            return;
+        }
+
+        statuses.Sort((a, b) =>
+        {
+            bool aServing = a.TimeoutEnd > now, bServing = b.TimeoutEnd > now;
+            if (aServing != bServing) return aServing ? -1 : 1;
+            return aServing
+                ? b.TimeoutEnd.CompareTo(a.TimeoutEnd)
+                : b.MemoryEnd.CompareTo(a.MemoryEnd);
+        });
+
+        _chat.SendMessage(player, $"Queue-timeout penalties ({statuses.Count}):");
+        foreach (var s in statuses)
+        {
+            string state = s.TimeoutEnd > now
+                ? $"{HumanDuration.Humanize(s.TimeoutEnd - now)} remaining"
+                : "timeout served";
+            string ladder = s.Multiplier > 1.0
+                ? $"x{s.Multiplier:0.##} multiplier ({Ordinal(s.OffenseCount)} offense, resets in {HumanDuration.Humanize(s.MemoryEnd - now)})"
+                : $"no escalation (resets in {HumanDuration.Humanize(s.MemoryEnd - now)})";
+            _chat.SendMessage(player, $"  {s.Player.Name} -- {KindLabel(s.Kind)}: {state}; {ladder}");
+        }
+    }
+
+    /// <summary>Player-facing phrasing for the penalty reason shown by ?penalties.</summary>
+    private static string KindLabel(PenaltyKind kind) => kind switch
+    {
+        PenaltyKind.Abandonment => "abandoned a match",
+        PenaltyKind.Griefing => "griefing",
+        PenaltyKind.EliminationCooldown => "elimination cooldown",
+        PenaltyKind.StagingAfk => "AFK during staging",
+        _ => kind.ToString(),
+    };
+
+    private static string Ordinal(int n)
+    {
+        if (n % 100 is >= 11 and <= 13) return $"{n}th";
+        return (n % 10) switch { 1 => $"{n}st", 2 => $"{n}nd", 3 => $"{n}rd", _ => $"{n}th" };
+    }
+
+    // ---- ?resetplayer <player> [--keep-rating]
 
     /// <summary>
     /// Operator-only reset. Parses a required player name and an optional --keep-rating flag,
@@ -953,48 +1022,25 @@ public sealed class MatchmakingCommands
     /// summary of what was actually cleared. Always Info-logs the action with the operator's
     /// name -- this is moderation, useful to audit even outside debug verbosity.
     /// </summary>
-    private void ClashReset(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    private void ResetPlayerCmd(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
     {
-        LogCommand("clashreset", player, parameters);
+        LogCommand("resetplayer", player, parameters);
 
-        var args = parameters.Trim();
-        if (args.IsEmpty)
+        // Player names may contain spaces, so the parser (Core, unit-tested) only recognizes
+        // flags at the ends of the argument string and takes everything between them verbatim
+        // as the name.
+        var parsed = ResetPlayerArgs.Parse(parameters);
+        if (parsed.UnknownFlag is { } unknownFlag)
         {
-            _chat.SendMessage(player, "Usage: ?clashreset <player> [--keep-rating]");
+            _chat.SendMessage(player, $"Unknown flag '{unknownFlag}'. Supported: --keep-rating.");
             return;
         }
-
-        // Tokenize on whitespace. The flag may come before or after the player name; everything
-        // else is the player name (only one positional token allowed).
-        bool keepRating = false;
-        string? targetName = null;
-        foreach (var raw in args.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        if (parsed.PlayerName is not { } targetName)
         {
-            if (string.Equals(raw, "--keep-rating", StringComparison.OrdinalIgnoreCase))
-            {
-                keepRating = true;
-            }
-            else if (raw.StartsWith("--", StringComparison.Ordinal))
-            {
-                _chat.SendMessage(player, $"Unknown flag '{raw}'. Supported: --keep-rating.");
-                return;
-            }
-            else if (targetName is null)
-            {
-                targetName = raw;
-            }
-            else
-            {
-                _chat.SendMessage(player, "Usage: ?clashreset <player> [--keep-rating]");
-                return;
-            }
-        }
-
-        if (targetName is null)
-        {
-            _chat.SendMessage(player, "Usage: ?clashreset <player> [--keep-rating]");
+            _chat.SendMessage(player, "Usage: ?resetplayer <player> [--keep-rating]");
             return;
         }
+        bool keepRating = parsed.KeepRating;
 
         var targetKey = new PlayerKey(targetName);
         var summary = _engine.ResetPlayer(targetKey, _clock.UtcNow, keepRating);
@@ -1002,7 +1048,7 @@ public sealed class MatchmakingCommands
         // Audit log -- always emitted (not gated on _log.IsDebug) so operators have a paper
         // trail even with verbosity at Normal. Mirrors ?clashlog's "always log this" pattern.
         _log.Info(LogCategory,
-            $"?clashreset by {player.Name ?? "(no-name)"}: target={targetKey.Name} keepRating={keepRating} " +
+            $"?resetplayer by {player.Name ?? "(no-name)"}: target={targetKey.Name} keepRating={keepRating} " +
             $"queues={summary.RemovedFromQueues} group={summary.LeftGroup} match={summary.RemovedFromMatch} " +
             $"penalties={summary.PenaltyEventsCleared} ratings={summary.RatingsCleared} " +
             $"pendingGriefs={summary.PendingGriefsCleared}");
@@ -1017,9 +1063,9 @@ public sealed class MatchmakingCommands
 
         string suffix = keepRating ? " (rating preserved)" : "";
         if (parts.Count == 0)
-            _chat.SendMessage(player, $"?clashreset {targetKey.Name}: no persistent data found{suffix}.");
+            _chat.SendMessage(player, $"?resetplayer {targetKey.Name}: no persistent data found{suffix}.");
         else
-            _chat.SendMessage(player, $"?clashreset {targetKey.Name}: {string.Join(", ", parts)}{suffix}.");
+            _chat.SendMessage(player, $"?resetplayer {targetKey.Name}: {string.Join(", ", parts)}{suffix}.");
     }
 
     // ---- ?clashlog [off|normal|verbose|trace]
@@ -1076,7 +1122,7 @@ public sealed class MatchmakingCommands
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?rating",                      "Show your skill rating per game type."),
             ("?connect discord <alias>",     "Relay a request to link your name to a Discord alias (the bot confirms)."),
-            ("?autoqueue [on|off]",          "Auto re-queue into a match's queue when it ends (persists; off if flagged AFK)."),
+            ("?autoqueue [on|off]",          "Auto re-queue when a match ends; no argument toggles (persists; off if flagged AFK)."),
             ("?chart",                       "Show the live scoreboard for your match (or one you're spectating)."),
             ("?party",                       "List your current party's members (leader marked if closed)."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),
@@ -1085,6 +1131,7 @@ public sealed class MatchmakingCommands
             ("?leaveparty",                  "Leave your party (leader of a closed party = disband)."),
             ("?partymode [open|closed]",     "View or change your party's invite-control mode."),
             ("?forgive <player>",            "Vote to overturn a pending griefing penalty."),
+            ("?penalties",                   "List players on queue timeout: reason, time left, escalation multiplier."),
         };
 
         // Pad the command column to the longest row's length so every description starts at the

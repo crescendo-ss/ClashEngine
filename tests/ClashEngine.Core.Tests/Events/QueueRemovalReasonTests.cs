@@ -94,6 +94,20 @@ public class QueueRemovalReasonTests
     }
 
     [Fact]
+    public void Reset_resolves_a_spaced_name_typed_in_a_different_case()
+    {
+        // ?resetplayer takes the name verbatim (it may contain spaces) and the operator may
+        // type it in any case; the reset must still find the stored player.
+        var h = new Harness();
+        h.Connect("Bob the Builder");
+        h.Enqueue("Bob the Builder");
+        h.Engine.ResetPlayer(K("BOB THE builder"), h.Clock.UtcNow, keepRating: true);
+
+        Assert.Contains(h.Telemetry.QueueRemovals,
+            r => r.Player.Equals(K("Bob the Builder")) && r.Reason == QueueRemovalReason.Reset);
+    }
+
+    [Fact]
     public void Match_formation_reports_reason_matched()
     {
         var h = new Harness();

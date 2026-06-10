@@ -68,6 +68,33 @@ public class PlayerKeyTests
         Assert.Equal("Alice", new PlayerKey("Alice").ToString());
     }
 
+    // Subspace player names may contain spaces. PlayerKey must carry them verbatim — every
+    // name-taking command (?accept/?decline/?forgive/?resetplayer) funnels the typed name into
+    // a PlayerKey and relies on this equality to find the stored player.
+
+    [Fact]
+    public void Spaced_names_compare_case_insensitively()
+    {
+        Assert.Equal(new PlayerKey("Bob the Builder"), new PlayerKey("bob THE builder"));
+        Assert.Equal(new PlayerKey("Bob the Builder").GetHashCode(),
+                     new PlayerKey("bob the builder").GetHashCode());
+    }
+
+    [Fact]
+    public void Spaces_are_significant()
+    {
+        Assert.NotEqual(new PlayerKey("Bob Smith"), new PlayerKey("BobSmith"));
+        Assert.NotEqual(new PlayerKey("Bob  Smith"), new PlayerKey("Bob Smith"));
+    }
+
+    [Fact]
+    public void Spaced_name_round_trips_through_a_dictionary()
+    {
+        var dict = new Dictionary<PlayerKey, int> { [new PlayerKey("Bob the Builder")] = 7 };
+        Assert.Equal(7, dict[new PlayerKey("BOB THE BUILDER")]);
+        Assert.False(dict.ContainsKey(new PlayerKey("Bob")));
+    }
+
     [Fact]
     public void Works_as_dictionary_key()
     {

@@ -122,9 +122,10 @@ cmd_decline
 cmd_forgive
 cmd_helpclash
 cmd_chart
+cmd_penalties
 ```
 
-`?clashlog` is reserved for higher-privileged groups by default; grant it where appropriate.
+`?clashlog` and `?resetplayer` are reserved for higher-privileged groups by default; grant them where appropriate.
 
 ---
 
@@ -401,8 +402,9 @@ v1 emits:
 | `?partymode [open\|closed]` | player | View or change your party's mode. Closed parties have a leader who controls invites. |
 | `?rating` | player | Show your skill rating per game type. |
 | `?connect discord <alias>` | player | Relay a request to link your in-game name to a Discord alias, so the [event-stream](#event-stream) consumer (e.g. a Discord bot) can notify you. ClashEngine stores nothing — it emits a `player.discord_link_requested` event and the bot service performs the link/opt-in. |
-| `?autoqueue [on\|off]` | player | View or set auto-queue. When **on**, you're automatically re-queued into a match's queue when it ends (the same queue you popped out of), so you keep cycling through matches without re-issuing `?play`. Persists across sessions. Independent of the KOTH `Queue<i>PromoteWinners` setting, and applies to winners and losers alike (added at the back, not the head). Auto-disabled — with a notice to turn it back on — if you're flagged for a staging AFK violation. |
+| `?autoqueue [on\|off]` | player | Set auto-queue, or **toggle** it with no argument. When **on**, you're automatically re-queued into a match's queue when it ends (the same queue you popped out of), so you keep cycling through matches without re-issuing `?play`. Persists across sessions. Independent of the KOTH `Queue<i>PromoteWinners` setting, and applies to winners and losers alike (added at the back, not the head). Auto-disabled — with a notice to turn it back on — if you're flagged for a staging AFK violation. |
 | `?chart` | player | Show the live scoreboard for the match you're in or spectating. |
 | `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
+| `?penalties` | player | List every player with live queue-timeout penalty state, one line per penalty ladder: the reason (abandonment, griefing, elimination cooldown, staging AFK), time remaining on the timeout (or "timeout served"), and the escalation multiplier with how long until it resets (the policy's memory window since the last offense). Players still serving a timeout sort first. |
 | `?helpclash` | player | List the player commands. |
 | `?clashlog [off\|normal\|verbose\|trace]` | mod | Read or set ClashEngine debug verbosity at runtime. |

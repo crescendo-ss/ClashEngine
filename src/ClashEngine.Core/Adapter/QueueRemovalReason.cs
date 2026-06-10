@@ -23,6 +23,6 @@ public enum QueueRemovalReason
     /// <summary>The player was swept from queues by a party membership change (join/leave/disband).</summary>
     GroupChange,
 
-    /// <summary>The player's matchmaking state was wiped by an operator <c>?clashreset</c>.</summary>
+    /// <summary>The player's matchmaking state was wiped by an operator <c>?resetplayer</c>.</summary>
     Reset,
 }

@@ -388,4 +388,75 @@ public class PenaltyTrackerTests
         var latest = T0 + TimeSpan.FromMinutes(19);
         Assert.Equal(latest + TimeSpan.FromHours(6), until);
     }
+
+    [Fact]
+    public void ActiveStatuses_empty_tracker_returns_empty()
+    {
+        Assert.Empty(Tracker().ActiveStatuses(T0));
+    }
+
+    [Fact]
+    public void ActiveStatuses_reports_ladder_multiplier_and_window_ends()
+    {
+        var t = Tracker();   // abandonment: 10min base, x2 factor, 24h memory
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0);
+        var second = T0 + TimeSpan.FromMinutes(30);
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, second);
+
+        var status = Assert.Single(t.ActiveStatuses(second));
+        Assert.Equal(K("Alice"), status.Player);
+        Assert.Equal(PenaltyKind.Abandonment, status.Kind);
+        Assert.Equal(2, status.OffenseCount);
+        Assert.Equal(2.0, status.Multiplier);                                  // 2^(2-1) * 1.0
+        Assert.Equal(second, status.LastAt);
+        Assert.Equal(second + TimeSpan.FromMinutes(20), status.TimeoutEnd);    // 10min * x2
+        Assert.Equal(second + TimeSpan.FromHours(24), status.MemoryEnd);
+    }
+
+    [Fact]
+    public void ActiveStatuses_severity_scales_the_multiplier()
+    {
+        var t = Tracker();
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0, severity: 3.0);
+
+        var status = Assert.Single(t.ActiveStatuses(T0));
+        Assert.Equal(1, status.OffenseCount);
+        Assert.Equal(3.0, status.Multiplier);
+    }
+
+    [Fact]
+    public void ActiveStatuses_keeps_served_timeout_while_memory_window_is_armed()
+    {
+        var t = Tracker();   // abandonment timeout 10min, memory 24h
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0);
+
+        var afterTimeout = T0 + TimeSpan.FromHours(1);
+        var status = Assert.Single(t.ActiveStatuses(afterTimeout));
+        Assert.True(status.TimeoutEnd <= afterTimeout);
+        Assert.True(status.MemoryEnd > afterTimeout);
+    }
+
+    [Fact]
+    public void ActiveStatuses_excludes_entries_past_both_windows()
+    {
+        var t = Tracker(abandonMemory: TimeSpan.FromHours(24));
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0);
+
+        Assert.Empty(t.ActiveStatuses(T0 + TimeSpan.FromHours(25)));
+    }
+
+    [Fact]
+    public void ActiveStatuses_returns_one_row_per_player_kind()
+    {
+        var t = Tracker();
+        t.RecordPenalty(K("Alice"), PenaltyKind.Abandonment, T0);
+        t.RecordPenalty(K("Alice"), PenaltyKind.Griefing, T0);
+        t.RecordPenalty(K("Bob"), PenaltyKind.Abandonment, T0);
+
+        var statuses = t.ActiveStatuses(T0);
+        Assert.Equal(3, statuses.Count);
+        Assert.Contains(statuses, s => s.Player == K("Alice") && s.Kind == PenaltyKind.Abandonment);
+        Assert.Contains(statuses, s => s.Player == K("Alice") && s.Kind == PenaltyKind.Griefing);
+        Assert.Contains(statuses, s => s.Player == K("Bob") && s.Kind == PenaltyKind.Abandonment);
+    }
 }

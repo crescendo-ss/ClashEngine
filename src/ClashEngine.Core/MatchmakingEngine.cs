@@ -615,7 +615,7 @@ public sealed class MatchmakingEngine
 
     /// <summary>
     /// Operator-driven full wipe of <paramref name="player"/>'s matchmaking state. Used by the
-    /// <c>?clashreset</c> command. Clears every persistent and in-flight artifact tied to the
+    /// <c>?resetplayer</c> command. Clears every persistent and in-flight artifact tied to the
     /// player: queue entries, party membership, any in-progress match (without re-applying an
     /// abandonment penalty to the target), penalty history, KOTH consecutive-defense counters,
     /// pending griefing penalties targeting them, and -- unless <paramref name="keepRating"/>

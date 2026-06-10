@@ -160,6 +160,47 @@ public class PlayerNameMatcherTests
         Assert.Equal("Diana", result.Name);
     }
 
+    // ---- spaced names (Subspace names may contain spaces) ----
+
+    [Fact]
+    public void Exact_match_works_for_a_name_with_spaces()
+    {
+        var roster = new[] { "Bob the Builder", "Bob", "Diana" };
+        var result = PlayerNameMatcher.Resolve("bob the builder", roster);
+        Assert.Equal(NameMatchKind.Exact, result.Kind);
+        Assert.Equal("Bob the Builder", result.Name);
+    }
+
+    [Fact]
+    public void Prefix_match_works_across_a_space()
+    {
+        // The typed prefix itself contains the space -- the matcher must not tokenize.
+        var roster = new[] { "Bob the Builder", "Diana" };
+        var result = PlayerNameMatcher.Resolve("Bob the", roster);
+        Assert.Equal(NameMatchKind.Prefix, result.Kind);
+        Assert.Equal("Bob the Builder", result.Name);
+    }
+
+    [Fact]
+    public void Fuzzy_match_tolerates_a_missing_space()
+    {
+        // "Bobthe Builder" vs "Bob the Builder": one deletion, distance 1.
+        var roster = new[] { "Bob the Builder", "Diana" };
+        var result = PlayerNameMatcher.Resolve("Bobthe Builder", roster);
+        Assert.Equal(NameMatchKind.Fuzzy, result.Kind);
+        Assert.Equal("Bob the Builder", result.Name);
+    }
+
+    [Fact]
+    public void Spaced_prefix_collision_is_ambiguous()
+    {
+        var roster = new[] { "Bob the Builder", "Bob the Baker" };
+        var result = PlayerNameMatcher.Resolve("Bob the", roster);
+        Assert.Equal(NameMatchKind.Ambiguous, result.Kind);
+        Assert.Contains("Bob the Builder", result.Candidates);
+        Assert.Contains("Bob the Baker", result.Candidates);
+    }
+
     // ---- OSA distance unit tests ----
 
     [Theory]

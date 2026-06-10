@@ -231,6 +231,22 @@ public class GroupMatchmakingTests
     }
 
     [Fact]
+    public void Invite_and_accept_work_with_spaced_player_names()
+    {
+        // Subspace names may contain spaces. ?party/?accept pass the typed name through
+        // verbatim (split only on commas / taken as the whole remainder), so the engine must
+        // resolve a spaced, differently-cased name to the stored player.
+        var h = new Harness();
+        h.Connect("Bob the Builder", "Mary Jane");
+
+        Assert.Equal(InviteResult.Sent,
+            h.Engine.InviteToGroup(K("Bob the Builder"), K("Mary Jane"), T0));
+        Assert.Equal(AcceptResult.Joined,
+            h.Engine.AcceptInvite(K("Mary Jane"), K("bob the builder"), T0.AddSeconds(1), out var group));
+        Assert.Equal(2, h.Engine.Groups.MembersOf(group).Count);
+    }
+
+    [Fact]
     public void LeaveGroup_dequeues_from_all_queues()
     {
         var h = new Harness();

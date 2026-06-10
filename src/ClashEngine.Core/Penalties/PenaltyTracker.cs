@@ -139,6 +139,35 @@ public sealed class PenaltyTracker
         }
     }
 
+    /// <summary>
+    /// Per-ladder status for every (player, kind) that is still live at <paramref name="at"/>:
+    /// either the timeout hasn't ended yet, or the memory window is still armed (so a new
+    /// offense would escalate). Liveness matches <see cref="Prune"/> — anything Prune would
+    /// remove is excluded here.
+    /// </summary>
+    public IReadOnlyList<PenaltyStatus> ActiveStatuses(DateTimeOffset at)
+    {
+        lock (_gate)
+        {
+            var list = new List<PenaltyStatus>();
+            foreach (var kvp in _events)
+            {
+                var policy = GetPolicy(kvp.Key.Kind);
+                int count = ComputeOffenseCountLocked(kvp.Value, kvp.Key.Kind);
+                var latest = kvp.Value[^1];
+                var timeoutEnd = latest.At + policy.EffectiveTimeoutFor(count, latest.Severity, latest.BaseTimeoutOverride);
+                var memoryEnd = latest.At + policy.MemoryWindow;
+                if (timeoutEnd <= at && memoryEnd <= at) continue;
+                double multiplier = Math.Pow(policy.EscalationFactor, count - 1) * latest.Severity;
+                if (!double.IsFinite(multiplier)) multiplier = double.MaxValue;
+                list.Add(new PenaltyStatus(
+                    kvp.Key.Player, kvp.Key.Kind, count, latest.Severity, multiplier,
+                    latest.At, timeoutEnd, memoryEnd));
+            }
+            return list;
+        }
+    }
+
     public void Rehydrate(IEnumerable<PenaltyRecord> records)
     {
         ArgumentNullException.ThrowIfNull(records);
