@@ -53,6 +53,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnQueueNearFull(q, waiting, waitingCount, needed);
     }
+    public void OnQueueMatchmakingBlocked(string q, QueueBlockStatus status, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnQueueMatchmakingBlocked(q, status, at);
+    }
     public void OnQueueHoldStarted(string q, IReadOnlyList<PlayerKey> candidates, double quality, TimeSpan holdWindow)
     {
         foreach (var l in _listeners) l.OnQueueHoldStarted(q, candidates, quality, holdWindow);
