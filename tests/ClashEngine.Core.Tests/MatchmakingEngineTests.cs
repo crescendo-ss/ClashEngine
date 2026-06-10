@@ -317,6 +317,45 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
+    public void Join_timeout_backstop_outlasts_a_long_staging_and_countdown_window()
+    {
+        // Regression: a queue whose StagingDuration + CountdownDuration exceeds the engine's default
+        // join-timeout must NOT be cancelled by the engine before the orchestrator finishes its own
+        // staging (idle detection) + countdown. Otherwise the engine's join-timeout fires first and
+        // tears the Forming match down silently -- pre-empting the orchestrator's AFK/no-show
+        // broadcast (and, on the happy path, killing a healthy match mid-countdown). The shape is
+        // irrelevant; only the staging+countdown window drives the derived backstop.
+        var h = new Harness(joinTimeout: TimeSpan.FromMinutes(1));   // default 60s
+        h.Engine.Queues.Register(
+            "slowstage",
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt1",
+            () => new KillCountEndPolicy(5),
+            stagingDuration: TimeSpan.FromSeconds(60),
+            countdownDuration: TimeSpan.FromSeconds(20));
+
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            Assert.Equal(EnqueueResult.Ok, h.Engine.TryEnqueue(K(n), "slowstage", T0));
+        h.Engine.Tick(T0);
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+
+        // Past the old fixed 60s join-timeout, but within staging(60) + countdown(20) + margin(30):
+        // the match is still Forming, leaving the orchestrator room to run its own cancellation.
+        h.Clock.Advance(TimeSpan.FromSeconds(65));
+        h.Engine.Tick(h.Clock.UtcNow);
+        Assert.Empty(h.Telemetry.Ended);
+        Assert.Equal(MatchState.Forming, h.Engine.ActiveMatches[matchId].State);
+
+        // Past the derived backstop (60+20+30 = 110s): the engine's safety net still fires.
+        h.Clock.Advance(TimeSpan.FromSeconds(50));   // 115s since proposal
+        h.Engine.Tick(h.Clock.UtcNow);
+        Assert.Single(h.Telemetry.Ended);
+        Assert.Equal(MatchState.Cancelled, h.Telemetry.Ended[0].FinalState);
+    }
+
+    [Fact]
     public void Disconnect_during_live_match_starts_grace_then_abandons_on_tick()
     {
         var h = new Harness(graceWindow: TimeSpan.FromSeconds(30), killTarget: 100);

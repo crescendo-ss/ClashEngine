@@ -159,6 +159,16 @@ public sealed class MatchOrchestrator
     public Guid MatchId => _matchId;
     public MatchPhase Phase { get; private set; } = MatchPhase.Setup;
 
+    /// <summary>
+    /// True once one of this orchestrator's own cancellation paths (<see cref="OnStagingEnd"/>'s
+    /// no-show branch or <see cref="AbandonForAbsenteesAtGo"/>) has broadcast a tailored
+    /// "Match cancelled ..." line naming the responsible player(s). The registry consults this in
+    /// <c>OnMatchEnded</c>: a Cancelled match the orchestrator did NOT announce -- i.e. the engine's
+    /// join-timeout backstop fired without the orchestrator reaching a cancellation itself -- still
+    /// gets a generic notice instead of dying silently.
+    /// </summary>
+    public bool HasAnnouncedCancellation { get; private set; }
+
     /// <summary>Single funnel for phase transitions so every change shows up in the log when
     /// verbose. Returns the new phase for ergonomic chaining.</summary>
     private MatchPhase SetPhase(MatchPhase next)
@@ -738,6 +748,7 @@ public sealed class MatchOrchestrator
                     _audience.Broadcast(_matchId, _queue.MatchArenaName, stillHere, cancelMessage);
                 else
                     foreach (var p in stillHere) _chat.SendMessage(p, cancelMessage);
+                HasAnnouncedCancellation = true;
 
                 // Drive still-here participants to Active before cancelling. PlayerStateObserver only
                 // fires OnPlayerJoinedArena on a spec->active ship change, so a participant who was
@@ -1010,6 +1021,7 @@ public sealed class MatchOrchestrator
             _audience.Broadcast(_matchId, _queue.MatchArenaName, present, cancelMessage);
         else
             foreach (var p in present) _chat.SendMessage(p, cancelMessage);
+        HasAnnouncedCancellation = true;
 
         _engine.CancelForming(_matchId, _clock.UtcNow);
         // Cleanup is invoked by the registry's OnMatchEnded handler.

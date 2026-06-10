@@ -36,6 +36,14 @@ public sealed class MatchmakingEngine
     private IMatchmakingTelemetry _telemetry;
     private readonly TimeSpan _joinTimeout;
     private readonly TimeSpan _graceWindow;
+
+    /// <summary>
+    /// Slack added on top of a queue's staging + countdown window when deriving a Forming match's
+    /// join-timeout backstop (see <see cref="EffectiveJoinTimeout"/>). Covers mainloop-timer slop
+    /// and the gap between proposal and the orchestrator actually starting its staging timer, so
+    /// the backstop never races the orchestrator's own staging-end / countdown cancellation.
+    /// </summary>
+    private static readonly TimeSpan JoinTimeoutBackstopMargin = TimeSpan.FromSeconds(30);
     private readonly Dictionary<Guid, ActiveMatch> _matches = new();
     private readonly Dictionary<Guid, QueueDefinition> _matchQueue = new();
     private readonly Dictionary<PlayerKey, Guid> _matchOf = new();
@@ -928,7 +936,7 @@ public sealed class MatchmakingEngine
             def.GameType,
             proposal.Teams,
             def.EndPolicyFactory(),
-            _joinTimeout,
+            EffectiveJoinTimeout(def),
             _graceWindow,
             at,
             livesPerPlayer: def.LivesPerPlayer,
@@ -953,6 +961,25 @@ public sealed class MatchmakingEngine
             }
 
         _telemetry.OnMatchProposed(proposal);
+    }
+
+    /// <summary>
+    /// The Forming-state join-timeout for a match formed from <paramref name="def"/>. The engine's
+    /// join-timeout is a backstop for a match that never reaches GO! (orchestrator wedged, players
+    /// never loaded in); it MUST outlast the orchestrator's own pre-Live sequence -- up to
+    /// <see cref="QueueDefinition.StagingDuration"/> of idle detection followed by
+    /// <see cref="QueueDefinition.CountdownDuration"/> of countdown -- or it fires first and cancels
+    /// the match itself. That engine-side cancellation is silent (no orchestrator broadcast names the
+    /// AFK / no-show player), and on the happy path it would also kill a healthy match mid-countdown
+    /// whose staging happened to run long. So take the larger of the configured default and the
+    /// staging+countdown window plus <see cref="JoinTimeoutBackstopMargin"/>. With the default
+    /// 10s/10s staging+countdown the result is just the configured default; longer per-queue windows
+    /// (e.g. a 4v4 with 60s staging + 20s countdown) push the backstop out past them.
+    /// </summary>
+    private TimeSpan EffectiveJoinTimeout(QueueDefinition def)
+    {
+        var orchestratorWindow = def.StagingDuration + def.CountdownDuration + JoinTimeoutBackstopMargin;
+        return orchestratorWindow > _joinTimeout ? orchestratorWindow : _joinTimeout;
     }
 
     private void FinalizeMatch(ActiveMatch m, DateTimeOffset at)

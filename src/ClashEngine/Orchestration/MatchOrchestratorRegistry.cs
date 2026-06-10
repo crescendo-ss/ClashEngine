@@ -129,15 +129,20 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
             if (ReferenceEquals(kvp.Value, orchestrator)) toRemove.Add(kvp.Key);
         foreach (var k in toRemove) _stagingPlayers.Remove(k);
 
-        // Cancelled state currently only comes from the staging no-show path, which has already
-        // broadcast a tailored "Match cancelled. {names} left / did not ready..." line in
-        // OnStagingEnd. Pass null here so Cleanup doesn't follow it with a redundant generic
-        // "Match cancelled."
+        // A Cancelled match usually came from the orchestrator's own staging no-show path
+        // (OnStagingEnd) or a GO!-time absentee (AbandonForAbsenteesAtGo); both already broadcast a
+        // tailored "Match cancelled. {names} left / did not ready..." line, so pass null to avoid a
+        // redundant generic one. But a Cancelled match the orchestrator did NOT announce means the
+        // engine's join-timeout backstop fired before/instead of its staging cancellation -- without
+        // a fallback that match would be torn down with no chat at all, leaving players wondering why
+        // they were specced. Surface a generic notice in that case.
         var summary = outcome.FinalState switch
         {
             MatchState.Completed when outcome.RankedTeams.Count > 0 =>
                 $"Match over! Team {string.Join("/", outcome.RankedTeams[0].Players)} wins.",
-            MatchState.Cancelled => null,
+            MatchState.Cancelled => orchestrator.HasAnnouncedCancellation
+                ? null
+                : "Match cancelled -- it didn't start in time. Use ?play to queue again.",
             MatchState.Abandoned => "Match abandoned.",
             _ => "Match ended.",
         };
