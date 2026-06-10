@@ -306,9 +306,16 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             ? new SpawnSettingsApplier(_clientSettings, _log)
             : null;
 
+        // Same client-settings edge, different override: zeroes per-ship item maxes for game
+        // types with DisallowItems=1 (no-items mode). Optional with the same degrade story.
+        var noItemsApplier = _clientSettings is not null
+            ? new NoItemsSettingsApplier(_clientSettings, _log)
+            : null;
+
         _orchestrators = new MatchOrchestratorRegistry(
             broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
-            matchAudience, freqAllocator, matchStats: _matchStats, spawnApplier: spawnApplier);
+            matchAudience, freqAllocator, matchStats: _matchStats, spawnApplier: spawnApplier,
+            noItemsApplier: noItemsApplier);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 

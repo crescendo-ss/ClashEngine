@@ -66,9 +66,10 @@ public sealed class SpawnSettingsApplier
     /// Override <paramref name="player"/>'s <c>[Spawn]</c> settings (all four Team slots) to
     /// <paramref name="area"/> and push the updated client settings. The center is converted from
     /// pixels to tiles (the native setting's unit); the radius is clamped to the 9-bit field.
-    /// No-op when <see cref="Ready"/> is false.
+    /// Pass <paramref name="send"/> = <see langword="false"/> when batching with other overrides;
+    /// follow up with one <see cref="Send"/>. No-op when <see cref="Ready"/> is false.
     /// </summary>
-    public void Apply(Player player, SpawnArea area)
+    public void Apply(Player player, SpawnArea area, bool send = true)
     {
         if (!Ready || player is null) return;
 
@@ -84,16 +85,18 @@ public sealed class SpawnSettingsApplier
         }
 
         // One settings packet after all overrides (the packet is large; batch then send once).
-        _clientSettings.SendClientSettings(player);
+        if (send) _clientSettings.SendClientSettings(player);
     }
 
     /// <summary>
     /// Remove any <c>[Spawn]</c> override previously applied to <paramref name="player"/> and push
     /// the reverted settings, so they fall back to the arena's configured spawn. No-op when
     /// <see cref="Ready"/> is false. Callers should only invoke this for players they actually
-    /// applied an override to, to avoid sending a redundant client-settings packet.
+    /// applied an override to, to avoid sending a redundant client-settings packet. Pass
+    /// <paramref name="send"/> = <see langword="false"/> when batching with other overrides;
+    /// follow up with one <see cref="Send"/>.
     /// </summary>
-    public void Clear(Player player)
+    public void Clear(Player player, bool send = true)
     {
         if (!Ready || player is null) return;
 
@@ -104,6 +107,17 @@ public sealed class SpawnSettingsApplier
             _clientSettings.UnoverrideSetting(player, _rIds[i]);
         }
 
+        if (send) _clientSettings.SendClientSettings(player);
+    }
+
+    /// <summary>
+    /// Push <paramref name="player"/>'s current client settings. The settings packet is large --
+    /// when this applier's override lands together with another (e.g. the no-items override),
+    /// batch with <c>send: false</c> and call this once at the end.
+    /// </summary>
+    public void Send(Player player)
+    {
+        if (player is null) return;
         _clientSettings.SendClientSettings(player);
     }
 }

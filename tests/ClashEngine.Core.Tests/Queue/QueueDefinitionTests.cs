@@ -36,6 +36,21 @@ public class QueueDefinitionTests
     }
 
     [Fact]
+    public void Default_disallow_items_is_off()
+    {
+        // Items stay enabled unless the game type opts in to no-items mode explicitly.
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
+        Assert.False(def.DisallowItems);
+    }
+
+    [Fact]
+    public void Disallow_items_round_trips()
+    {
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), disallowItems: true);
+        Assert.True(def.DisallowItems);
+    }
+
+    [Fact]
     public void Casual_rating_weight_can_be_below_one()
     {
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), ratingWeight: 0.5);

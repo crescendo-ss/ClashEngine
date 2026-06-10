@@ -130,6 +130,7 @@ internal static class QueueParser
                 shipChangeGracePeriod: gt.ShipChangeGracePeriod,
                 timeLimit: gt.TimeLimit,
                 returnItemsAction: gt.ReturnItemsAction,
+                disallowItems: gt.DisallowItems,
                 ownerArenaName: ownerArenaName,
                 label: label,
                 afkDwellWarning: afkWarn,

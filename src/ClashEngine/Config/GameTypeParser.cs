@@ -117,6 +117,9 @@ internal static class GameTypeParser
         TimeSpan? teamCollapseGrace = ReadOptionalNonNegativeTimeSpan(config, handle, p + "TeamCollapseGrace", p, log);
         TimeSpan? shipChangeGracePeriod = ReadOptionalNonNegativeTimeSpan(config, handle, p + "ShipChangeGracePeriod", p, log);
         ItemsAction returnItemsAction = ReadReturnItemsAction(config, handle, p, log);
+        // No-items mode: the orchestrator zeroes every participant's per-ship item-max client
+        // settings (BurstMax/RepelMax/DecoyMax/BrickMax/ThorMax/RocketMax/PortalMax) for the match.
+        bool disallowItems = config.GetInt(handle, ConfigConstants.Section, p + "DisallowItems", 0) != 0;
         // Absent -> null (engine's built-in default cooldown); 0 -> disabled (eliminated players in
         // this game type requeue immediately); >0 -> that duration. Negative is warned and dropped.
         TimeSpan? eliminationCooldown = ReadOptionalNonNegativeTimeSpan(config, handle, p + "EliminationCooldown", p, log);
@@ -134,7 +137,7 @@ internal static class GameTypeParser
             startSetByTeam, maxDrift, useStartLocation, spawnByTeam,
             stagingDuration, countdownDuration, knockoutSpecDelay,
             teamCollapseGrace, shipChangeGracePeriod,
-            returnItemsAction, eliminationCooldown);
+            returnItemsAction, eliminationCooldown, disallowItems);
     }
 
     /// <summary>Reads <c>GameType&lt;i&gt;ReturnItemsAction</c>. Accepts <c>full</c>, <c>restore</c>,
@@ -201,6 +204,7 @@ internal static class GameTypeParser
             $"TeamCollapseGrace={(def.TeamCollapseGrace is { } tg ? tg.ToString() : "(default 10s)")}, " +
             $"ShipChangeGracePeriod={(def.ShipChangeGracePeriod is { } sg ? sg.ToString() : "(default 10s)")}, " +
             $"EliminationCooldown={(def.EliminationCooldown is { } ec ? (ec == TimeSpan.Zero ? "0 (disabled)" : ec.ToString()) : "(default 1m)")}, " +
-            $"ReturnItemsAction={def.ReturnItemsAction}.");
+            $"ReturnItemsAction={def.ReturnItemsAction}, " +
+            $"DisallowItems={def.DisallowItems}.");
     }
 }

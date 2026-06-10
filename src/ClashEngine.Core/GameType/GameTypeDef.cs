@@ -40,7 +40,8 @@ public sealed record GameTypeDef(
     TimeSpan? TeamCollapseGrace,
     TimeSpan? ShipChangeGracePeriod,
     ItemsAction ReturnItemsAction,
-    TimeSpan? EliminationCooldown = null);
+    TimeSpan? EliminationCooldown = null,
+    bool DisallowItems = false);
 
 /// <summary>
 /// Auto-derived <c>metadata</c> blob attached to the gametype-registration POST. Follows the

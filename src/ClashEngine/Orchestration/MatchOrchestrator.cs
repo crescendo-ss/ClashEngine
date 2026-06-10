@@ -52,9 +52,18 @@ public sealed class MatchOrchestrator
     /// paths that construct the orchestrator without the SS client-settings edge.</summary>
     private readonly SpawnSettingsApplier? _spawnApplier;
 
+    /// <summary>Applies/clears the per-player client-settings item-max override that implements the
+    /// game type's <c>DisallowItems</c> no-items mode. <see langword="null"/> in test paths that
+    /// construct the orchestrator without the SS client-settings edge.</summary>
+    private readonly NoItemsSettingsApplier? _noItemsApplier;
+
     /// <summary>Participants who currently have a respawn override applied (tracked so we only send
     /// the large client-settings packet to clear it for players we actually overrode).</summary>
     private readonly HashSet<PlayerKey> _respawnOverridden = new();
+
+    /// <summary>Participants who currently have the no-items item-max override applied (same
+    /// only-clear-what-we-overrode rationale as <see cref="_respawnOverridden"/>).</summary>
+    private readonly HashSet<PlayerKey> _noItemsOverridden = new();
 
     /// <summary>Per-player ship the participant was on at the moment they last specced themselves
     /// out. Populated by <see cref="OnPlayerSpecced"/>; consumed by <see cref="TryReturn"/> so the
@@ -108,7 +117,8 @@ public sealed class MatchOrchestrator
         IRandomSource? rng = null,
         MatchStatsRegistry? matchStats = null,
         IComponentBroker? broker = null,
-        SpawnSettingsApplier? spawnApplier = null)
+        SpawnSettingsApplier? spawnApplier = null,
+        NoItemsSettingsApplier? noItemsApplier = null)
     {
         _matchId = matchId;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -128,6 +138,7 @@ public sealed class MatchOrchestrator
         _matchStats = matchStats;
         _broker = broker;
         _spawnApplier = spawnApplier;
+        _noItemsApplier = noItemsApplier;
         _drift = new StartDriftEnforcer(_queue, _proposal);
 
         for (int t = 0; t < _proposal.Teams.Count; t++)
@@ -267,11 +278,11 @@ public sealed class MatchOrchestrator
     {
         if (!_pendingPlacement.Remove(key, out var info)) return;
 
-        // Push the client-settings respawn override BEFORE the ship-up so the client already has
-        // the match's [Spawn] box when it spawns the ship. For the initial placement the WarpTo
-        // below moves them onto the exact start location regardless; the override governs every
-        // subsequent respawn after a death.
-        ApplyRespawnOverride(key, info.TeamIdx, player);
+        // Push the client-settings overrides BEFORE the ship-up so the client already has the
+        // match's [Spawn] box (and zeroed item maxes in no-items mode) when it spawns the ship.
+        // For the initial placement the WarpTo below moves them onto the exact start location
+        // regardless; the respawn override governs every subsequent respawn after a death.
+        ApplyClientSettingOverrides(key, info.TeamIdx, player);
 
         _game.SetShipAndFreq(player, info.Ship, info.Freq);
         if (info.StartX != 0 || info.StartY != 0)
@@ -296,40 +307,83 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// Apply the queue's per-team respawn box for <paramref name="teamIdx"/> to
-    /// <paramref name="player"/> via the client-settings <c>[Spawn]</c> override, recording that we
-    /// did so. No-op when no override is configured for that team (or the applier is absent), so a
-    /// player who needs no override never gets a client-settings packet.
+    /// Apply every client-settings override this match calls for to <paramref name="player"/> --
+    /// the team's respawn box (when one is configured) and the no-items item-max zeroing (when the
+    /// game type sets <c>DisallowItems</c>) -- then push at most one client-settings packet
+    /// covering both. A player who needs no override never gets a packet.
     /// </summary>
-    private void ApplyRespawnOverride(PlayerKey key, int teamIdx, Player player)
+    private void ApplyClientSettingOverrides(PlayerKey key, int teamIdx, Player player)
     {
-        if (_spawnApplier is null) return;
-        if (_queue.SpawnByTeam is not { } byTeam) return;
-        if (teamIdx < 0 || teamIdx >= byTeam.Count) return;
-        if (byTeam[teamIdx] is not { } area) return;
+        bool spawn = ApplyRespawnOverride(key, teamIdx, player);
+        bool items = ApplyNoItemsOverride(key, player);
+        if (spawn) _spawnApplier!.Send(player);
+        else if (items) _noItemsApplier!.Send(player);
+    }
 
-        _spawnApplier.Apply(player, area);
+    /// <summary>
+    /// Stage (without sending) the queue's per-team respawn box for <paramref name="teamIdx"/> on
+    /// <paramref name="player"/> via the client-settings <c>[Spawn]</c> override, recording that we
+    /// did so. Returns whether an override was staged; no-op (false) when no box is configured for
+    /// that team or the applier is absent / not ready.
+    /// </summary>
+    private bool ApplyRespawnOverride(PlayerKey key, int teamIdx, Player player)
+    {
+        if (_spawnApplier is not { Ready: true }) return false;
+        if (_queue.SpawnByTeam is not { } byTeam) return false;
+        if (teamIdx < 0 || teamIdx >= byTeam.Count) return false;
+        if (byTeam[teamIdx] is not { } area) return false;
+
+        _spawnApplier.Apply(player, area, send: false);
         _respawnOverridden.Add(key);
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
                 $"Match {_matchId:N}: applied respawn override for {key.Name} -> " +
                 $"({area.Center.X},{area.Center.Y}) r{area.RadiusTiles}t.");
+        return true;
     }
 
     /// <summary>
-    /// Clear any respawn override previously applied to <paramref name="key"/>, reverting them to
-    /// the arena's default spawn. No-op if we never applied one (so no redundant client-settings
-    /// packet). Resolves the player fresh so it works from the spec / cleanup paths.
+    /// Stage (without sending) the no-items override -- every ship's item-max client settings
+    /// zeroed -- on <paramref name="player"/>, recording that we did so. Returns whether the
+    /// override was staged; no-op (false) when the game type allows items or the applier is
+    /// absent / not ready.
     /// </summary>
-    private void ClearRespawnOverride(PlayerKey key)
+    private bool ApplyNoItemsOverride(PlayerKey key, Player player)
     {
-        if (_spawnApplier is null) return;
-        if (!_respawnOverridden.Remove(key)) return;
+        if (_noItemsApplier is not { Ready: true }) return false;
+        if (!_queue.DisallowItems) return false;
+
+        _noItemsApplier.Apply(player, send: false);
+        _noItemsOverridden.Add(key);
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"Match {_matchId:N}: applied no-items override for {key.Name}.");
+        return true;
+    }
+
+    /// <summary>
+    /// Clear any client-settings overrides (respawn box and/or no-items) previously applied to
+    /// <paramref name="key"/>, pushing at most one client-settings packet. No-op if we never
+    /// applied any (so no redundant packet). Resolves the player fresh so it works from the
+    /// spec / cleanup paths.
+    /// </summary>
+    private void ClearClientSettingOverrides(PlayerKey key)
+    {
+        bool hadSpawn = _respawnOverridden.Remove(key);
+        bool hadItems = _noItemsOverridden.Remove(key);
+        if (!hadSpawn && !hadItems) return;
         if (_resolver.Resolve(key) is not { } player) return;
 
-        _spawnApplier.Clear(player);
+        // Keys only enter the tracking sets when the corresponding applier was present and ready,
+        // so the null-forgiving derefs below are safe.
+        if (hadSpawn) _spawnApplier!.Clear(player, send: false);
+        if (hadItems) _noItemsApplier!.Clear(player, send: false);
+        if (hadSpawn) _spawnApplier!.Send(player);
+        else _noItemsApplier!.Send(player);
+
         if (_verbose.IsDebug)
-            _verbose.Debug(LogCategory, $"Match {_matchId:N}: cleared respawn override for {key.Name}.");
+            _verbose.Debug(LogCategory,
+                $"Match {_matchId:N}: cleared client-setting overrides for {key.Name} " +
+                $"(respawn={hadSpawn}, noItems={hadItems}).");
     }
 
     private static bool IsInArena(Player player, string arenaName) =>
@@ -392,10 +446,11 @@ public sealed class MatchOrchestrator
         var ship = _shipAtLeave.TryGetValue(key, out var savedShip) && savedShip != ShipType.Spec
             ? savedShip
             : ShipType.Warbird;
-        // Re-apply the client-settings respawn override BEFORE the ship-up: a returning player is
-        // not warped to the start location, so the client must already hold the match's [Spawn]
-        // box when it spawns the ship for them to come back inside the match arena.
-        ApplyRespawnOverride(key, teamIdx, player);
+        // Re-apply the client-settings overrides BEFORE the ship-up: a returning player is not
+        // warped to the start location, so the client must already hold the match's [Spawn] box
+        // when it spawns the ship for them to come back inside the match arena (and the zeroed
+        // item maxes in no-items mode, so the fresh ship spawns item-free).
+        ApplyClientSettingOverrides(key, teamIdx, player);
         _game.SetShipAndFreq(player, ship, freq);
 
         // Apply the game type's items policy to the freshly-respawned loadout.
@@ -501,10 +556,11 @@ public sealed class MatchOrchestrator
         _shipAtLeave[key] = prevShip;
 
         // A ship->spec transition (self-spec or a knockout ForceSpec, both of which funnel through
-        // here) takes the player out of the match's respawn flow, so drop their [Spawn] override.
-        // A normal mid-match death does NOT fire this (Continuum respawns the ship without a spec
-        // transition), so the override correctly persists across respawns. ?return re-applies it.
-        ClearRespawnOverride(key);
+        // here) takes the player out of the match's flow, so drop their client-setting overrides
+        // ([Spawn] box and no-items item maxes). A normal mid-match death does NOT fire this
+        // (Continuum respawns the ship without a spec transition), so the overrides correctly
+        // persist across respawns. ?return re-applies them.
+        ClearClientSettingOverrides(key);
         if (_matchStats is not null
             && _matchStats.ActiveRecorders.TryGetValue(_matchId, out var recorder))
         {
@@ -748,13 +804,18 @@ public sealed class MatchOrchestrator
         _timer.ClearTimer<PlayerKey>(OnDeferredKnockoutSpec, this);
         _pendingKnockoutSpec.Clear();
 
-        // Revert any still-active respawn overrides so departing participants don't keep the
-        // match's [Spawn] box if they ship up elsewhere later. Snapshot the set since
-        // ClearRespawnOverride mutates it. (Most participants were already cleared when they were
-        // specced; this catches the rest -- e.g. winners still in their ships at match end.)
-        if (_spawnApplier is not null && _respawnOverridden.Count > 0)
-            foreach (var k in new List<PlayerKey>(_respawnOverridden))
-                ClearRespawnOverride(k);
+        // Revert any still-active client-setting overrides so departing participants don't keep
+        // the match's [Spawn] box or zeroed item maxes if they ship up elsewhere later. Snapshot
+        // the sets since ClearClientSettingOverrides mutates them. (Most participants were already
+        // cleared when they were specced; this catches the rest -- e.g. winners still in their
+        // ships at match end.)
+        if (_respawnOverridden.Count > 0 || _noItemsOverridden.Count > 0)
+        {
+            var overridden = new HashSet<PlayerKey>(_respawnOverridden);
+            overridden.UnionWith(_noItemsOverridden);
+            foreach (var k in overridden)
+                ClearClientSettingOverrides(k);
+        }
 
         // Free the freq slot back to the rotating pool so a future match in the same arena can
         // pick it up after we've cycled past it. Symmetric with the BeginSetup allocate.

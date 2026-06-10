@@ -46,7 +46,8 @@ public sealed class QueueDefinition
         TimeSpan? afkDwellWarning = null,
         TimeSpan? afkDwellCull = null,
         TimeSpan? eliminationCooldown = null,
-        bool alwaysChooseLongestWaiter = true)
+        bool alwaysChooseLongestWaiter = true,
+        bool disallowItems = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -152,6 +153,7 @@ public sealed class QueueDefinition
         AfkDwellCull = afkDwellCull;
         EliminationCooldown = eliminationCooldown;
         AlwaysChooseLongestWaiter = alwaysChooseLongestWaiter;
+        DisallowItems = disallowItems;
         OwnerArenaName = ownerArenaName;
 
         // BaseName is the structural part of UniqueId without the arena prefix. Used as the
@@ -397,6 +399,16 @@ public sealed class QueueDefinition
     /// relaxation still applies to whoever is at the head, but no longer guarantees they are picked).
     /// </summary>
     public bool AlwaysChooseLongestWaiter { get; }
+
+    /// <summary>
+    /// When <see langword="true"/>, matches in this queue run item-free: the orchestrator
+    /// overrides each participant's per-ship item-max client settings
+    /// (<c>BurstMax</c>/<c>RepelMax</c>/<c>DecoyMax</c>/<c>BrickMax</c>/<c>ThorMax</c>/
+    /// <c>RocketMax</c>/<c>PortalMax</c>) to 0 for the duration of the match, so ships spawn
+    /// with no stockpilable items and greens can't grant any. Inherited from the queue's game
+    /// type (<c>GameType&lt;i&gt;DisallowItems</c>). Cleared when a player leaves the match.
+    /// </summary>
+    public bool DisallowItems { get; }
 
     /// <summary>Conventional team-index -> freq number (100, 200, 300, ...).</summary>
     public static short FreqOf(int teamIndex) => (short)(100 * (teamIndex + 1));
