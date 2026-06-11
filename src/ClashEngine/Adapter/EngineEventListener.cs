@@ -161,7 +161,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         if (_resolver.Resolve(player) is { } p)
             _chat.SendMessage(p,
                 $"You've been in {FormatQueueDescriptor(queueName)} for {Format(dwell)} -- still around? " +
-                "Use ?play again to refresh, or you'll be removed for inactivity.");
+                "Turn your ship, fire, or chat (or ?play again), or you'll be removed for inactivity.");
     }
 
     public void OnDiscordLinkRequested(PlayerKey player, string discordAlias, DateTimeOffset at)

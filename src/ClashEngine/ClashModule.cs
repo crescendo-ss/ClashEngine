@@ -64,6 +64,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private SystemClock? _clock;
     private PlayerKeyResolver? _resolver;
     private PlayerStateObserver? _observer;
+    private QueueLivenessWatcher? _queueLiveness;
     private MatchKillRouter? _killRouter;
     private EngineEventListener? _listener;
     private ClashLog? _clashLog;
@@ -427,6 +428,18 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // (orchestrator setup, knockout-spec) bypass the advisor and remain unaffected.
         _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, _chat, freqAllocator);
 
+        // Queue liveness: in-game activity (ship rotation change, weapon fire, chat) refreshes
+        // queued players' AFK dwell clocks so present players never need to re-?play. Zone-scope
+        // kill switch: when 0 the watcher isn't constructed, so the zone-wide position/chat
+        // callbacks aren't subscribed at all and refresh reverts to ?play-only.
+        bool queueActivityRefresh = _config.GetInt(_config.Global, "ClashEngine", "QueueActivityRefresh", 1) != 0;
+        if (queueActivityRefresh)
+        {
+            _queueLiveness = new QueueLivenessWatcher(broker, _engine, _resolver, _clock, _clashLog);
+            _queueLiveness.Register();
+            _unregisterActions.Add(_queueLiveness.Unregister);
+        }
+
         // _listener is registered AFTER _matchStatsTelemetry so its OnMatchEnded handler runs
         // post-statbox: EngineEventListener buffers post-match DMs (abandonment / griefing /
         // promotion) during FinalizeMatch and drains them in OnMatchEnded, which must come after
@@ -437,6 +450,9 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // the other listeners see. It must NOT go after _listener, which stays last for its
         // post-match DM drain.
         var listeners = new List<Core.Adapter.IMatchmakingTelemetry> { eventStreamTelemetry, _orchestrators };
+        // The liveness watcher is a pure observer (tracks queue membership only, never chats or
+        // mutates engine state), so like eventStreamTelemetry it has no ordering dependency.
+        if (_queueLiveness is not null) listeners.Add(_queueLiveness);
         if (_replayRecorder is not null) listeners.Add(_replayRecorder);
         listeners.Add(_matchStatsTelemetry);
         listeners.Add(_listener);

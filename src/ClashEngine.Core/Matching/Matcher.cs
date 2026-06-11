@@ -113,6 +113,22 @@ public sealed class Matcher
         return def.Queue.Touch(player, at);
     }
 
+    /// <summary>
+    /// As <see cref="Touch"/>, but refreshes the player's liveness timestamp in every queue they
+    /// currently occupy. Returns the number of entries touched (0 = not queued anywhere). Touch
+    /// moves nobody, so held candidates stay valid.
+    /// </summary>
+    public int TouchEverywhere(PlayerKey player, DateTimeOffset at)
+    {
+        int touched = 0;
+        foreach (var name in _multiQueue.QueuesFor(player))
+        {
+            if (_registry.TryGet(name, out var def) && def.Queue.Touch(player, at))
+                touched++;
+        }
+        return touched;
+    }
+
     public bool Dequeue(PlayerKey player, string queueName)
     {
         if (!_registry.TryGet(queueName, out var def)) return false;

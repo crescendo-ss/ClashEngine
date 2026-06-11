@@ -313,6 +313,17 @@ public sealed class MatchmakingEngine
     }
 
     /// <summary>
+    /// In-game activity (ship rotation, weapon fire, chat) observed for a queued player. The
+    /// in-activity equivalent of re-issuing <c>?play</c>: refreshes the AFK dwell clock
+    /// (<see cref="QueueEntry.LastSeenAt"/>) in every queue the player occupies, without moving
+    /// them or disturbing <see cref="QueueEntry.EnqueuedAt"/>. A fresh timestamp also re-arms a
+    /// pending dwell warning (see <see cref="SweepAfkDwell"/>'s epoch keying). Cheap no-op for
+    /// players not queued anywhere. Returns <see langword="true"/> if any entry was refreshed.
+    /// </summary>
+    public bool OnPlayerActivity(PlayerKey player, DateTimeOffset at)
+        => _matcher.TouchEverywhere(player, at) > 0;
+
+    /// <summary>
     /// Adds <paramref name="player"/> to <paramref name="queueName"/> if eligible. Returns
     /// <see langword="true"/> on success.
     /// </summary>

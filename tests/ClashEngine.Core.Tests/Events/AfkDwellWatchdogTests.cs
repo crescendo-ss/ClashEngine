@@ -303,4 +303,108 @@ public class AfkDwellWatchdogTests
         Assert.Equal(T0, h.Entry("B").EnqueuedAt);                              // true time-in-queue preserved
         Assert.Equal(T0 + TimeSpan.FromMinutes(12), h.Entry("B").LastSeenAt);   // only the dwell clock advanced
     }
+
+    // ---- OnPlayerActivity: in-game activity (rotation/fire/chat, forwarded by the host
+    // adapter) is the same liveness ping as a repeat ?play, across every queue at once.
+
+    [Fact]
+    public void Activity_refreshes_LastSeenAt_in_every_queue_preserving_EnqueuedAt()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromHours(1));
+        h.Engine.Queues.Register(
+            "duo",
+            new MatchShape(2, 1),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt2",
+            () => new KillCountEndPolicy(5),
+            afkDwellWarning: TimeSpan.FromMinutes(15),
+            afkDwellCull: TimeSpan.FromHours(1));
+        h.Connect("A");
+        h.Enqueue("A");
+        h.Engine.TryEnqueue(K("A"), "duo", h.Clock.UtcNow);
+
+        h.Advance(TimeSpan.FromMinutes(5));
+        Assert.True(h.Engine.OnPlayerActivity(K("A"), h.Clock.UtcNow));
+
+        Assert.Equal(T0, h.Entry("A").EnqueuedAt);
+        Assert.Equal(T0 + TimeSpan.FromMinutes(5), h.Entry("A").LastSeenAt);
+
+        Assert.True(h.Engine.Queues.TryGet("duo", out var duo));
+        var duoEntry = duo.Queue.Snapshot().Single(e => e.Player.Equals(K("A")));
+        Assert.Equal(T0, duoEntry.EnqueuedAt);
+        Assert.Equal(T0 + TimeSpan.FromMinutes(5), duoEntry.LastSeenAt);
+    }
+
+    [Fact]
+    public void Activity_defers_the_dwell_warning()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromHours(1));
+        h.Connect("A");
+        h.Enqueue("A");
+
+        h.Advance(TimeSpan.FromMinutes(14));
+        h.Tick();
+        Assert.Empty(h.Telemetry.DwellWarnings);
+
+        Assert.True(h.Engine.OnPlayerActivity(K("A"), h.Clock.UtcNow));   // turned/fired/chatted
+
+        h.Advance(TimeSpan.FromMinutes(14));   // 28m in queue, 14m since the activity
+        h.Tick();
+        Assert.Empty(h.Telemetry.DwellWarnings);
+
+        h.Advance(TimeSpan.FromMinutes(1));    // 15m since the activity
+        h.Tick();
+        Assert.Single(h.Telemetry.DwellWarnings);
+    }
+
+    [Fact]
+    public void Activity_defers_the_cull()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromMinutes(20));
+        h.Connect("A");
+        h.Enqueue("A");
+
+        h.Advance(TimeSpan.FromMinutes(19));
+        h.Tick();
+        Assert.True(h.StillQueued("A"));
+
+        Assert.True(h.Engine.OnPlayerActivity(K("A"), h.Clock.UtcNow));
+
+        h.Advance(TimeSpan.FromMinutes(19));   // 38m in queue, 19m since activity < 20m cull
+        h.Tick();
+        Assert.True(h.StillQueued("A"));
+        Assert.DoesNotContain(h.Telemetry.QueueRemovals, r => r.Reason == QueueRemovalReason.AfkCull);
+    }
+
+    [Fact]
+    public void Activity_after_a_warning_rearms_it()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromHours(1));
+        h.Connect("A");
+        h.Enqueue("A");
+
+        h.Advance(TimeSpan.FromMinutes(15));
+        h.Tick();
+        Assert.Single(h.Telemetry.DwellWarnings);
+
+        Assert.True(h.Engine.OnPlayerActivity(K("A"), h.Clock.UtcNow));   // fresh liveness epoch
+
+        h.Advance(TimeSpan.FromMinutes(14));
+        h.Tick();
+        Assert.Single(h.Telemetry.DwellWarnings);   // not yet: 14m since the activity
+
+        h.Advance(TimeSpan.FromMinutes(1));
+        h.Tick();
+        Assert.Equal(2, h.Telemetry.DwellWarnings.Count);   // second warning, full period later
+    }
+
+    [Fact]
+    public void Activity_for_an_unqueued_player_is_a_noop_returning_false()
+    {
+        var h = new Harness(warn: TimeSpan.FromMinutes(15), cull: TimeSpan.FromMinutes(20));
+        h.Connect("A");
+
+        Assert.False(h.Engine.OnPlayerActivity(K("A"), h.Clock.UtcNow));
+        Assert.False(h.Engine.OnPlayerActivity(K("Nobody"), h.Clock.UtcNow));
+    }
 }

@@ -143,6 +143,7 @@ cmd_penalties
 | `RecordReplays` | 0/1 | 1 | Record every started match using the in-plug-in `MatchRecorder`. |
 | `ReplayRecordingDir` | path | `<AppContext.BaseDirectory>/clash-replays` | Where in-flight `.replay` files land. Files are deleted after a successful upload. |
 | `DistanceSampleHz` | int (1–50) | 5 | Frequency of the periodic distance-to-nearest-enemy sampler used for the scoreboard's `dE` column. Set to `0` to disable. |
+| `QueueActivityRefresh` | 0/1 | 1 | Queued players' in-game activity — turning their ship, firing any weapon, or sending any chat message — automatically refreshes their AFK dwell clock (`Queue<i>AfkWarn`/`AfkCull`), so present players never need to re-issue `?play`. Spectators emit no position data, so a queued spectator refreshes via chat or `?play` only. `0` restores `?play`-only refresh (and skips the position/chat observation entirely). |
 | `EventStreamUrl` | URL | (unset) | Outbound [event stream](#event-stream) endpoint. Receives one `application/json` POST per queue/match/player event for live advertising/notification (e.g. a Discord bot). Unset disables event emission. Never derived from `UploadUrl` — point it at the consuming service. |
 | `EventStreamApiKey` | string | (unset) | Sent as `X-Api-Key` on event POSTs. Falls back to `UploadApiKey` when unset, so a single gateway terminating both needs no extra config. |
 
@@ -229,7 +230,7 @@ Interactions worth knowing: presence is counted only from **active, in-ship** pa
 | `Queue<i>VetoWindow` | `HH:MM:SS` | `0:01:00` | Open period for vetos after a griefing flag fires. Penalty becomes final at the end of the window if the threshold wasn't reached. |
 | `Queue<i>PromoteWinners` | 0/1 | `0` | KOTH ("king of the hill") mode: the winning team's players are auto-re-enqueued at the head of this queue after a Completed match. Off by default. |
 | `Queue<i>MaxConsecutiveDefenses` | int ≥ 1 | `3` | Max consecutive wins a champion can defend before being sent to the back of the queue to give challengers a clean shot. Only meaningful with `PromoteWinners = 1`. |
-| `Queue<i>AfkWarn` | `HH:MM:SS` or seconds | `0:15:00` | In-queue dwell time before a one-time "still there?" AFK warning fires (a `queue.dwell_warning` [event](#event-stream) plus an in-game DM). `0` disables both the warning **and** the cull for this queue. Re-queuing resets the timer. |
+| `Queue<i>AfkWarn` | `HH:MM:SS` or seconds | `0:15:00` | In-queue dwell time before a one-time "still there?" AFK warning fires (a `queue.dwell_warning` [event](#event-stream) plus an in-game DM). `0` disables both the warning **and** the cull for this queue. Re-queuing, repeating `?play`, or any in-game activity (turning your ship, firing, chatting — see `QueueActivityRefresh`) resets the timer. |
 | `Queue<i>AfkCull` | `HH:MM:SS` or seconds | `0:20:00` | In-queue dwell time before the player is auto-dequeued for inactivity (a `queue.left` event with `reason = afk_cull`). `0` keeps the warning but never culls. A value below `AfkWarn` is raised to `AfkWarn`. |
 
 ### Per-arena `DefaultQueue`
@@ -383,7 +384,7 @@ v1 emits:
 
 **ClashEngine is identity-agnostic:** events are keyed by in-game player name. Any Discord-account link and per-player opt-in live entirely in the consuming service — `?connect discord` just relays the alias; the engine stores nothing.
 
-**AFK watchdog.** Players who sit in a queue too long are nudged then culled, per-queue via `Queue<i>AfkWarn` / `Queue<i>AfkCull` (defaults 15 min / 20 min; `AfkWarn = 0` disables). The warning surfaces as a `queue.dwell_warning` event and an in-game DM; the cull dequeues the player and surfaces as `queue.left` with `reason = afk_cull`. Re-queuing (`?play`) resets the timer.
+**AFK watchdog.** Players who sit in a queue too long are nudged then culled, per-queue via `Queue<i>AfkWarn` / `Queue<i>AfkCull` (defaults 15 min / 20 min; `AfkWarn = 0` disables). The warning surfaces as a `queue.dwell_warning` event and an in-game DM; the cull dequeues the player and surfaces as `queue.left` with `reason = afk_cull`. The timer resets on any proof of presence: in-game activity (turning your ship, firing any weapon, or sending any chat message — zone-wide toggle `QueueActivityRefresh`, on by default) or re-issuing `?play`. Deliberate input is required — a motionless client's keep-alive packets and a drifting ship's position changes don't count, and spectators (who emit no position data) refresh via chat or `?play` only.
 
 ---
 
