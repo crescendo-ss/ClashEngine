@@ -39,6 +39,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     private readonly MatchStatsRegistry? _matchStats;
     private readonly ClashEngine.Adapter.SpawnSettingsApplier? _spawnApplier;
     private readonly ClashEngine.Adapter.NoItemsSettingsApplier? _noItemsApplier;
+    private readonly ClashEngine.Persistence.PersistLastShipStore? _lastShips;
     private bool _registeredCallback;
 
     public MatchOrchestratorRegistry(
@@ -56,7 +57,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         MatchFreqAllocator? freqAllocator = null,
         MatchStatsRegistry? matchStats = null,
         ClashEngine.Adapter.SpawnSettingsApplier? spawnApplier = null,
-        ClashEngine.Adapter.NoItemsSettingsApplier? noItemsApplier = null)
+        ClashEngine.Adapter.NoItemsSettingsApplier? noItemsApplier = null,
+        ClashEngine.Persistence.PersistLastShipStore? lastShips = null)
     {
         _broker = broker;
         _engine = engine;
@@ -73,6 +75,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         _matchStats = matchStats;
         _spawnApplier = spawnApplier;
         _noItemsApplier = noItemsApplier;
+        _lastShips = lastShips;
     }
 
     public void Register()
@@ -108,7 +111,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         var orchestrator = new MatchOrchestrator(
             matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log,
             _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats, broker: _broker,
-            spawnApplier: _spawnApplier, noItemsApplier: _noItemsApplier);
+            spawnApplier: _spawnApplier, noItemsApplier: _noItemsApplier, lastShips: _lastShips);
         _orchestrators[matchId] = orchestrator;
 
         // Track players for position-packet routing during staging.

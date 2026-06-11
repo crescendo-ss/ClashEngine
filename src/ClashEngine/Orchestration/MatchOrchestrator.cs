@@ -71,6 +71,12 @@ public sealed class MatchOrchestrator
     /// made within the grace window. Cleared on successful return.</summary>
     private readonly Dictionary<PlayerKey, ShipType> _shipAtLeave = new();
 
+    /// <summary>Zone-wide per-player "last ship" memory (fed by
+    /// <see cref="ClashEngine.Adapter.LastShipTracker"/>, persisted via IPersist). Consulted at
+    /// placement so each player starts in the ship they last flew. <see langword="null"/> in test
+    /// paths that construct the orchestrator without it; placement then defaults to Warbird.</summary>
+    private readonly Persistence.PersistLastShipStore? _lastShips;
+
     /// <summary>Team-0 freq for this match; team-t uses <c>_freqBase + t * 100</c>. Defaults to
     /// the legacy 100/200/... convention until <see cref="BeginSetup"/> reserves a rotating base
     /// from <see cref="MatchFreqAllocator"/>. Read by <see cref="MatchFreqAdvisor"/> and the LVZ
@@ -118,7 +124,8 @@ public sealed class MatchOrchestrator
         MatchStatsRegistry? matchStats = null,
         IComponentBroker? broker = null,
         SpawnSettingsApplier? spawnApplier = null,
-        NoItemsSettingsApplier? noItemsApplier = null)
+        NoItemsSettingsApplier? noItemsApplier = null,
+        Persistence.PersistLastShipStore? lastShips = null)
     {
         _matchId = matchId;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -139,6 +146,7 @@ public sealed class MatchOrchestrator
         _broker = broker;
         _spawnApplier = spawnApplier;
         _noItemsApplier = noItemsApplier;
+        _lastShips = lastShips;
         _drift = new StartDriftEnforcer(_queue, _proposal);
 
         for (int t = 0; t < _proposal.Teams.Count; t++)
@@ -211,7 +219,7 @@ public sealed class MatchOrchestrator
                     continue;
                 }
 
-                var ship = ShipType.Warbird;
+                var ship = PreferredShip(key);
                 _pendingPlacement[key] = new PlacementInfo(ship, freq, t, start.X, start.Y);
 
                 if (arenaName is not null && !IsInArena(player, arenaName))
@@ -283,6 +291,14 @@ public sealed class MatchOrchestrator
                 $"Match {_matchId:N}: OnPlayerEnteredArena failed for {key.Name}: {ex}");
         }
     }
+
+    /// <summary>The ship to place <paramref name="key"/> on when entering a match: the last ship
+    /// they were observed flying before going to spec (zone-wide, persisted), falling back to
+    /// Warbird when no memory exists (first-time players, or no store wired).</summary>
+    private ShipType PreferredShip(PlayerKey key) =>
+        _lastShips?.Get(key) is { } remembered && remembered != ShipType.Spec
+            ? remembered
+            : ShipType.Warbird;
 
     private void PlacePlayerOnShip(PlayerKey key, Player player)
     {
@@ -451,11 +467,11 @@ public sealed class MatchOrchestrator
 
         short freq = (short)(_freqBase + teamIdx * MatchFreqAllocator.FreqStep);
         // Prefer the ship the player was actually on at the moment they specced -- preserves any
-        // post-death ship-change made within the grace window. Falls back to Warbird for
-        // first-time placements (no spec snapshot yet) or if the snapshot was lost.
+        // post-death ship-change made within the grace window. Falls back to the player's
+        // zone-wide last-ship memory (then Warbird) if the snapshot was lost.
         var ship = _shipAtLeave.TryGetValue(key, out var savedShip) && savedShip != ShipType.Spec
             ? savedShip
-            : ShipType.Warbird;
+            : PreferredShip(key);
         // Re-apply the client-settings overrides BEFORE the ship-up: a returning player is not
         // warped to the start location, so the client must already hold the match's [Spawn] box
         // when it spawns the ship for them to come back inside the match arena (and the zeroed

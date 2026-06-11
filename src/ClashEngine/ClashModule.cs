@@ -74,9 +74,12 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private PersistPenaltyStore? _persistPenalties;
     private InMemoryAutoQueueStore? _autoQueueCache;
     private PersistAutoQueueStore? _persistAutoQueue;
+    private PersistLastShipStore? _persistLastShip;
+    private LastShipTracker? _lastShipTracker;
     private DelegatePersistentData<Player>? _ratingsRegistration;
     private DelegatePersistentData<Player>? _penaltiesRegistration;
     private DelegatePersistentData<Player>? _autoQueueRegistration;
+    private DelegatePersistentData<Player>? _lastShipRegistration;
     private MatchmakingCommands? _commandHandlers;
     private MatchStatsRegistry? _matchStats;
     private ClashStatsTelemetry? _matchStatsTelemetry;
@@ -243,6 +246,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _autoQueueCache = new InMemoryAutoQueueStore();
         IAutoQueueStore autoQueueStore = _persist is not null ? _persistAutoQueue : _autoQueueCache;
 
+        // Per-player "last ship" memory (QoL: match placement puts each player in the ship they
+        // last flew). The store doubles as its own in-memory cache, so without IPersist it still
+        // works for the life of the process -- it just isn't persisted across sessions.
+        _persistLastShip = new PersistLastShipStore();
+
         // Per-policy hard ceiling on the assessed timeout. Defaults to 6h; configurable to give
         // operators an escape hatch if a future bug ever puts a player on a runaway escalation
         // ladder again. Values <= 0 fall back to the default rather than disabling the cap.
@@ -313,10 +321,16 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             ? new NoItemsSettingsApplier(_clientSettings, _log)
             : null;
 
+        // Keeps the last-ship store current from zone-wide ship->spec (and in-ship arena-exit)
+        // transitions, in and out of matches alike.
+        _lastShipTracker = new LastShipTracker(broker, _persistLastShip, _resolver);
+        _lastShipTracker.Register();
+        _unregisterActions.Add(_lastShipTracker.Unregister);
+
         _orchestrators = new MatchOrchestratorRegistry(
             broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
             matchAudience, freqAllocator, matchStats: _matchStats, spawnApplier: spawnApplier,
-            noItemsApplier: noItemsApplier);
+            noItemsApplier: noItemsApplier, lastShips: _persistLastShip);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 
@@ -522,6 +536,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
                 setDataCallback: _persistAutoQueue.SetData,
                 clearDataCallback: _persistAutoQueue.ClearData);
             await _persist.RegisterPersistentDataAsync(_autoQueueRegistration);
+
+            _lastShipRegistration = new DelegatePersistentData<Player>(
+                PersistLastShipStore.PersistKey, PersistInterval.Forever, PersistScope.Global,
+                getDataCallback: _persistLastShip.GetData,
+                setDataCallback: _persistLastShip.SetData,
+                clearDataCallback: _persistLastShip.ClearData);
+            await _persist.RegisterPersistentDataAsync(_lastShipRegistration);
         }
 
         // Only ?play and ?queue are zone-wide so a player can opt into matchmaking from any
@@ -584,10 +605,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
                 await _persist.UnregisterPersistentDataAsync(_penaltiesRegistration);
             if (_autoQueueRegistration is not null)
                 await _persist.UnregisterPersistentDataAsync(_autoQueueRegistration);
+            if (_lastShipRegistration is not null)
+                await _persist.UnregisterPersistentDataAsync(_lastShipRegistration);
         }
         _ratingsRegistration = null;
         _penaltiesRegistration = null;
         _autoQueueRegistration = null;
+        _lastShipRegistration = null;
     }
 
     async Task<bool> IAsyncArenaAttachableModule.AttachModuleAsync(Arena arena, CancellationToken cancellationToken)
