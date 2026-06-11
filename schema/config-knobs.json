@@ -407,6 +407,13 @@
           "source": "src/ClashEngine/Config/QueueParser.cs:228 (ReadQualityCeiling)"
         },
         {
+          "key": "Queue<i>IgnorePenalties",
+          "type": "bool",
+          "default": 0,
+          "description": "When on, this queue does not enforce penalty timeouts: players serving any queue-timeout (abandonment, griefing, staging AFK, elimination cooldown) may still enqueue, group-enqueue, and be auto/KOTH re-enqueued here. Penalties are still assessed, escalated, tracked, and shown by ?penalties, and every other queue still enforces them -- only admission to this queue ignores them. Disconnected/in-match ineligibility still applies.",
+          "source": "src/ClashEngine/Config/QueueParser.cs; enforcement in src/ClashEngine.Core/MatchmakingEngine.cs (TryEnqueue/TryEnqueueGroup/re-enqueue paths)"
+        },
+        {
           "key": "Queue<i>VetoesRequired",
           "type": "int",
           "constraint": ">= 1",

@@ -61,7 +61,8 @@ public sealed class QueueRegistry
         TimeSpan? eliminationCooldown = null,
         bool alwaysChooseLongestWaiter = true,
         SpawnArea? presenceZone = null,
-        TimeSpan? presenceZoneTimeout = null)
+        TimeSpan? presenceZoneTimeout = null,
+        bool ignorePenalties = false)
     {
         if (_byName.ContainsKey(name))
             throw new ArgumentException($"Queue '{name}' already registered.", nameof(name));
@@ -77,7 +78,8 @@ public sealed class QueueRegistry
             livesPerPlayer, teamCollapseGrace, shipChangeGracePeriod,
             timeLimit, returnItemsAction, ownerArenaName, label,
             afkDwellWarning, afkDwellCull, eliminationCooldown, alwaysChooseLongestWaiter,
-            presenceZone: presenceZone, presenceZoneTimeout: presenceZoneTimeout);
+            presenceZone: presenceZone, presenceZoneTimeout: presenceZoneTimeout,
+            ignorePenalties: ignorePenalties);
         _byName[name] = def;
         return def;
     }
@@ -319,6 +321,7 @@ public sealed class QueueRegistry
         if (a.MaxStartDriftTiles != b.MaxStartDriftTiles) return false;
         if (a.AfkDwellWarning != b.AfkDwellWarning) return false;
         if (a.AfkDwellCull != b.AfkDwellCull) return false;
+        if (a.IgnorePenalties != b.IgnorePenalties) return false;
         return true;
     }
 }

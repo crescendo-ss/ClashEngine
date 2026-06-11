@@ -49,7 +49,8 @@ public sealed class QueueDefinition
         bool alwaysChooseLongestWaiter = true,
         bool disallowItems = false,
         SpawnArea? presenceZone = null,
-        TimeSpan? presenceZoneTimeout = null)
+        TimeSpan? presenceZoneTimeout = null,
+        bool ignorePenalties = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -164,6 +165,7 @@ public sealed class QueueDefinition
         DisallowItems = disallowItems;
         PresenceZone = presenceZone;
         PresenceZoneTimeout = presenceZoneTimeout;
+        IgnorePenalties = ignorePenalties;
         OwnerArenaName = ownerArenaName;
 
         // BaseName is the structural part of UniqueId without the arena prefix. Used as the
@@ -419,6 +421,15 @@ public sealed class QueueDefinition
     /// type (<c>GameType&lt;i&gt;DisallowItems</c>). Cleared when a player leaves the match.
     /// </summary>
     public bool DisallowItems { get; }
+
+    /// <summary>
+    /// When <see langword="true"/>, this queue does not enforce penalty timeouts: players in an
+    /// active queue-timeout (abandonment, griefing, staging-AFK, elimination cooldown) may still
+    /// enqueue and be matched here. Penalties are still assessed, escalated, and tracked as usual
+    /// (and every other queue still enforces them) -- only admission to <em>this</em> queue
+    /// ignores them. Disconnected/in-match ineligibility still applies.
+    /// </summary>
+    public bool IgnorePenalties { get; }
 
     /// <summary>
     /// The game type's "stay in the zone" box (center + radius, tiles), or <see langword="null"/>

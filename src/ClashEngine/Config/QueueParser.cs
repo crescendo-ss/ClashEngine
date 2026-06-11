@@ -81,6 +81,10 @@ internal static class QueueParser
         // Off lets the matcher pass the head over for a better-balanced subset from the pool.
         bool alwaysChooseLongestWaiter = config.GetBool(
             handle, ConfigConstants.Section, p + "AlwaysChooseLongestWaiter", defaultValue: true);
+        // Off (default): penalty timeouts block entry to this queue as usual. On: this queue
+        // admits penalized players (penalties still accrue and other queues still enforce them).
+        bool ignorePenalties = config.GetBool(
+            handle, ConfigConstants.Section, p + "IgnorePenalties", defaultValue: false);
 
         // Preset defaults (only used when the corresponding explicit key wasn't set). Each row
         // is overridable -- explicit Queue<i><Key> always wins.
@@ -140,7 +144,8 @@ internal static class QueueParser
                 label: label,
                 afkDwellWarning: afkWarn,
                 afkDwellCull: afkCull,
-                eliminationCooldown: gt.EliminationCooldown);
+                eliminationCooldown: gt.EliminationCooldown,
+                ignorePenalties: ignorePenalties);
         }
         catch (Exception ex)
         {
@@ -167,6 +172,7 @@ internal static class QueueParser
                 $"PromoteWinners={(promoteWinners ? "yes" : "no")}, " +
                 $"MaxConsecutiveDefenses={effectiveMaxDef}{Note(maxDefDefaulted)}, " +
                 $"AfkWarn={DescribeAfk(afkWarn)}, AfkCull={DescribeAfk(afkCull)}, " +
+                $"IgnorePenalties={ignorePenalties}, " +
                 $"EndPolicy=[{endPolicyDesc}], " +
                 $"Griefing=[{DescribeGriefing(griefing())}].");
         }

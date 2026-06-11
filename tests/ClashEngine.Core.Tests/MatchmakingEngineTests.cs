@@ -250,6 +250,61 @@ public class MatchmakingEngineTests
         Assert.Equal(EnqueueResult.InTimeout, h.Engine.TryEnqueue(K("A"), "2v2", T0));
     }
 
+    private static void RegisterIgnorePenaltiesQueue(Harness h, string name = "2v2open") =>
+        h.Engine.Queues.Register(
+            name,
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt1",
+            () => new KillCountEndPolicy(5),
+            ignorePenalties: true);
+
+    [Fact]
+    public void Player_in_timeout_can_queue_into_an_ignore_penalties_queue()
+    {
+        var h = new Harness();
+        RegisterIgnorePenaltiesQueue(h);
+        h.Connect("A");
+        h.Engine.Penalties.RecordPenalty(K("A"), PenaltyKind.Abandonment, T0);
+
+        Assert.Equal(EnqueueResult.Ok, h.Engine.TryEnqueue(K("A"), "2v2open", T0));
+
+        // The penalty itself is untouched: eligibility still reports the timeout, and the
+        // enforcing queue still rejects.
+        Assert.Equal(EligibilityStatus.InTimeout, h.Engine.CheckEligibility(K("A")).Status);
+        Assert.Equal(EnqueueResult.InTimeout, h.Engine.TryEnqueue(K("A"), "2v2", T0));
+    }
+
+    [Fact]
+    public void Group_with_a_member_in_timeout_can_queue_into_an_ignore_penalties_queue()
+    {
+        var h = new Harness();
+        RegisterIgnorePenaltiesQueue(h);
+        h.Connect("A", "B");
+        h.Engine.Penalties.RecordPenalty(K("B"), PenaltyKind.Griefing, T0);
+
+        Assert.Equal(EnqueueResult.InTimeout,
+            h.Engine.TryEnqueueGroup(new[] { K("A"), K("B") }, "2v2", T0, out _));
+        Assert.Equal(EnqueueResult.Ok,
+            h.Engine.TryEnqueueGroup(new[] { K("A"), K("B") }, "2v2open", T0, out _));
+    }
+
+    [Fact]
+    public void Players_in_timeout_are_matched_from_an_ignore_penalties_queue()
+    {
+        var h = new Harness();
+        RegisterIgnorePenaltiesQueue(h);
+        h.Connect("A", "B", "C", "D");
+        h.Engine.Penalties.RecordPenalty(K("A"), PenaltyKind.Abandonment, T0);
+
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            Assert.Equal(EnqueueResult.Ok, h.Engine.TryEnqueue(K(n), "2v2open", T0));
+        h.Engine.Tick(T0);
+
+        Assert.Single(h.Telemetry.Proposed);
+        Assert.Equal(EligibilityStatus.InMatch, h.Engine.CheckEligibility(K("A")).Status);
+    }
+
     [Fact]
     public void Unknown_queue_returns_UnknownQueue()
     {

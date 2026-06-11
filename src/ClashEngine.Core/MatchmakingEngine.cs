@@ -337,7 +337,9 @@ public sealed class MatchmakingEngine
         {
             EligibilityStatus.Disconnected => EnqueueResult.NotConnected,
             EligibilityStatus.InMatch => EnqueueResult.InMatch,
-            EligibilityStatus.InTimeout => EnqueueResult.InTimeout,
+            // An IgnorePenalties queue admits players serving a queue-timeout; the penalty itself
+            // keeps running (and every other queue keeps enforcing it).
+            EligibilityStatus.InTimeout when !def.IgnorePenalties => EnqueueResult.InTimeout,
             _ => EnqueueResult.Ok,
         };
         if (status != EnqueueResult.Ok) return status;
@@ -476,7 +478,7 @@ public sealed class MatchmakingEngine
             {
                 EligibilityStatus.Disconnected => EnqueueResult.NotConnected,
                 EligibilityStatus.InMatch => EnqueueResult.InMatch,
-                EligibilityStatus.InTimeout => EnqueueResult.InTimeout,
+                EligibilityStatus.InTimeout when !def.IgnorePenalties => EnqueueResult.InTimeout,
                 _ => EnqueueResult.Ok,
             };
             if (status != EnqueueResult.Ok) return status;
@@ -583,7 +585,9 @@ public sealed class MatchmakingEngine
         for (int i = 0; i < readied.Count; i++)
         {
             var p = readied[i];
-            if (CheckEligibility(p).Status != EligibilityStatus.Available) continue;
+            var status = CheckEligibility(p).Status;
+            if (status != EligibilityStatus.Available
+                && !(status == EligibilityStatus.InTimeout && queue.IgnorePenalties)) continue;
             var rating = _ratings.Get(p, queue.GameType);
             var groupId = _groups.GroupOf(p);
             if (_matcher.EnqueuePriority(p, rating, queue.UniqueId, groupId))
@@ -1112,7 +1116,8 @@ public sealed class MatchmakingEngine
                 if (!_autoQueue.IsEnabled(p)) continue;
                 if (!_connected.Contains(p)) continue;            // gone -- nothing to re-queue
                 if (IsInActiveMatch(p)) continue;                 // already pulled into another match
-                if (CheckEligibility(p).Status == EligibilityStatus.InTimeout) continue;
+                if (!queue.IgnorePenalties
+                    && CheckEligibility(p).Status == EligibilityStatus.InTimeout) continue;
 
                 var rating = _ratings.Get(p, queue.GameType);
                 var groupId = _groups.GroupOf(p);
@@ -1151,7 +1156,8 @@ public sealed class MatchmakingEngine
         foreach (var p in winners)
         {
             if (!_connected.Contains(p)) continue;   // disconnected winners forfeit their priority
-            if (CheckEligibility(p).Status == EligibilityStatus.InTimeout) continue;
+            if (!queue.IgnorePenalties
+                && CheckEligibility(p).Status == EligibilityStatus.InTimeout) continue;
 
             var rating = _ratings.Get(p, queue.GameType);
             var groupId = _groups.GroupOf(p);
