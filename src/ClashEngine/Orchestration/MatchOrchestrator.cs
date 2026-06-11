@@ -557,7 +557,10 @@ public sealed class MatchOrchestrator
     /// <see cref="StatsRecorder.CaptureLastLeaveInventory"/>.</item>
     /// </list>
     /// Routed by <see cref="MatchOrchestratorRegistry"/> on every ship->Spec transition for an
-    /// in-match participant. No-op for players we no longer own (e.g. already eliminated).
+    /// in-match participant, and on LeaveArena for a participant still in a ship (an arena exit
+    /// fires no ship->spec change of its own). No-op for players we no longer own (e.g. already
+    /// eliminated) and for players already in spec (preserving the snapshot taken when they
+    /// specced, for the spec-then-leave-arena sequence).
     /// </summary>
     public void OnPlayerSpecced(PlayerKey key, ShipType prevShip)
     {
@@ -588,12 +591,10 @@ public sealed class MatchOrchestrator
     /// is a no-op.
     /// </summary>
     /// <remarks>
-    /// Iterates the UNION of the ship's initial-inventory keys (what Continuum just handed the
-    /// player) and the saved-leave keys (what they had at the moment of self-spec, possibly
-    /// including items they picked up mid-match via greens that aren't in the slot's initial
-    /// loadout). Each item is emitted as a single positive- or negative-prize call so Restore
-    /// can ADD items the player accumulated past the initial (e.g. green-pickup thors on a ship
-    /// whose initial Thor count is 0) and Burn zeroes everything they were carrying.
+    /// The per-item delta math (union of initial-loadout and saved-leave keys, and the
+    /// Restore-without-snapshot degrade-to-Full fallback) lives in
+    /// <see cref="ReturnItemsPlan.ComputeAdjustments"/> so it's unit-testable without SS types;
+    /// this method just maps each computed delta onto a single positive- or negative-prize call.
     /// </remarks>
     private void ApplyReturnItemsAction(Player player, PlayerKey key)
     {
@@ -610,18 +611,10 @@ public sealed class MatchOrchestrator
         if (_queue.ReturnItemsAction == ItemsAction.Restore)
             recorder.TryGetLastLeaveInventory(key, out saved);
 
-        var items = new HashSet<ItemKind>(initial.Keys);
-        if (saved is not null)
-            foreach (var item in saved.Keys) items.Add(item);
-
-        foreach (var item in items)
+        foreach (var (item, delta) in ReturnItemsPlan.ComputeAdjustments(_queue.ReturnItemsAction, initial, saved))
         {
-            int current = initial.TryGetValue(item, out var c) ? c : 0;
-            int target = (saved is not null && saved.TryGetValue(item, out var s)) ? s : 0;
-            if (current == target) continue;
             var prize = PrizeForItem(item);
             if (prize is null) continue;
-            int delta = target - current;
             // Positive prize value adds; negative removes. SS Core's GivePrize takes a count
             // separately from the prize id, but Continuum keys off the sign of the prize id.
             short prizeId = delta > 0 ? (short)prize.Value : (short)(-(short)prize.Value);

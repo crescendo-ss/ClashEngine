@@ -202,15 +202,33 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
 
     /// <summary>
     /// Dispatches EnterArena events to the right orchestrator so it can finish ship/freq setup
-    /// for any of its players who were SendToArena'd at match-setup time. Other PlayerAction
-    /// values are ignored here; PlayerStateObserver handles the engine-side events.
+    /// for any of its players who were SendToArena'd at match-setup time, and LeaveArena events
+    /// so it can freeze a return-snapshot for a participant who exits the arena while still in a
+    /// ship. Other PlayerAction values are ignored here; PlayerStateObserver handles the
+    /// engine-side events.
     /// </summary>
     private void OnPlayerAction(Player player, PlayerAction action, Arena? arena)
     {
-        if (action != PlayerAction.EnterArena || arena is null) return;
         if (_resolver.KeyOf(player) is not PlayerKey key) return;
         if (!_stagingPlayers.TryGetValue(key, out var orchestrator)) return;
-        orchestrator.OnPlayerEnteredArena(key, arena);
+
+        switch (action)
+        {
+            case PlayerAction.EnterArena when arena is not null:
+                orchestrator.OnPlayerEnteredArena(key, arena);
+                break;
+            case PlayerAction.LeaveArena:
+                // SS fires no ship->spec PreShipFreqChange when a player exits an arena while
+                // still in a ship (Game's LeaveArena handler only clears spectator state), so
+                // the OnShipFreqChange route never captures a return-snapshot for an arena hop
+                // or disconnect. Capture it here instead -- Player.Ship still holds the
+                // in-match ship until the next EnterArena resets it -- so a later ?return
+                // restores the right ship and (under ItemsAction.Restore) the right items.
+                // OnPlayerSpecced no-ops when the ship is already Spec, which preserves the
+                // snapshot taken at spec time for the spec-first-then-leave sequence.
+                orchestrator.OnPlayerSpecced(key, player.Ship);
+                break;
+        }
     }
 
     /// <summary>
