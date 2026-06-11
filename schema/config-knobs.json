@@ -289,6 +289,36 @@
           "default": "30s (engine default)",
           "description": "How long a team may be entirely absent from the presence zone before forfeiting. A chat warning fires once the absence is detected (~2s) quoting the remaining time. Only meaningful with ZoneCenter/ZoneRadius set; <= 0 -> dropped to the 30s default.",
           "source": "src/ClashEngine/Config/GameTypeParser.cs:154 (ReadPresenceZone)"
+        },
+        {
+          "key": "GameType<i>EarlyExitPenalty",
+          "type": "bool",
+          "default": 0,
+          "description": "Opt-in switch for the early-exit griefing detector (burned through all lives unusually fast, leaving teammates out to dry). Off by default; no game type assesses early-exit penalties unless this is 1. Only ever fires in limited-lives matches: 1 with Lives=0 is inert (warned). Intended for team shapes -- on a solo-team shape (1v1/FFA) it flags players for simply losing fast.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs (griefing knobs); resolution in src/ClashEngine.Core/Penalties/GriefingHeuristicSelector.cs"
+        },
+        {
+          "key": "GameType<i>EarlyExitMinimumDuration",
+          "type": "duration",
+          "constraint": "> 0",
+          "default": "2m (engine default)",
+          "description": "Minimum participation time before exhausting all lives stops being flagged as an early exit. Severity scales with how badly the bar was missed. <= 0 -> dropped to default. Ignored (warned) unless EarlyExitPenalty=1.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs (griefing knobs)"
+        },
+        {
+          "key": "GameType<i>TeamkillPenalty",
+          "type": "bool",
+          "default": 0,
+          "description": "Opt-in switch for the teamkill-threshold griefing detector. Off by default; no game type assesses teamkill penalties unless this is 1. With both detectors enabled they run together; a player flagged by both gets one penalty (the higher-severity flag wins).",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs (griefing knobs); resolution in src/ClashEngine.Core/Penalties/GriefingHeuristicSelector.cs"
+        },
+        {
+          "key": "GameType<i>TeamkillThreshold",
+          "type": "int",
+          "constraint": ">= 0",
+          "default": "2 standard / 3 with Queue<j>Preset=casual",
+          "description": "Teamkill count a player must strictly exceed to be flagged. Absent -> the queue preset's default; an explicit value wins for every queue using this game type. Negative -> dropped to default. Ignored (warned) unless TeamkillPenalty=1.",
+          "source": "src/ClashEngine/Config/GameTypeParser.cs (griefing knobs)"
         }
       ]
     },
@@ -459,10 +489,10 @@
       },
       {
         "name": "GriefingHeuristic",
-        "derivedFrom": "GameType<i>Lives and Queue<i>Preset",
-        "value": "Lives>0 -> EarlyExitHeuristic (2-min min duration); else TeamkillThresholdHeuristic (threshold 3 casual / 2 standard)",
-        "description": "Griefing detector selected from the game type and preset. No standalone conf key.",
-        "source": "src/ClashEngine/Config/QueueParser.cs:93"
+        "derivedFrom": "GameType<i>EarlyExitPenalty/EarlyExitMinimumDuration/TeamkillPenalty/TeamkillThreshold and Queue<i>Preset",
+        "value": "both detectors opt-in, default off: EarlyExitPenalty=1 -> EarlyExitHeuristic (default 2-min min duration); TeamkillPenalty=1 -> TeamkillThresholdHeuristic (default threshold 3 casual / 2 standard); both -> CompositeGriefingHeuristic; neither -> NoGriefingHeuristic.",
+        "description": "Griefing detector resolved from the per-game-type griefing keys (see GriefingHeuristicSelector).",
+        "source": "src/ClashEngine.Core/Penalties/GriefingHeuristicSelector.cs (called from src/ClashEngine/Config/QueueParser.cs)"
       },
       {
         "name": "GameTypeMetadata",

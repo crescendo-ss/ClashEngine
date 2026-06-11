@@ -94,9 +94,12 @@ internal static class QueueParser
             maxLiabilityGap: casual ? null : 8.0);
 
         var (endPolicy, endPolicyDesc) = BuildEndPolicy(gt);
-        Func<IGriefingHeuristic> griefing = gt.Lives > 0
-            ? () => new EarlyExitHeuristic(minimumDuration: TimeSpan.FromMinutes(2))
-            : () => new TeamkillThresholdHeuristic(threshold: casual ? 3 : 2);
+        Func<IGriefingHeuristic> griefing = () => GriefingHeuristicSelector.Build(
+            defaultTeamkillThreshold: casual ? 3 : 2,
+            earlyExitEnabled: gt.EarlyExitPenalty,
+            earlyExitMinimumDuration: gt.EarlyExitMinimumDuration,
+            teamkillEnabled: gt.TeamkillPenalty,
+            teamkillThreshold: gt.TeamkillThreshold);
 
         QueueDefinition def;
         try
@@ -164,7 +167,8 @@ internal static class QueueParser
                 $"PromoteWinners={(promoteWinners ? "yes" : "no")}, " +
                 $"MaxConsecutiveDefenses={effectiveMaxDef}{Note(maxDefDefaulted)}, " +
                 $"AfkWarn={DescribeAfk(afkWarn)}, AfkCull={DescribeAfk(afkCull)}, " +
-                $"EndPolicy=[{endPolicyDesc}].");
+                $"EndPolicy=[{endPolicyDesc}], " +
+                $"Griefing=[{DescribeGriefing(griefing())}].");
         }
         return def;
     }
@@ -308,6 +312,15 @@ internal static class QueueParser
     }
 
     private static string DescribeAfk(TimeSpan ts) => ts <= TimeSpan.Zero ? "off" : ts.ToString();
+
+    private static string DescribeGriefing(IGriefingHeuristic heuristic) => heuristic switch
+    {
+        NoGriefingHeuristic => "none",
+        EarlyExitHeuristic e => $"early-exit (min {e.MinimumDuration})",
+        TeamkillThresholdHeuristic t => $"teamkill (threshold {t.Threshold})",
+        CompositeGriefingHeuristic c => string.Join(" + ", c.Heuristics.Select(DescribeGriefing)),
+        _ => heuristic.GetType().Name,
+    };
 
     /// <summary>
     /// End policy: <c>KillTarget</c> and <c>TimeLimit</c> can both be set, in which case

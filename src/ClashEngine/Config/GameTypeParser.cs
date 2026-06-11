@@ -127,6 +127,28 @@ internal static class GameTypeParser
         // this game type requeue immediately); >0 -> that duration. Negative is warned and dropped.
         TimeSpan? eliminationCooldown = ReadOptionalNonNegativeTimeSpan(config, handle, p + "EliminationCooldown", p, log);
 
+        // Griefing knobs. Both detectors are opt-in: absent or 0 -> off (no automated griefing
+        // penalties for this game type) -- see GriefingHeuristicSelector.
+        bool earlyExitPenalty = config.GetInt(handle, ConfigConstants.Section, p + "EarlyExitPenalty", 0) != 0;
+        TimeSpan? earlyExitMinimumDuration = ReadOptionalPositiveTimeSpan(config, handle, p + "EarlyExitMinimumDuration", p, log);
+        bool teamkillPenalty = config.GetInt(handle, ConfigConstants.Section, p + "TeamkillPenalty", 0) != 0;
+        int? teamkillThreshold = ConfigReadHelpers.TryReadInt(config, handle, p + "TeamkillThreshold");
+        if (teamkillThreshold is { } tkt && tkt < 0)
+        {
+            log?.Warn(ConfigConstants.LogCategory, $"{p}TeamkillThreshold={tkt} must be >=0; using default.");
+            teamkillThreshold = null;
+        }
+        if (earlyExitPenalty && lives <= 0)
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{p}EarlyExitPenalty=1 but {p}Lives is 0 (unlimited); the early-exit heuristic " +
+                "only fires in limited-lives matches, so it will never flag anyone.");
+        if (earlyExitMinimumDuration is not null && !earlyExitPenalty)
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{p}EarlyExitMinimumDuration is set but {p}EarlyExitPenalty is not enabled; it has no effect.");
+        if (teamkillThreshold is not null && !teamkillPenalty)
+            log?.Warn(ConfigConstants.LogCategory,
+                $"{p}TeamkillThreshold is set but {p}TeamkillPenalty is not enabled; it has no effect.");
+
         // Auto-derive the metadata blob from the resolved shape. The stats server stores this
         // verbatim with the gametype version; downstream consumers (scoreboards, dashboards)
         // read teamCount / teamSizes / livesPerPlayer from here. Operators don't see a
@@ -141,7 +163,8 @@ internal static class GameTypeParser
             stagingDuration, countdownDuration, knockoutSpecDelay,
             teamCollapseGrace, shipChangeGracePeriod,
             returnItemsAction, eliminationCooldown, disallowItems,
-            presenceZone, presenceZoneTimeout);
+            presenceZone, presenceZoneTimeout,
+            earlyExitPenalty, earlyExitMinimumDuration, teamkillPenalty, teamkillThreshold);
     }
 
     /// <summary>
@@ -259,6 +282,10 @@ internal static class GameTypeParser
             $"EliminationCooldown={(def.EliminationCooldown is { } ec ? (ec == TimeSpan.Zero ? "0 (disabled)" : ec.ToString()) : "(default 1m)")}, " +
             $"ReturnItemsAction={def.ReturnItemsAction}, " +
             $"DisallowItems={def.DisallowItems}, " +
+            $"EarlyExitPenalty={def.EarlyExitPenalty}, " +
+            $"EarlyExitMinimumDuration={(def.EarlyExitMinimumDuration is { } eem ? eem.ToString() : "(default 2m)")}, " +
+            $"TeamkillPenalty={def.TeamkillPenalty}, " +
+            $"TeamkillThreshold={(def.TeamkillThreshold is { } tkd ? tkd.ToString() : "(preset default)")}, " +
             $"PresenceZone={(def.PresenceZone is { } z ? $"({z.Center.X},{z.Center.Y}) r{z.RadiusTiles}t" : "(none)")}, " +
             $"ZoneForfeitTimeout={(def.PresenceZoneTimeout is { } zt ? zt.ToString() : "(default 30s)")}.");
     }

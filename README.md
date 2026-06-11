@@ -210,6 +210,22 @@ Interactions worth knowing: presence is counted only from **active, in-ship** pa
 | `GameType<i>CountdownDuration` | seconds or `HH:MM:SS` | `10` | Length of the pre-GO countdown. The orchestrator broadcasts `All set! Pick your final ship -- Ns until lock, then GO.` up-front, then ticks `-3-` → `-2-` → `-1-` → `GO!` over the final 3 s. Ships lock 5 s before GO, so values above that leave a ship-pick window at the start of the countdown. Minimum 5 seconds. |
 | `GameType<i>KnockoutSpecDelay` | seconds or `HH:MM:SS` | `0` | Grace between a player's last-life death and the forced spec, so residual mines/bombs they just fired can still land. Only meaningful for elimination matches (`Lives > 0`); match-end cleanup specs everyone immediately regardless. |
 
+#### Griefing penalties
+
+Two automated griefing detectors can run at match end; players they flag receive a queue-timeout that match participants may collectively veto (`?forgive`, governed by the queue's `VetoesRequired` / `VetoWindow`). Both detectors are **opt-in per game type and default off** — a game type that enables neither assesses no automated griefing penalties:
+
+- **Early-exit** flags a player who burned through all their lives unusually fast, leaving teammates out to dry. It only ever fires in limited-lives matches (`Lives > 0`), and it's intended for team shapes — on a solo-team shape (1v1, FFA) it would flag players for simply losing fast, so think twice before enabling it there.
+- **Teamkill threshold** flags a player whose teamkill count exceeds a threshold.
+
+With both enabled they run together; a player flagged by both gets one penalty (the higher-severity flag).
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `GameType<i>EarlyExitPenalty` | 0/1 | 0 (off) | Enables the early-exit detector for this game type. Has no effect without `Lives > 0` (warned). |
+| `GameType<i>EarlyExitMinimumDuration` | seconds or `HH:MM:SS` | `0:02:00` | A player who uses up all their lives less than this long into the match is flagged. Severity scales with how badly they missed the bar. Raise it for game types where bowing out early is more suspect; lower it for riskier, faster modes. Ignored (warned) unless `EarlyExitPenalty = 1`. |
+| `GameType<i>TeamkillPenalty` | 0/1 | 0 (off) | Enables the teamkill detector for this game type. |
+| `GameType<i>TeamkillThreshold` | int ≥ 0 | `2` (`3` with `Queue<j>Preset = casual`) | A player whose teamkill count strictly exceeds this is flagged. The default comes from the queue's preset; an explicit value here wins for every queue using this game type. Ignored (warned) unless `TeamkillPenalty = 1`. |
+
 ### Queues
 
 `QueueCount = N` → ClashEngine reads `Queue1` … `QueueN`. Each queue is one matchmaking pool that produces matches under a particular game type.

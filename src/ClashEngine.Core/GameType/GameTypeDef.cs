@@ -19,6 +19,10 @@ namespace ClashEngine.Core.GameType;
 /// <para>The remaining knobs (team shape, lives, spawn layout, durations) drive
 /// match formation locally. They are summarized into <see cref="Metadata"/> for the upload
 /// payload but are otherwise ClashEngine-internal.</para>
+/// <para>The griefing detectors (<see cref="EarlyExitPenalty"/>, <see cref="TeamkillPenalty"/>)
+/// are opt-in and default off; <see cref="EarlyExitMinimumDuration"/> and
+/// <see cref="TeamkillThreshold"/> are <see langword="null"/> for "engine default", resolved by
+/// <see cref="Penalties.GriefingHeuristicSelector"/>.</para>
 /// </remarks>
 public sealed record GameTypeDef(
     string Name,
@@ -43,7 +47,11 @@ public sealed record GameTypeDef(
     TimeSpan? EliminationCooldown = null,
     bool DisallowItems = false,
     SpawnArea? PresenceZone = null,
-    TimeSpan? PresenceZoneTimeout = null);
+    TimeSpan? PresenceZoneTimeout = null,
+    bool EarlyExitPenalty = false,
+    TimeSpan? EarlyExitMinimumDuration = null,
+    bool TeamkillPenalty = false,
+    int? TeamkillThreshold = null);
 
 /// <summary>
 /// Auto-derived <c>metadata</c> blob attached to the gametype-registration POST. Follows the
