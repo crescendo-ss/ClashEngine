@@ -238,6 +238,40 @@ public sealed class MatchmakingEngine
         }
     }
 
+    /// <summary>
+    /// Registers a <c>?forfeit</c> vote for <paramref name="player"/>'s active match (see
+    /// <see cref="ActiveMatch.TryForfeit"/> for the vote rules). Looks the match up via the
+    /// in-match index first, then falls back to a roster scan so an <em>eliminated</em>
+    /// participant -- already released from the index -- still gets the specific
+    /// <see cref="ForfeitVoteResult.Eliminated"/> answer instead of "not in a match".
+    /// Emits <see cref="IMatchmakingTelemetry.OnForfeitVote"/> for every vote that registers,
+    /// and finalizes the match when the vote completes a two-team forfeit.
+    /// </summary>
+    public ForfeitVote TryForfeit(PlayerKey player, DateTimeOffset at)
+    {
+        ActiveMatch? m = null;
+        if (_matchOf.TryGetValue(player, out var matchId))
+        {
+            m = _matches[matchId];
+        }
+        else
+        {
+            foreach (var candidate in _matches.Values)
+                if (candidate.TeamIndexOf(player) is not null) { m = candidate; break; }
+        }
+        if (m is null) return new ForfeitVote(ForfeitVoteResult.NotInMatch, 0, 0);
+
+        var vote = m.TryForfeit(player, at);
+        if (vote.Result is ForfeitVoteResult.Requested
+            or ForfeitVoteResult.Agreed
+            or ForfeitVoteResult.Completed)
+        {
+            _telemetry.OnForfeitVote(m, player, vote, at);
+        }
+        if (HasFinished(m)) FinalizeMatch(m, at);
+        return vote;
+    }
+
     /// <summary>Records a kill. The kill is credited only if both players are in the same active match.</summary>
     /// <remarks>
     /// Anchors on the victim's <see cref="_matchOf"/> entry. The killer may either be in the

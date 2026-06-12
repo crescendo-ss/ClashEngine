@@ -756,4 +756,82 @@ public class MatchmakingEngineTests
         h.Engine.Tick(h.Clock.UtcNow);
         Assert.Single(h.Telemetry.TeammateAbandoned);
     }
+
+    [Fact]
+    public void TryForfeit_emits_vote_telemetry_and_finalizes_on_unanimity()
+    {
+        var h = new Harness(killTarget: 100);
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        var match = h.StartProposedMatch();
+        var team0 = match.Teams[0];
+
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        var first = h.Engine.TryForfeit(team0[0], h.Clock.UtcNow);
+        Assert.Equal(ForfeitVoteResult.Requested, first.Result);
+        var second = h.Engine.TryForfeit(team0[1], h.Clock.UtcNow);
+        Assert.Equal(ForfeitVoteResult.Completed, second.Result);
+
+        Assert.Equal(2, h.Telemetry.ForfeitVotes.Count);
+        Assert.Equal((match.MatchId, team0[0]), (h.Telemetry.ForfeitVotes[0].MatchId, h.Telemetry.ForfeitVotes[0].Voter));
+
+        // The completing vote finalized the match: outcome published, no abandonment penalties,
+        // and every participant is released from the in-match index.
+        var outcome = Assert.Single(h.Telemetry.Ended);
+        Assert.Equal(match.MatchId, outcome.MatchId);
+        Assert.Empty(outcome.AbandonedBy);
+        Assert.Empty(h.Telemetry.Abandonments);
+        foreach (var team in match.Teams)
+            foreach (var p in team)
+                Assert.NotEqual(EligibilityStatus.InMatch, h.Engine.CheckEligibility(p).Status);
+    }
+
+    [Fact]
+    public void TryForfeit_still_answers_an_eliminated_player_released_from_the_index()
+    {
+        // Elimination removes the player from the engine's in-match index (so they can re-queue),
+        // but ?forfeit should still find their match by roster and answer Eliminated -- not
+        // pretend they aren't in a match they're literally spectating.
+        var h = new Harness(killTarget: 100);
+        h.Engine.Queues.Register(
+            "2v2lives",
+            new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)),
+            "gt1",
+            () => new KillCountEndPolicy(100),
+            livesPerPlayer: 1);
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n, "2v2lives");
+        h.Engine.Tick(T0);
+        var match = h.StartProposedMatch();
+        var victim = match.Teams[0][0];
+        var killer = match.Teams[1][0];
+
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        h.Engine.OnKill(killer, victim, h.Clock.UtcNow);
+        Assert.Single(h.Telemetry.PlayerReleases);
+
+        Assert.Equal(ForfeitVoteResult.Eliminated, h.Engine.TryForfeit(victim, h.Clock.UtcNow).Result);
+    }
+
+    [Fact]
+    public void TryForfeit_rejections_emit_no_telemetry()
+    {
+        var h = new Harness(killTarget: 100);
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        var match = h.StartProposedMatch();
+
+        // Spectator with no match at all.
+        Assert.Equal(ForfeitVoteResult.NotInMatch, h.Engine.TryForfeit(K("Z"), h.Clock.UtcNow).Result);
+
+        // Duplicate vote.
+        var voter = match.Teams[0][0];
+        h.Engine.TryForfeit(voter, h.Clock.UtcNow);
+        Assert.Equal(ForfeitVoteResult.AlreadyVoted, h.Engine.TryForfeit(voter, h.Clock.UtcNow).Result);
+
+        Assert.Single(h.Telemetry.ForfeitVotes);
+    }
 }

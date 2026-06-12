@@ -85,6 +85,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnTeammateAbandoned(survivors, abandoner, matchId, at);
     }
+    public void OnForfeitVote(ActiveMatch match, PlayerKey voter, ForfeitVote vote, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnForfeitVote(match, voter, vote, at);
+    }
     public void OnPlayerReleasedFromMatch(PlayerKey p, Guid matchId, DateTimeOffset at)
     {
         foreach (var l in _listeners) l.OnPlayerReleasedFromMatch(p, matchId, at);

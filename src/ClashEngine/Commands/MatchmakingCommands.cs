@@ -123,6 +123,10 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("return", Return, arena, helpText:
             "?return -- Rejoin the match you were specced from. Bypasses the per-match freq lock " +
             "by placing you directly on your assigned ship and team freq.");
+        _commands.AddCommand("forfeit", Forfeit, arena, helpText:
+            "?forfeit -- Vote to forfeit your current match. When every remaining (non-eliminated) " +
+            "player on your team has voted, the match ends immediately as a loss for your team -- " +
+            "with no abandonment penalty. Votes are permanent and can't be withdrawn.");
         _commands.AddCommand("party", Group, arena, helpText:
             "?party -- List the members of your current party. " +
             "?party player1[,player2,...] -- Invite one or more players to your ClashEngine group.");
@@ -155,6 +159,7 @@ public sealed class MatchmakingCommands
         _commands.RemoveCommand("rating", Rating, arena);
         _commands.RemoveCommand("cancel", Cancel, arena);
         _commands.RemoveCommand("return", Return, arena);
+        _commands.RemoveCommand("forfeit", Forfeit, arena);
         _commands.RemoveCommand("party", Group, arena);
         _commands.RemoveCommand("accept", Accept, arena);
         _commands.RemoveCommand("decline", Decline, arena);
@@ -689,6 +694,30 @@ public sealed class MatchmakingCommands
         if (msg is not null) _chat.SendMessage(player, msg);
     }
 
+    // ---- ?forfeit
+
+    private void Forfeit(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("forfeit", player, parameters);
+        if (_resolver.KeyOf(player) is not PlayerKey k) return;
+
+        var vote = _engine.TryForfeit(k, _clock.UtcNow);
+        if (_log.IsDebug)
+            _log.Debug(LogCategory, $"?forfeit {k.Name} result={vote.Result} votes={vote.Votes}/{vote.Needed}");
+
+        // Registered votes (Requested/Agreed/Completed) are messaged by EngineEventListener's
+        // OnForfeitVote broadcast -- voter included -- so only the rejections answer here.
+        var msg = vote.Result switch
+        {
+            ForfeitVoteResult.NotInMatch => "You aren't in an active match.",
+            ForfeitVoteResult.NotLive => "Your match hasn't started yet -- ?forfeit is only available once it's live.",
+            ForfeitVoteResult.Eliminated => "You've been eliminated -- the forfeit vote belongs to your remaining teammates.",
+            ForfeitVoteResult.AlreadyVoted => $"You've already voted to forfeit ({vote.Votes}/{vote.Needed}). Votes can't be withdrawn.",
+            _ => null,
+        };
+        if (msg is not null) _chat.SendMessage(player, msg);
+    }
+
     // ---- ?party player1,player2,...
 
     private void Group(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
@@ -1180,6 +1209,7 @@ public sealed class MatchmakingCommands
             ("?play <queue name>",           "Queue for the next match. Spaces map to underscores in the lookup."),
             ("?cancel",                      "Leave every ClashEngine queue."),
             ("?return",                      "Rejoin the match you were specced from."),
+            ("?forfeit",                     "Vote to forfeit your match; unanimous (non-eliminated) team = immediate loss, no penalty."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
             ("?showline",                    "Show the detailed state of every queue you're in."),
             ("?rating",                      "Show your skill rating per game type."),

@@ -37,6 +37,17 @@ public sealed class ActiveMatch
     private readonly int[] _killsByTeam;
     private readonly IMatchEndPolicy _endPolicy;
 
+    /// <summary>Players with a registered (sticky, irrevocable) <c>?forfeit</c> vote.</summary>
+    private readonly HashSet<PlayerKey> _forfeitVotes = new();
+
+    /// <summary>Teams on which at least one forfeit vote has ever been cast. Lets the first vote
+    /// be announced differently ("asked to forfeit") and bounds the per-event unanimity recheck.</summary>
+    private readonly HashSet<int> _forfeitRequestedTeams = new();
+
+    /// <summary>Teams whose forfeit vote went unanimous. Treated as forfeited by
+    /// <see cref="IsTeamForfeited"/>, so the standard collapse machinery resolves the match.</summary>
+    private readonly HashSet<int> _forfeitedTeams = new();
+
     /// <summary>Per-team wall-clock of the last position sample seen inside the presence zone
     /// from an Active, non-knocked-out member. Seeded to the GO! time by <see cref="MarkLive"/>
     /// (every team starts "present" and must enter the zone within the timeout). Null when the
@@ -320,6 +331,132 @@ public sealed class ActiveMatch
         return result is null ? Array.Empty<PlayerKey>() : result;
     }
 
+    /// <summary>
+    /// Registers <paramref name="player"/>'s <c>?forfeit</c> vote. Votes are sticky -- there is no
+    /// way to withdraw one -- and a team forfeits the moment every <em>eligible</em> member
+    /// (Active or InGrace, lives remaining) has voted. Eliminated players are out of the vote;
+    /// an Abandoned player's vote still registers (it counts again if they <c>?return</c>) but
+    /// they don't block their present teammates' unanimity. On a two-team match a completed
+    /// forfeit ends the match immediately as a loss for the forfeiting team; with 3+ teams the
+    /// team is treated as forfeited (ranked by the usual forfeit rules) and the match ends once
+    /// at most one team remains. Completing a forfeit excuses every voter from abandonment
+    /// accounting -- a unanimous exit is the sanctioned alternative to leaving teammates hanging.
+    /// </summary>
+    public ForfeitVote TryForfeit(PlayerKey player, DateTimeOffset at)
+    {
+        if (!_teamOf.TryGetValue(player, out var teamIdx))
+            return new ForfeitVote(ForfeitVoteResult.NotInMatch, 0, 0);
+        if (State != MatchState.Live)
+            return new ForfeitVote(ForfeitVoteResult.NotLive, 0, 0);
+        if (IsKnockedOut(player))
+            return new ForfeitVote(ForfeitVoteResult.Eliminated, 0, 0);
+
+        if (!_forfeitVotes.Add(player))
+        {
+            var (v, n) = CountForfeitVotes(teamIdx);
+            return new ForfeitVote(ForfeitVoteResult.AlreadyVoted, v, n);
+        }
+
+        bool isFirst = _forfeitRequestedTeams.Add(teamIdx);
+        var (votes, needed) = CountForfeitVotes(teamIdx);
+        if (TryCompleteForfeit(teamIdx))
+        {
+            TryForfeitOrAbandon(at);
+            return new ForfeitVote(ForfeitVoteResult.Completed, votes, needed);
+        }
+        return new ForfeitVote(isFirst ? ForfeitVoteResult.Requested : ForfeitVoteResult.Agreed, votes, needed);
+    }
+
+    /// <summary>True when <paramref name="player"/> has a registered forfeit vote.</summary>
+    public bool HasForfeitVoted(PlayerKey player) => _forfeitVotes.Contains(player);
+
+    /// <summary>
+    /// Teammates of <paramref name="player"/> currently in the forfeit-vote denominator -- Active
+    /// or InGrace with lives remaining -- excluding the player. These are the people a vote
+    /// announcement should reach.
+    /// </summary>
+    public IReadOnlyList<PlayerKey> ForfeitEligibleTeammatesOf(PlayerKey player)
+    {
+        if (!_teamOf.TryGetValue(player, out var teamIdx)) return Array.Empty<PlayerKey>();
+        List<PlayerKey>? result = null;
+        var team = Teams[teamIdx];
+        for (int j = 0; j < team.Count; j++)
+        {
+            var mate = team[j];
+            if (mate == player) continue;
+            if (!IsForfeitEligible(mate)) continue;
+            (result ??= new List<PlayerKey>()).Add(mate);
+        }
+        return result is null ? Array.Empty<PlayerKey>() : result;
+    }
+
+    /// <summary>
+    /// A player counts toward (and blocks) their team's forfeit unanimity while they're still
+    /// meaningfully in the match: Active or InGrace, with lives remaining. Eliminated players
+    /// have no say left; Abandoned players forfeited their say by leaving (their team shouldn't
+    /// be held hostage by someone who's gone -- but see <see cref="TryForfeit"/>: their vote
+    /// re-counts if they <c>?return</c>).
+    /// </summary>
+    private bool IsForfeitEligible(PlayerKey player)
+    {
+        var s = _status[player];
+        if (s != PlayerStatus.Active && s != PlayerStatus.InGrace) return false;
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return false;
+        return true;
+    }
+
+    private (int Votes, int Needed) CountForfeitVotes(int teamIdx)
+    {
+        int votes = 0, needed = 0;
+        var team = Teams[teamIdx];
+        for (int j = 0; j < team.Count; j++)
+        {
+            var p = team[j];
+            if (!IsForfeitEligible(p)) continue;
+            needed++;
+            if (_forfeitVotes.Contains(p)) votes++;
+        }
+        return (votes, needed);
+    }
+
+    /// <summary>
+    /// Marks <paramref name="teamIdx"/> forfeited if its forfeit vote is unanimous among eligible
+    /// voters (and there is at least one -- an emptied team is the collapse machinery's case, not
+    /// a forfeit). Voters are excused from abandonment accounting: a leaver whose whole remaining
+    /// team agreed to quit didn't strand anyone. Returns true when the team newly forfeited.
+    /// </summary>
+    private bool TryCompleteForfeit(int teamIdx)
+    {
+        if (_forfeitedTeams.Contains(teamIdx)) return false;
+        if (!_forfeitRequestedTeams.Contains(teamIdx)) return false;
+
+        var (votes, needed) = CountForfeitVotes(teamIdx);
+        if (needed == 0 || votes < needed) return false;
+
+        _forfeitedTeams.Add(teamIdx);
+        var team = Teams[teamIdx];
+        for (int j = 0; j < team.Count; j++)
+        {
+            var p = team[j];
+            if (!_forfeitVotes.Contains(p)) continue;
+            _candidateAbandoners.Remove(p);
+            _everAbandoned.Remove(p);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Re-evaluates pending (requested-but-not-unanimous) forfeit votes after the eligible-voter
+    /// set may have shrunk -- a holdout was eliminated or their grace expired into Abandoned.
+    /// "All non-eliminated players have voted" can become true without anyone typing a thing.
+    /// </summary>
+    private void RecheckPendingForfeits()
+    {
+        if (_forfeitRequestedTeams.Count == 0) return;
+        foreach (var teamIdx in _forfeitRequestedTeams)
+            TryCompleteForfeit(teamIdx);
+    }
+
     /// <summary>Player has entered the arena and joined their assigned ship/freq.</summary>
     public void OnPlayerJoined(PlayerKey player, DateTimeOffset at)
     {
@@ -450,6 +587,11 @@ public sealed class ActiveMatch
 
         if (!_teamOf.TryGetValue(player, out var teamIdx)) return false;
 
+        // A team that already forfeited by unanimous vote has nothing left to abandon --
+        // its members are expected to leave (matters only in 3+ team matches, where the
+        // match keeps running after one team forfeits out).
+        if (_forfeitedTeams.Contains(teamIdx)) return false;
+
         var team = Teams[teamIdx];
         for (int j = 0; j < team.Count; j++)
         {
@@ -564,8 +706,11 @@ public sealed class ActiveMatch
         }
 
         // After a death, refresh collapse timers and check for immediate forfeit/collapse --
-        // including TK-driven eliminations, since a team can theoretically self-wipe.
+        // including TK-driven eliminations, since a team can theoretically self-wipe. An
+        // elimination can also shrink a pending forfeit vote's denominator to unanimity (the
+        // lone holdout just lost their last life), so recheck votes first.
         UpdateTeamCollapseTimers(at);
+        RecheckPendingForfeits();
         if (TryForfeitOrAbandon(at)) return;
 
         TryFinish(at);
@@ -615,6 +760,10 @@ public sealed class ActiveMatch
         }
 
         UpdateTeamCollapseTimers(at);
+
+        // A grace expiry above may have dropped a non-voter out of a pending forfeit vote's
+        // denominator, making the remaining voters unanimous.
+        RecheckPendingForfeits();
 
         // If only one team is still alive (not yet forfeited past the collapse grace), the
         // others have forfeited. If no teams are alive, the match collapses entirely.
@@ -724,6 +873,9 @@ public sealed class ActiveMatch
 
     private bool IsTeamForfeited(int teamIdx, DateTimeOffset at)
     {
+        // A unanimous ?forfeit vote is an immediate, irrevocable forfeit -- no grace involved.
+        if (_forfeitedTeams.Contains(teamIdx)) return true;
+
         if (HasLiveMember(teamIdx)) return false;
 
         // Team has no Active/Pending players with lives. If any teammates are still in grace

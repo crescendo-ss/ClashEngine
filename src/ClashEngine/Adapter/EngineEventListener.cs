@@ -381,6 +381,32 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         }
     }
 
+    public void OnForfeitVote(ActiveMatch match, PlayerKey voter, ForfeitVote vote, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory,
+                $"ForfeitVote: {voter.Name} {vote.Result} ({vote.Votes}/{vote.Needed}) match={match.MatchId:N}");
+
+        // Sent live, like the free-to-leave notice: the team needs the tally while the match is
+        // still running. The voter gets a tailored confirmation; eligible teammates get the
+        // call-to-action / progress line. On Completed the match has already finalized -- the
+        // (N/N) line lands just before the end-of-match scoreboard explains the loss.
+        bool isFirst = vote.Result == ForfeitVoteResult.Requested;
+        if (_resolver.Resolve(voter) is { } voterPlayer)
+            _chat.SendMessage(voterPlayer, isFirst
+                ? $"You asked to forfeit. Your teammates must also type ?forfeit to agree. ({vote.Votes}/{vote.Needed})"
+                : $"You agreed to forfeit. ({vote.Votes}/{vote.Needed})");
+
+        var teammateMsg = isFirst
+            ? $"{voter.Name} has asked to forfeit. Type ?forfeit to agree ({vote.Votes}/{vote.Needed})"
+            : $"{voter.Name} has agreed to forfeit. ({vote.Votes}/{vote.Needed})";
+        foreach (var mate in match.ForfeitEligibleTeammatesOf(voter))
+        {
+            if (_resolver.Resolve(mate) is { } p)
+                _chat.SendMessage(p, teammateMsg);
+        }
+    }
+
     public void OnTeamCollapsing(ActiveMatch match, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
     {
         _verbose.Info(LogCategory,

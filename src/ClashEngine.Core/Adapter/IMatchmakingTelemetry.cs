@@ -169,6 +169,17 @@ public interface IMatchmakingTelemetry
     void OnPlayerReturnedToMatch(PlayerKey player, Guid matchId, DateTimeOffset at) { }
 
     /// <summary>
+    /// A match participant cast a <c>?forfeit</c> vote that registered (<paramref name="vote"/> is
+    /// <see cref="ForfeitVoteResult.Requested"/>, <see cref="ForfeitVoteResult.Agreed"/>, or
+    /// <see cref="ForfeitVoteResult.Completed"/> -- rejected attempts don't fire). The adapter
+    /// broadcasts the progress to the voter's eligible teammates
+    /// (<see cref="ActiveMatch.ForfeitEligibleTeammatesOf"/>): "asked to forfeit" on Requested,
+    /// "agreed to forfeit" after. On Completed the team has forfeited and -- in a two-team match --
+    /// the match has already finalized (<see cref="OnMatchEnded"/> follows).
+    /// </summary>
+    void OnForfeitVote(ActiveMatch match, PlayerKey voter, ForfeitVote vote, DateTimeOffset at) { }
+
+    /// <summary>
     /// A team just lost its last live member; the team-collapse grace timer started at
     /// <paramref name="since"/> and the team will forfeit at <paramref name="forfeitAt"/> unless
     /// at least one player returns to active before then.
