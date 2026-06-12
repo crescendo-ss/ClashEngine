@@ -47,6 +47,11 @@ public sealed class MatchOrchestrator
     private readonly MatchStatsRegistry? _matchStats;
     private readonly IComponentBroker? _broker;
 
+    /// <summary>The ship/freq lock advisor, notified when the countdown actually starts so its
+    /// ship-lock deadline tracks the real GO instant (staging may short-circuit early).
+    /// <see langword="null"/> in test paths that construct the orchestrator without it.</summary>
+    private readonly MatchFreqAdvisor? _freqAdvisor;
+
     /// <summary>Applies/clears the per-player client-settings <c>[Spawn]</c> override that controls
     /// where the client respawns participants during the match. <see langword="null"/> in test
     /// paths that construct the orchestrator without the SS client-settings edge.</summary>
@@ -125,7 +130,8 @@ public sealed class MatchOrchestrator
         IComponentBroker? broker = null,
         SpawnSettingsApplier? spawnApplier = null,
         NoItemsSettingsApplier? noItemsApplier = null,
-        Persistence.PersistLastShipStore? lastShips = null)
+        Persistence.PersistLastShipStore? lastShips = null,
+        MatchFreqAdvisor? freqAdvisor = null)
     {
         _matchId = matchId;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -147,6 +153,7 @@ public sealed class MatchOrchestrator
         _spawnApplier = spawnApplier;
         _noItemsApplier = noItemsApplier;
         _lastShips = lastShips;
+        _freqAdvisor = freqAdvisor;
         _drift = new StartDriftEnforcer(_queue, _proposal);
 
         for (int t = 0; t < _proposal.Teams.Count; t++)
@@ -798,6 +805,15 @@ public sealed class MatchOrchestrator
             // "-3-/-2-/-1-" tick window always has room to fire.
             _countdownSecondsRemaining = (int)_queue.CountdownDuration.TotalSeconds;
             _timer.SetTimer(OnCountdownTick, 1000, 1000, this);
+
+            // Re-anchor the advisor's ship-lock deadline to the countdown that actually started.
+            // Staging may have ended well before the configured StagingDuration (the all-ready
+            // short-circuit in OnPositionPacket), and the advisor's proposal-time deadline
+            // assumed the full window -- without this correction the ship-change window stays
+            // open past GO by however much staging time went unused.
+            var lockAt = _clock.UtcNow + _queue.CountdownDuration - MatchFreqAdvisor.ShipLockBeforeStart;
+            if (lockAt < _clock.UtcNow) lockAt = _clock.UtcNow;
+            _freqAdvisor?.OnCountdownStarted(_matchId, lockAt);
 
             // For countdowns with a pre-lock ship-pick window (CountdownDuration >
             // ShipLockBeforeStart), tell players how many seconds they have to finalize their

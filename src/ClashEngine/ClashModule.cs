@@ -333,10 +333,20 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _lastShipTracker.Register();
         _unregisterActions.Add(_lastShipTracker.Unregister);
 
+        // Per-life ship lock + per-match freq lock. Implements IFreqManagerEnforcerAdvisor and
+        // registers on every configured match arena; SS Core's FreqManager consults it on each
+        // ship/freq change request from a player. Direct API placements via IGame.SetShipAndFreq
+        // (orchestrator setup, knockout-spec) bypass the advisor and remain unaffected.
+        // Constructed before the orchestrator registry: each orchestrator re-anchors the
+        // advisor's ship-lock deadline (OnCountdownStarted) when its countdown actually begins,
+        // since staging can short-circuit early. Registration happens further down with the
+        // other advisors/listeners.
+        _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, _chat, freqAllocator);
+
         _orchestrators = new MatchOrchestratorRegistry(
             broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
             matchAudience, freqAllocator, matchStats: _matchStats, spawnApplier: spawnApplier,
-            noItemsApplier: noItemsApplier, lastShips: _persistLastShip);
+            noItemsApplier: noItemsApplier, lastShips: _persistLastShip, freqAdvisor: _freqAdvisor);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 
@@ -441,12 +451,6 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // is available for IMemberStats reads. Skipped silently if SS.Matchmaking module
         // graph isn't loaded -- the callbacks fire harmlessly with no subscribers.
         _lvzAdapter = new MatchLvzAdapter(broker, _engine, _matchStats, _resolver, _arenaManager, _game, _log, freqAllocator);
-
-        // Per-life ship lock + per-match freq lock. Implements IFreqManagerEnforcerAdvisor and
-        // registers on every configured match arena; SS Core's FreqManager consults it on each
-        // ship/freq change request from a player. Direct API placements via IGame.SetShipAndFreq
-        // (orchestrator setup, knockout-spec) bypass the advisor and remain unaffected.
-        _freqAdvisor = new MatchFreqAdvisor(broker, _engine, _arenaManager, _resolver, _clock, _log, _chat, freqAllocator);
 
         // Queue liveness: in-game activity (ship rotation change, weapon fire, chat) refreshes
         // queued players' AFK dwell clocks so present players never need to re-?play. Zone-scope

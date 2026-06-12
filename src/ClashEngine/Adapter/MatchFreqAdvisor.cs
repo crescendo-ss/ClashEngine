@@ -156,8 +156,12 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
         // Populate locks at proposal time (not at OnMatchStarted) so freq enforcement is in
         // effect during Setup/Staging/Countdown, with ShipChangeAllowedUntil extended through
         // staging and most of the countdown -- the lock only kicks in ShipLockBeforeStart before
-        // GO. Listener order in CompositeTelemetry guarantees MatchOrchestratorRegistry has
-        // already run BeginSetup (allocating the freq base) by the time this listener fires.
+        // GO. This value assumes staging runs its full configured window; it is an upper bound
+        // the orchestrator re-anchors via OnCountdownStarted when the countdown actually begins
+        // (staging short-circuits as soon as everyone readies up, which would otherwise leave
+        // the window open past GO). Listener order in CompositeTelemetry guarantees
+        // MatchOrchestratorRegistry has already run BeginSetup (allocating the freq base) by the
+        // time this listener fires.
         var lockOffset = queueDef.StagingDuration + queueDef.CountdownDuration - ShipLockBeforeStart;
         // QueueDefinition validates CountdownDuration >= 5s so this is non-negative in practice;
         // clamp defensively for any future relaxation of that bound.
@@ -176,9 +180,32 @@ public sealed class MatchFreqAdvisor : IFreqManagerEnforcerAdvisor, IMatchmaking
 
     public void OnMatchStarted(ActiveMatch match)
     {
-        // Locks were populated at OnMatchProposed; by GO the pre-match
-        // ShipChangeAllowedUntil has already passed (it expires ShipLockBeforeStart before GO),
-        // so the per-life lock is in effect. Nothing to refresh here.
+        // Locks were populated at OnMatchProposed and re-anchored at OnCountdownStarted; by GO
+        // the pre-match ShipChangeAllowedUntil has already passed (it expires
+        // ShipLockBeforeStart before GO), so the per-life lock is in effect. Nothing to refresh.
+    }
+
+    /// <summary>
+    /// Called by <see cref="ClashEngine.Orchestration.MatchOrchestrator"/> the moment its
+    /// countdown phase starts. Re-anchors every participant's pre-match ship-change window to
+    /// <paramref name="lockAt"/>, the instant derived from the countdown that is actually
+    /// running. This correction is load-bearing: staging ends early whenever every participant
+    /// readies up before the configured StagingDuration elapses, and the upper bound seeded at
+    /// <see cref="OnMatchProposed"/> assumed the full window -- left uncorrected, the unused
+    /// staging time would keep ship changes open that long past GO.
+    /// </summary>
+    public void OnCountdownStarted(Guid matchId, DateTimeOffset lockAt)
+    {
+        if (!_engine.ActiveMatches.TryGetValue(matchId, out var match)) return;
+        for (int t = 0; t < match.Teams.Count; t++)
+        {
+            for (int j = 0; j < match.Teams[t].Count; j++)
+            {
+                var key = match.Teams[t][j];
+                if (_byPlayer.TryGetValue(key, out var st))
+                    _byPlayer[key] = st with { ShipChangeAllowedUntil = lockAt };
+            }
+        }
     }
 
     public void OnMatchEnded(MatchOutcome outcome)
