@@ -177,6 +177,18 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
         _registry.OnPlayerReleased(matchId, player, (uint)ServerTick.Now);
     }
 
+    /// <summary>
+    /// Re-arm the player's damage-callback watch after any mid-match departure-and-return.
+    /// The client-side damage-reporting toggle does not survive an arena re-entry or a
+    /// reconnect, so the watch added at <see cref="OnMatchStarted"/> goes silently dead for
+    /// the rest of the match -- the returned player would register zero damage taken, their
+    /// deaths would credit no kill-damage/assists, and their repels no forced-repel damage.
+    /// </summary>
+    public void OnPlayerReturnedToMatch(PlayerKey player, Guid matchId, DateTimeOffset at)
+    {
+        _damageWatcher.Rewatch(player);
+    }
+
     public void OnMatchEnded(MatchOutcome outcome)
     {
         uint atTick = (uint)ServerTick.Now;

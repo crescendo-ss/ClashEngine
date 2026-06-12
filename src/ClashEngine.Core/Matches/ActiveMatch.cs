@@ -410,14 +410,17 @@ public sealed class ActiveMatch
     /// team-collapse timer clears) but the abandon flag is sticky -- they're still counted as an
     /// abandoner at match end via <see cref="_everAbandoned"/>. Knocked-out players (lives
     /// exhausted) cannot return.
+    /// Returns <see langword="true"/> when the return took effect (the player flipped back to
+    /// Active); <see langword="false"/> when it was a no-op (unknown player, not in a returnable
+    /// status, match no longer running, or knocked out).
     /// </summary>
-    public void OnPlayerReturned(PlayerKey player, DateTimeOffset at)
+    public bool OnPlayerReturned(PlayerKey player, DateTimeOffset at)
     {
-        if (!_status.TryGetValue(player, out var s)) return;
-        if (s != PlayerStatus.InGrace && s != PlayerStatus.Abandoned) return;
-        if (State != MatchState.Live && State != MatchState.Forming) return;
+        if (!_status.TryGetValue(player, out var s)) return false;
+        if (s != PlayerStatus.InGrace && s != PlayerStatus.Abandoned) return false;
+        if (State != MatchState.Live && State != MatchState.Forming) return false;
         // Knocked out -- their slot is closed for the rest of the match.
-        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return;
+        if (LivesPerPlayer.HasValue && _exitedAt.ContainsKey(player)) return false;
 
         _status[player] = PlayerStatus.Active;
         _leftAt.Remove(player);
@@ -429,6 +432,7 @@ public sealed class ActiveMatch
         // Clear the team-collapse timer if this player's return brings their team back to life.
         if (_teamOf.TryGetValue(player, out var teamIdx))
             _teamCollapsedSince.Remove(teamIdx);
+        return true;
     }
 
     /// <summary>

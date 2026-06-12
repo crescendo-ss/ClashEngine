@@ -183,6 +183,74 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
+    public void Return_after_midmatch_departure_fires_OnPlayerReturnedToMatch()
+    {
+        // Stats consumers re-arm per-connection wiring (the damage-callback watch) off this
+        // event -- without it, a player who specs/leaves/reconnects mid-match registers zero
+        // damage taken for the rest of the match.
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        var match = h.StartProposedMatch();
+
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnPlayerSpecced(K("A"), h.Clock.UtcNow);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(5));
+        h.Engine.OnPlayerReturned(K("A"), h.Clock.UtcNow);
+
+        var ret = Assert.Single(h.Telemetry.PlayerReturns);
+        Assert.Equal(K("A"), ret.Player);
+        Assert.Equal(match.MatchId, ret.MatchId);
+        Assert.Equal(h.Clock.UtcNow, ret.At);
+    }
+
+    [Fact]
+    public void Return_without_a_prior_departure_does_not_fire_OnPlayerReturnedToMatch()
+    {
+        // A stale ship-change callback for an Active player is a no-op return; firing the
+        // event for it would needlessly cycle the player's damage watch.
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        h.StartProposedMatch();
+
+        h.Engine.OnPlayerReturned(K("A"), h.Clock.UtcNow);
+
+        Assert.Empty(h.Telemetry.PlayerReturns);
+    }
+
+    [Fact]
+    public void Return_during_countdown_also_fires_OnPlayerReturnedToMatch()
+    {
+        // Pre-GO! departures get the same grace as live ones, so the return event fires for
+        // a Forming-state recovery too (the orchestrator retries go-live off it).
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+
+        h.Clock.Advance(TimeSpan.FromSeconds(2));
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+
+        h.Engine.OnPlayerSpecced(K("B"), h.Clock.UtcNow);
+        h.Clock.Advance(TimeSpan.FromSeconds(3));
+        h.Engine.OnPlayerReturned(K("B"), h.Clock.UtcNow);
+
+        var ret = Assert.Single(h.Telemetry.PlayerReturns);
+        Assert.Equal(K("B"), ret.Player);
+        Assert.Equal(matchId, ret.MatchId);
+    }
+
+    [Fact]
     public void CancelForming_immediately_cancels_with_the_candidate_abandoner_rule()
     {
         // The orchestrator calls this at GO! when a player is missing -- it must cancel right away

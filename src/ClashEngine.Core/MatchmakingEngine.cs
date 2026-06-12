@@ -232,7 +232,8 @@ public sealed class MatchmakingEngine
         {
             var m = _matches[matchId];
             var prev = SnapshotCollapsed(m);
-            m.OnPlayerReturned(player, at);
+            if (m.OnPlayerReturned(player, at))
+                _telemetry.OnPlayerReturnedToMatch(player, matchId, at);
             DiffCollapsedAndEmit(m, prev);
         }
     }

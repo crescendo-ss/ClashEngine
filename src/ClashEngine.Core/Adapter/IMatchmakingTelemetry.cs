@@ -159,6 +159,16 @@ public interface IMatchmakingTelemetry
     void OnPlayerReleasedFromMatch(PlayerKey player, Guid matchId, DateTimeOffset at) { }
 
     /// <summary>
+    /// A participant who had departed mid-match (specced, left the arena, or disconnected) is
+    /// Active in the match again. Fires only when the return actually took effect -- the player
+    /// was in a returnable status and the match is still Forming/Live; no-op returns (knocked-out
+    /// players, stale ship-change callbacks) don't fire. Stats consumers use this to re-arm
+    /// per-connection wiring that does not survive the departure (e.g. the damage-callback watch:
+    /// the client-side damage-reporting toggle dies on arena re-entry and reconnect).
+    /// </summary>
+    void OnPlayerReturnedToMatch(PlayerKey player, Guid matchId, DateTimeOffset at) { }
+
+    /// <summary>
     /// A team just lost its last live member; the team-collapse grace timer started at
     /// <paramref name="since"/> and the team will forfeit at <paramref name="forfeitAt"/> unless
     /// at least one player returns to active before then.

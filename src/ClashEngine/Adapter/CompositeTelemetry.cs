@@ -89,6 +89,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnPlayerReleasedFromMatch(p, matchId, at);
     }
+    public void OnPlayerReturnedToMatch(PlayerKey p, Guid matchId, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnPlayerReturnedToMatch(p, matchId, at);
+    }
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)
     {
         foreach (var l in _listeners) l.OnTeamCollapsing(m, teamIdx, since, forfeitAt);
