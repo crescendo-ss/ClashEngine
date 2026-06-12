@@ -15,6 +15,7 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public List<(PlayerKey Player, string DiscordAlias)> DiscordLinkRequests { get; } = new();
     public List<(PlayerKey Player, string Queue, int DefensesUsed, int MaxDefenses, bool SentToBack)> WinnerPromotions { get; } = new();
     public List<(PlayerKey Player, string Queue)> AutoQueued { get; } = new();
+    public List<(PlayerKey Player, string Queue)> QueueRestored { get; } = new();
     public List<PlayerKey> AutoQueueDisabledByAfk { get; } = new();
     public List<MatchProposal> Proposed { get; } = new();
     public List<ActiveMatch> Started { get; } = new();
@@ -51,6 +52,8 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
         WinnerPromotions.Add((player, queueName, defensesUsed, maxDefenses, sentToBack));
     public void OnAutoQueued(PlayerKey player, string queueName, DateTimeOffset at) =>
         AutoQueued.Add((player, queueName));
+    public void OnQueueRestored(PlayerKey player, string queueName, DateTimeOffset at) =>
+        QueueRestored.Add((player, queueName));
     public void OnAutoQueueDisabledByAfk(PlayerKey player, DateTimeOffset at) =>
         AutoQueueDisabledByAfk.Add(player);
     public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed) =>

@@ -46,6 +46,13 @@ public sealed class MatchmakingEngine
     private static readonly TimeSpan JoinTimeoutBackstopMargin = TimeSpan.FromSeconds(30);
     private readonly Dictionary<Guid, ActiveMatch> _matches = new();
     private readonly Dictionary<Guid, QueueDefinition> _matchQueue = new();
+
+    // Per-match snapshot of each participant's *other* queue memberships at pop time -- the queues
+    // the matcher dequeued them from besides the one the match formed from (the proposal's
+    // AlsoRemovedFrom map). Consumed (and always removed) by FinalizeMatch, which restores those
+    // memberships: the original enqueues were explicit player intent that the pop revoked
+    // mechanically. Only matches with at least one multi-queue searcher have an entry.
+    private readonly Dictionary<Guid, IReadOnlyDictionary<PlayerKey, IReadOnlyList<string>>> _otherQueuesAtPop = new();
     private readonly Dictionary<PlayerKey, Guid> _matchOf = new();
     private readonly HashSet<PlayerKey> _connected = new();
     private readonly Dictionary<(Guid MatchId, PlayerKey Target), PendingGriefingPenalty> _pendingGriefs = new();
@@ -1021,6 +1028,8 @@ public sealed class MatchmakingEngine
             presenceZoneTimeout: def.PresenceZoneTimeout);
         _matches[matchId] = match;
         _matchQueue[matchId] = def;
+        if (proposal.AlsoRemovedFrom.Count > 0)
+            _otherQueuesAtPop[matchId] = proposal.AlsoRemovedFrom;
 
         // The matcher already dequeued these players from every queue they were searching; surface
         // a removal (reason=Matched) for the queue this match formed from AND for any other queues
@@ -1114,6 +1123,7 @@ public sealed class MatchmakingEngine
 
         _matches.Remove(m.MatchId);
         _matchQueue.Remove(m.MatchId);
+        _otherQueuesAtPop.Remove(m.MatchId, out var otherQueuesAtPop);
 
         // KOTH re-enqueue: winners go to the head of the queue, capped by MaxConsecutiveDefenses.
         if (queueDef is { PromoteWinnersToFront: true }
@@ -1130,6 +1140,15 @@ public sealed class MatchmakingEngine
         // AFK violator already had auto-queue switched off in the abandon loop above.
         if (queueDef is not null && m.Outcome.FinalState != MatchState.Cancelled)
             ApplyAutoQueueReenqueue(queueDef, m, at);
+
+        // Restore the *other* queue memberships the pop revoked. Unlike ?auto this is
+        // unconditional and runs for every final state including Cancelled -- the player queued
+        // there themselves and the match (which possibly never even ran) shouldn't cost them
+        // that spot. Runs after the formation-queue re-adds above so an ?auto/KOTH player is
+        // already back in the formation queue; the sets are disjoint either way (AlsoRemovedFrom
+        // never contains the proposal queue).
+        if (otherQueuesAtPop is not null)
+            RestoreOtherQueues(otherQueuesAtPop, m, at);
 
         _telemetry.OnMatchEnded(m.Outcome);
     }
@@ -1165,6 +1184,48 @@ public sealed class MatchmakingEngine
                 var groupId = _groups.GroupOf(p);
                 if (_matcher.Enqueue(p, rating, queue.UniqueId, groupId))
                     _telemetry.OnAutoQueued(p, queue.UniqueId, at);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Restores the queue memberships a match pop mechanically revoked: when the proposal formed,
+    /// the matcher dequeued every participant from ALL queues they were searching, not just the
+    /// queue the match formed from (<see cref="MatchProposal.AlsoRemovedFrom"/>). Those other
+    /// enqueues were explicit player actions, so -- unlike the opt-in <c>?auto</c> re-add into the
+    /// formation queue -- restoration is unconditional. Eligibility mirrors
+    /// <see cref="ApplyAutoQueueReenqueue"/>: abandoners are skipped (they bailed; for an AFK
+    /// cancel the violator also just landed in timeout), as are disconnected players, players
+    /// already pulled into another match, players in timeout (unless the target queue ignores
+    /// penalties), and queues that no longer exist (removed by a config hot reload while the match
+    /// ran). Players land at the back via <see cref="Matcher.Enqueue"/> with group affiliation
+    /// re-resolved at restore time; each successful re-add fires
+    /// <see cref="IMatchmakingTelemetry.OnQueueRestored"/> in place of <c>OnQueueAdded</c> so the
+    /// adapter can word the notice as a restoration.
+    /// </summary>
+    private void RestoreOtherQueues(
+        IReadOnlyDictionary<PlayerKey, IReadOnlyList<string>> otherQueues, ActiveMatch m, DateTimeOffset at)
+    {
+        var abandoned = m.Outcome!.AbandonedBy.Count > 0
+            ? new HashSet<PlayerKey>(m.Outcome.AbandonedBy)
+            : null;
+
+        foreach (var (p, queueNames) in otherQueues)
+        {
+            if (abandoned is not null && abandoned.Contains(p)) continue;
+            if (!_connected.Contains(p)) continue;            // gone -- nothing to restore
+            if (IsInActiveMatch(p)) continue;                 // already pulled into another match
+
+            for (int i = 0; i < queueNames.Count; i++)
+            {
+                if (!_queues.TryGet(queueNames[i], out var queue)) continue;
+                if (!queue.IgnorePenalties
+                    && CheckEligibility(p).Status == EligibilityStatus.InTimeout) continue;
+
+                var rating = _ratings.Get(p, queue.GameType);
+                var groupId = _groups.GroupOf(p);
+                if (_matcher.Enqueue(p, rating, queue.UniqueId, groupId))
+                    _telemetry.OnQueueRestored(p, queue.UniqueId, at);
             }
         }
     }

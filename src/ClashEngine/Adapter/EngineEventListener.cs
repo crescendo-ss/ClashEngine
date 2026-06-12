@@ -206,6 +206,20 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
             "Use ?cancel to leave, or ?auto off to stop."));
     }
 
+    public void OnQueueRestored(PlayerKey player, string queueName, DateTimeOffset at)
+    {
+        if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"QueueRestored: {player.Name} -> {queueName}");
+        if (_resolver.Resolve(player) is not { } p) return;
+
+        // Wording deliberately avoids the bot-harness keys: must not contain "Auto-queued for",
+        // "Auto-queue", " returned to the match", or "free to leave" (ClashRig RegressionZone
+        // classifies post-match DMs by strstr on those).
+        var descriptor = FormatQueueDescriptor(queueName);
+        _pendingAutoQueueDms.Add((p,
+            $"You're back in line for {descriptor} -- you were queued there when your match formed. " +
+            "Use ?cancel to leave."));
+    }
+
     public void OnAutoQueueDisabledByAfk(PlayerKey player, DateTimeOffset at)
     {
         if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"AutoQueueDisabledByAfk: {player.Name}");

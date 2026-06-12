@@ -45,6 +45,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         foreach (var l in _listeners) l.OnAutoQueued(p, q, at);
     }
+    public void OnQueueRestored(PlayerKey p, string q, DateTimeOffset at)
+    {
+        foreach (var l in _listeners) l.OnQueueRestored(p, q, at);
+    }
     public void OnAutoQueueDisabledByAfk(PlayerKey p, DateTimeOffset at)
     {
         foreach (var l in _listeners) l.OnAutoQueueDisabledByAfk(p, at);

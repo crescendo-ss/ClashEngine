@@ -80,6 +80,18 @@ public interface IMatchmakingTelemetry
     void OnAutoQueued(PlayerKey player, string queueName, DateTimeOffset at) { }
 
     /// <summary>
+    /// A finished match's participant was re-enqueued into <paramref name="queueName"/> -- a queue
+    /// they were still searching when their match popped (the matcher dequeues matched players
+    /// from <em>every</em> queue, not just the one the match formed from). Restoration is
+    /// unconditional -- the original enqueue was an explicit player action, unlike the opt-in
+    /// <c>?auto</c> re-add into the formation queue -- and fires for every final state including
+    /// Cancelled. Fires in place of <see cref="OnQueueAdded"/> so adapters can word the notice as
+    /// a restoration, typically with a <c>?cancel</c> hint. Abandoners and players who became
+    /// ineligible while the match ran are skipped.
+    /// </summary>
+    void OnQueueRestored(PlayerKey player, string queueName, DateTimeOffset at) { }
+
+    /// <summary>
     /// A player's <c>?autoqueue</c> preference was automatically turned off because they were
     /// flagged for a staging AFK violation. Fires only when the preference was actually on (so the
     /// adapter only nudges players who lost something). The adapter notifies them they'll need to

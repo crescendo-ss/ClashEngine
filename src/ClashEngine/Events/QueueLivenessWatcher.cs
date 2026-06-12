@@ -20,9 +20,9 @@ namespace ClashEngine.Events;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Membership comes from the telemetry composite: <see cref="OnQueueAdded"/> plus the two
+/// Membership comes from the telemetry composite: <see cref="OnQueueAdded"/> plus the three
 /// post-match re-enqueue events that fire in its place (<c>OnWinnerPromoted</c>,
-/// <c>OnAutoQueued</c>) cover every add path, and <see cref="OnQueueRemoved"/> every remove
+/// <c>OnAutoQueued</c>, <c>OnQueueRestored</c>) cover every add path, and <see cref="OnQueueRemoved"/> every remove
 /// path, so the per-position-packet cost for a non-queued player is one dictionary miss. Spectators never reach
 /// <see cref="PlayerPositionPacketCallback"/> (the SS Game module only fires it for ship
 /// players), so a queued spectator proves liveness via chat or <c>?play</c> only.
@@ -76,14 +76,18 @@ public sealed class QueueLivenessWatcher : IMatchmakingTelemetry
     void IMatchmakingTelemetry.OnQueueAdded(PlayerKey player, string queueName, DateTimeOffset at, PlayerKey? initiator)
         => _tracker.OnQueueAdded(player, queueName);
 
-    // Post-match re-enqueues (KOTH winner promotion, ?auto) fire these in place of OnQueueAdded,
-    // so they're membership-adds here too -- otherwise a re-queued player's in-game activity
-    // never refreshes their dwell clock and they get AFK-warned/culled while visibly present.
+    // Post-match re-enqueues (KOTH winner promotion, ?auto, other-queue restoration) fire these
+    // in place of OnQueueAdded, so they're membership-adds here too -- otherwise a re-queued
+    // player's in-game activity never refreshes their dwell clock and they get AFK-warned/culled
+    // while visibly present.
     void IMatchmakingTelemetry.OnWinnerPromoted(PlayerKey player, string queueName, DateTimeOffset at,
         int defensesUsed, int maxDefenses, bool sentToBack)
         => _tracker.OnQueueAdded(player, queueName);
 
     void IMatchmakingTelemetry.OnAutoQueued(PlayerKey player, string queueName, DateTimeOffset at)
+        => _tracker.OnQueueAdded(player, queueName);
+
+    void IMatchmakingTelemetry.OnQueueRestored(PlayerKey player, string queueName, DateTimeOffset at)
         => _tracker.OnQueueAdded(player, queueName);
 
     void IMatchmakingTelemetry.OnQueueRemoved(PlayerKey player, string queueName, DateTimeOffset at, QueueRemovalReason reason)
