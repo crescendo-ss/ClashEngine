@@ -15,16 +15,22 @@ public sealed class MatchStatsRegistry
     private readonly Dictionary<Guid, StatsRecorder> _recorders = new();
     private readonly Dictionary<PlayerKey, Guid> _matchOf = new();
     private readonly DamageDecay _decay;
+    private readonly DamageDecay? _assistDecay;
     private readonly double _assistThresholdFraction;
 
+    /// <param name="assistDecay">Optional decay used only for assist-eligibility weighting in
+    /// each recorder (see <see cref="StatsRecorder"/>); <see langword="null"/> means assists use
+    /// <paramref name="decay"/>.</param>
     public MatchStatsRegistry(
         DamageDecay decay,
-        double assistThresholdFraction = StatsRecorder.DefaultAssistThresholdFraction)
+        double assistThresholdFraction = StatsRecorder.DefaultAssistThresholdFraction,
+        DamageDecay? assistDecay = null)
     {
         ArgumentNullException.ThrowIfNull(decay);
         if (assistThresholdFraction < 0 || assistThresholdFraction > 1)
             throw new ArgumentOutOfRangeException(nameof(assistThresholdFraction), "Must be in [0, 1].");
         _decay = decay;
+        _assistDecay = assistDecay;
         _assistThresholdFraction = assistThresholdFraction;
     }
 
@@ -35,7 +41,7 @@ public sealed class MatchStatsRegistry
     {
         if (_recorders.ContainsKey(matchId))
             throw new InvalidOperationException($"Match {matchId:N} already has a recorder.");
-        var recorder = new StatsRecorder(_decay, _assistThresholdFraction);
+        var recorder = new StatsRecorder(_decay, _assistThresholdFraction, _assistDecay);
         _recorders[matchId] = recorder;
         return recorder;
     }

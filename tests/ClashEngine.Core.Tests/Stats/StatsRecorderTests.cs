@@ -204,6 +204,44 @@ public class StatsRecorderTests
     }
 
     [Fact]
+    public void Assist_decay_widens_eligibility_without_shifting_kill_credit()
+    {
+        // B deals 600 a full 400 ticks before the kill (recharge 0, so nothing recovers).
+        // Threshold = 25% of 1000 = 250.
+        //   primary decay (hl=200): 600 * 0.5^2 = 150  -> under threshold, no assist
+        //   assist  decay (hl=400): 600 * 0.5^1 = 300  -> assist
+        // KillCredit must keep using the primary decay either way.
+        StatsRecorder Build(DamageDecay? assistDecay)
+        {
+            var r = new StatsRecorder(new DamageDecay(halfLifeTicks: 200), assistDecay: assistDecay);
+            var energy = SimpleEnergy();
+            r.RegisterPlayer(K("A"), 0, 1000, 0.0, energy, atTick: 0);
+            r.RegisterPlayer(K("B"), 0, 1000, 0.0, energy, atTick: 0);
+            r.RegisterPlayer(K("C"), 1, 1000, 0.0, energy, atTick: 0);
+            r.OnSpawn(K("C"), atTick: 0);
+            r.OnDamage(K("C"), K("B"), 600, WeaponKind.Bullet, 0, atTick: 0);
+            r.OnDamage(K("C"), K("A"), 400, WeaponKind.Bullet, 0, atTick: 400);
+            r.OnKill(K("C"), K("A"), atTick: 400);
+            return r;
+        }
+
+        var sameDecay = Build(assistDecay: null);
+        Assert.Equal(0, sameDecay.Stats[K("B")].Assists);
+
+        var slowAssists = Build(assistDecay: new DamageDecay(halfLifeTicks: 400));
+        Assert.Equal(1, slowAssists.Stats[K("B")].Assists);
+
+        // Credit normalization is identical in both recorders: weighted by the PRIMARY decay,
+        // B = 600*0.25 = 150 vs A = 400*1.0 = 400.
+        double bWeighted = 150.0, aWeighted = 400.0, total = bWeighted + aWeighted;
+        foreach (var r in new[] { sameDecay, slowAssists })
+        {
+            Assert.Equal(bWeighted / total, r.Stats[K("B")].KillCredit, precision: 6);
+            Assert.Equal(aWeighted / total, r.Stats[K("A")].KillCredit, precision: 6);
+        }
+    }
+
+    [Fact]
     public void Teamkill_increments_killer_teamkill_counter_not_kill()
     {
         var r = Make4Player();

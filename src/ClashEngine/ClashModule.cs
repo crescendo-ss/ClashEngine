@@ -305,7 +305,12 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         // BeginMatch/EndMatch; the listener subscribes to wire events and dispatches.
         // Constructed before the orchestrator registry so we can hand it the recorder reference
         // for the ?return loadout-restore path.
-        _matchStats = new MatchStatsRegistry(new DamageDecay());
+        // Assist eligibility gets twice the credit half-life (4 s vs 2 s): the 2 s decay made
+        // assists vanish for damage dealt even a few seconds before the kill. KillCredit /
+        // ForcedRepelCredit normalization stays on the default decay.
+        _matchStats = new MatchStatsRegistry(
+            new DamageDecay(),
+            assistDecay: new DamageDecay(2 * DamageDecay.DefaultHalfLifeTicks));
 
         // Client-settings edge for the in-match respawn-box override (a port of SS's
         // SendSpawnOverrides). Optional: if the interface (or the [Spawn] identifiers) can't be

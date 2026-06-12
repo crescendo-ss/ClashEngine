@@ -40,6 +40,7 @@ public sealed class StatsRecorder
     /// </summary>
     private readonly Dictionary<PlayerKey, string> _currentShip = new();
     private readonly DamageDecay _decay;
+    private readonly DamageDecay _assistDecay;
     private readonly double _assistThresholdFraction;
 
     public const double DefaultAssistThresholdFraction = 0.25;
@@ -61,17 +62,27 @@ public sealed class StatsRecorder
     /// </summary>
     public const double AliveEnergyThresholdFraction = 0.75;
 
-    public StatsRecorder(DamageDecay decay, double assistThresholdFraction = DefaultAssistThresholdFraction)
+    /// <param name="assistDecay">Decay used only for assist-eligibility weighting; defaults to
+    /// <paramref name="decay"/>. A slower (longer half-life) assist decay lets contributions from
+    /// a few seconds before the kill still count toward the assist threshold without shifting the
+    /// <c>KillCredit</c> / <c>ForcedRepelCredit</c> normalization, which stays on
+    /// <paramref name="decay"/>.</param>
+    public StatsRecorder(
+        DamageDecay decay,
+        double assistThresholdFraction = DefaultAssistThresholdFraction,
+        DamageDecay? assistDecay = null)
     {
         ArgumentNullException.ThrowIfNull(decay);
         if (assistThresholdFraction < 0 || assistThresholdFraction > 1)
             throw new ArgumentOutOfRangeException(nameof(assistThresholdFraction), "Must be in [0, 1].");
         _decay = decay;
+        _assistDecay = assistDecay ?? decay;
         _assistThresholdFraction = assistThresholdFraction;
     }
 
     public IReadOnlyDictionary<PlayerKey, PlayerStats> Stats => _stats;
     public DamageDecay Decay => _decay;
+    public DamageDecay AssistDecay => _assistDecay;
     public double AssistThresholdFraction => _assistThresholdFraction;
 
     /// <summary>
@@ -492,11 +503,18 @@ public sealed class StatsRecorder
             return new KillFeedSnapshot(0, Array.Empty<KillFeedAssister>());
         }
 
-        // Single pass producing per-attacker (raw, weighted) pairs. KillDamage takes the raw
+        // One walk producing per-attacker (raw, weighted) pairs. KillDamage takes the raw
         // recovery-adjusted amount; KillCredit takes the decay-weighted share normalized so the
-        // event distributes a total of 1.0 credit across contributors. Assist eligibility uses
-        // the decay-weighted share so it correctly devalues old hits.
-        var (attribution, totalWeighted) = AttributeWithNormalization(victimStats, atTick);
+        // event distributes a total of 1.0 credit across contributors. Assist eligibility is
+        // judged on its own decay (typically a longer half-life) so contributions from a few
+        // seconds before the kill still clear the threshold, while old hits are still devalued.
+        var entries = victimStats.Recovery.Snapshot(atTick);
+        var attribution = DamageAttribution.AttributeRawAndWeighted(entries, atTick, _decay);
+        double totalWeighted = 0;
+        foreach (var (_, share) in attribution) totalWeighted += share.Weighted;
+        var assistWeights = ReferenceEquals(_assistDecay, _decay)
+            ? attribution
+            : DamageAttribution.AttributeRawAndWeighted(entries, atTick, _assistDecay);
         double assistThreshold = victimProfile.MaxEnergy * _assistThresholdFraction;
 
         foreach (var (attacker, share) in attribution)
@@ -507,7 +525,7 @@ public sealed class StatsRecorder
 
             if (attacker == killer) continue;             // killer gets the kill, not an assist
             if (SameTeam(attacker, victim)) continue;     // teammate of victim cannot "assist" the kill
-            if (share.Weighted >= assistThreshold)
+            if (assistWeights[attacker].Weighted >= assistThreshold)
                 attackerStats.RecordAssist();
         }
 
