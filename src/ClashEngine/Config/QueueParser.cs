@@ -138,6 +138,7 @@ internal static class QueueParser
                 timeLimit: gt.TimeLimit,
                 returnItemsAction: gt.ReturnItemsAction,
                 disallowItems: gt.DisallowItems,
+                disallowAntiwarp: gt.DisallowAntiwarp,
                 presenceZone: gt.PresenceZone,
                 presenceZoneTimeout: gt.PresenceZoneTimeout,
                 ownerArenaName: ownerArenaName,

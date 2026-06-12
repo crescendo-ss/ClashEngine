@@ -50,7 +50,8 @@ public sealed class QueueDefinition
         bool disallowItems = false,
         SpawnArea? presenceZone = null,
         TimeSpan? presenceZoneTimeout = null,
-        bool ignorePenalties = false)
+        bool ignorePenalties = false,
+        bool disallowAntiwarp = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(uniqueId);
         ArgumentNullException.ThrowIfNull(shape);
@@ -163,6 +164,7 @@ public sealed class QueueDefinition
         EliminationCooldown = eliminationCooldown;
         AlwaysChooseLongestWaiter = alwaysChooseLongestWaiter;
         DisallowItems = disallowItems;
+        DisallowAntiwarp = disallowAntiwarp;
         PresenceZone = presenceZone;
         PresenceZoneTimeout = presenceZoneTimeout;
         IgnorePenalties = ignorePenalties;
@@ -421,6 +423,16 @@ public sealed class QueueDefinition
     /// type (<c>GameType&lt;i&gt;DisallowItems</c>). Cleared when a player leaves the match.
     /// </summary>
     public bool DisallowItems { get; }
+
+    /// <summary>
+    /// When <see langword="true"/>, antiwarp is unavailable in matches of this queue: the
+    /// orchestrator overrides each participant's per-ship <c>AntiWarpStatus</c> client setting to
+    /// 0 ("no antiwarp", on all eight ships) for the duration of the match, so nobody can carry,
+    /// green, or start with antiwarp regardless of the arena's ship settings. Inherited from the
+    /// queue's game type (<c>GameType&lt;i&gt;DisallowAntiwarp</c>). Cleared when a player leaves
+    /// the match.
+    /// </summary>
+    public bool DisallowAntiwarp { get; }
 
     /// <summary>
     /// When <see langword="true"/>, this queue does not enforce penalty timeouts: players in an

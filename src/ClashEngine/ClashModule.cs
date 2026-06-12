@@ -321,10 +321,14 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             ? new SpawnSettingsApplier(_clientSettings, _log)
             : null;
 
-        // Same client-settings edge, different override: zeroes per-ship item maxes for game
-        // types with DisallowItems=1 (no-items mode). Optional with the same degrade story.
+        // Same client-settings edge, different overrides: zeroed per-ship item maxes for game
+        // types with DisallowItems=1 (no-items mode) and zeroed AntiWarpStatus for game types
+        // with DisallowAntiwarp=1. Optional with the same degrade story.
         var noItemsApplier = _clientSettings is not null
-            ? new NoItemsSettingsApplier(_clientSettings, _log)
+            ? ShipSettingsZeroApplier.NoItems(_clientSettings, _log)
+            : null;
+        var noAntiwarpApplier = _clientSettings is not null
+            ? ShipSettingsZeroApplier.NoAntiwarp(_clientSettings, _log)
             : null;
 
         // Keeps the last-ship store current from zone-wide ship->spec (and in-ship arena-exit)
@@ -346,7 +350,8 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _orchestrators = new MatchOrchestratorRegistry(
             broker, _engine, _game, _chat, _mainloopTimer, _arenaManager, _clock, _log, _resolver, _clashLog,
             matchAudience, freqAllocator, matchStats: _matchStats, spawnApplier: spawnApplier,
-            noItemsApplier: noItemsApplier, lastShips: _persistLastShip, freqAdvisor: _freqAdvisor);
+            noItemsApplier: noItemsApplier, noAntiwarpApplier: noAntiwarpApplier,
+            lastShips: _persistLastShip, freqAdvisor: _freqAdvisor);
         _orchestrators.Register();
         _unregisterActions.Add(_orchestrators.Unregister);
 

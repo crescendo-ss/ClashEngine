@@ -60,7 +60,12 @@ public sealed class MatchOrchestrator
     /// <summary>Applies/clears the per-player client-settings item-max override that implements the
     /// game type's <c>DisallowItems</c> no-items mode. <see langword="null"/> in test paths that
     /// construct the orchestrator without the SS client-settings edge.</summary>
-    private readonly NoItemsSettingsApplier? _noItemsApplier;
+    private readonly ShipSettingsZeroApplier? _noItemsApplier;
+
+    /// <summary>Applies/clears the per-player <c>AntiWarpStatus</c> override that implements the
+    /// game type's <c>DisallowAntiwarp</c> mode. <see langword="null"/> in test paths that
+    /// construct the orchestrator without the SS client-settings edge.</summary>
+    private readonly ShipSettingsZeroApplier? _noAntiwarpApplier;
 
     /// <summary>Participants who currently have a respawn override applied (tracked so we only send
     /// the large client-settings packet to clear it for players we actually overrode).</summary>
@@ -69,6 +74,10 @@ public sealed class MatchOrchestrator
     /// <summary>Participants who currently have the no-items item-max override applied (same
     /// only-clear-what-we-overrode rationale as <see cref="_respawnOverridden"/>).</summary>
     private readonly HashSet<PlayerKey> _noItemsOverridden = new();
+
+    /// <summary>Participants who currently have the no-antiwarp override applied (same
+    /// only-clear-what-we-overrode rationale as <see cref="_respawnOverridden"/>).</summary>
+    private readonly HashSet<PlayerKey> _noAntiwarpOverridden = new();
 
     /// <summary>Per-player ship the participant was on at the moment they last specced themselves
     /// out. Populated by <see cref="OnPlayerSpecced"/>; consumed by <see cref="TryReturn"/> so the
@@ -129,7 +138,8 @@ public sealed class MatchOrchestrator
         MatchStatsRegistry? matchStats = null,
         IComponentBroker? broker = null,
         SpawnSettingsApplier? spawnApplier = null,
-        NoItemsSettingsApplier? noItemsApplier = null,
+        ShipSettingsZeroApplier? noItemsApplier = null,
+        ShipSettingsZeroApplier? noAntiwarpApplier = null,
         Persistence.PersistLastShipStore? lastShips = null,
         MatchFreqAdvisor? freqAdvisor = null)
     {
@@ -152,6 +162,7 @@ public sealed class MatchOrchestrator
         _broker = broker;
         _spawnApplier = spawnApplier;
         _noItemsApplier = noItemsApplier;
+        _noAntiwarpApplier = noAntiwarpApplier;
         _lastShips = lastShips;
         _freqAdvisor = freqAdvisor;
         _drift = new StartDriftEnforcer(_queue, _proposal);
@@ -341,16 +352,19 @@ public sealed class MatchOrchestrator
 
     /// <summary>
     /// Apply every client-settings override this match calls for to <paramref name="player"/> --
-    /// the team's respawn box (when one is configured) and the no-items item-max zeroing (when the
-    /// game type sets <c>DisallowItems</c>) -- then push at most one client-settings packet
-    /// covering both. A player who needs no override never gets a packet.
+    /// the team's respawn box (when one is configured), the no-items item-max zeroing (when the
+    /// game type sets <c>DisallowItems</c>), and the antiwarp zeroing (when it sets
+    /// <c>DisallowAntiwarp</c>) -- then push at most one client-settings packet covering all of
+    /// them. A player who needs no override never gets a packet.
     /// </summary>
     private void ApplyClientSettingOverrides(PlayerKey key, int teamIdx, Player player)
     {
         bool spawn = ApplyRespawnOverride(key, teamIdx, player);
         bool items = ApplyNoItemsOverride(key, player);
+        bool antiwarp = ApplyNoAntiwarpOverride(key, player);
         if (spawn) _spawnApplier!.Send(player);
         else if (items) _noItemsApplier!.Send(player);
+        else if (antiwarp) _noAntiwarpApplier!.Send(player);
     }
 
     /// <summary>
@@ -394,29 +408,50 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// Clear any client-settings overrides (respawn box and/or no-items) previously applied to
-    /// <paramref name="key"/>, pushing at most one client-settings packet. No-op if we never
-    /// applied any (so no redundant packet). Resolves the player fresh so it works from the
+    /// Stage (without sending) the no-antiwarp override -- every ship's <c>AntiWarpStatus</c>
+    /// zeroed -- on <paramref name="player"/>, recording that we did so. Returns whether the
+    /// override was staged; no-op (false) when the game type allows antiwarp or the applier is
+    /// absent / not ready.
+    /// </summary>
+    private bool ApplyNoAntiwarpOverride(PlayerKey key, Player player)
+    {
+        if (_noAntiwarpApplier is not { Ready: true }) return false;
+        if (!_queue.DisallowAntiwarp) return false;
+
+        _noAntiwarpApplier.Apply(player, send: false);
+        _noAntiwarpOverridden.Add(key);
+        if (_verbose.IsDebug)
+            _verbose.Debug(LogCategory, $"Match {_matchId:N}: applied no-antiwarp override for {key.Name}.");
+        return true;
+    }
+
+    /// <summary>
+    /// Clear any client-settings overrides (respawn box, no-items, and/or no-antiwarp) previously
+    /// applied to <paramref name="key"/>, pushing at most one client-settings packet. No-op if we
+    /// never applied any (so no redundant packet). Resolves the player fresh so it works from the
     /// spec / cleanup paths.
     /// </summary>
     private void ClearClientSettingOverrides(PlayerKey key)
     {
         bool hadSpawn = _respawnOverridden.Remove(key);
         bool hadItems = _noItemsOverridden.Remove(key);
-        if (!hadSpawn && !hadItems) return;
+        bool hadAntiwarp = _noAntiwarpOverridden.Remove(key);
+        if (!hadSpawn && !hadItems && !hadAntiwarp) return;
         if (_resolver.Resolve(key) is not { } player) return;
 
         // Keys only enter the tracking sets when the corresponding applier was present and ready,
         // so the null-forgiving derefs below are safe.
         if (hadSpawn) _spawnApplier!.Clear(player, send: false);
         if (hadItems) _noItemsApplier!.Clear(player, send: false);
+        if (hadAntiwarp) _noAntiwarpApplier!.Clear(player, send: false);
         if (hadSpawn) _spawnApplier!.Send(player);
-        else _noItemsApplier!.Send(player);
+        else if (hadItems) _noItemsApplier!.Send(player);
+        else _noAntiwarpApplier!.Send(player);
 
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory,
                 $"Match {_matchId:N}: cleared client-setting overrides for {key.Name} " +
-                $"(respawn={hadSpawn}, noItems={hadItems}).");
+                $"(respawn={hadSpawn}, noItems={hadItems}, noAntiwarp={hadAntiwarp}).");
     }
 
     private static bool IsInArena(Player player, string arenaName) =>
@@ -596,7 +631,7 @@ public sealed class MatchOrchestrator
 
         // A ship->spec transition (self-spec or a knockout ForceSpec, both of which funnel through
         // here) takes the player out of the match's flow, so drop their client-setting overrides
-        // ([Spawn] box and no-items item maxes). A normal mid-match death does NOT fire this
+        // ([Spawn] box, no-items item maxes, no-antiwarp). A normal mid-match death does NOT fire this
         // (Continuum respawns the ship without a spec transition), so the overrides correctly
         // persist across respawns. ?return re-applies them.
         ClearClientSettingOverrides(key);
@@ -856,14 +891,15 @@ public sealed class MatchOrchestrator
         _pendingKnockoutSpec.Clear();
 
         // Revert any still-active client-setting overrides so departing participants don't keep
-        // the match's [Spawn] box or zeroed item maxes if they ship up elsewhere later. Snapshot
-        // the sets since ClearClientSettingOverrides mutates them. (Most participants were already
-        // cleared when they were specced; this catches the rest -- e.g. winners still in their
-        // ships at match end.)
-        if (_respawnOverridden.Count > 0 || _noItemsOverridden.Count > 0)
+        // the match's [Spawn] box, zeroed item maxes, or zeroed antiwarp if they ship up
+        // elsewhere later. Snapshot the sets since ClearClientSettingOverrides mutates them.
+        // (Most participants were already cleared when they were specced; this catches the rest
+        // -- e.g. winners still in their ships at match end.)
+        if (_respawnOverridden.Count > 0 || _noItemsOverridden.Count > 0 || _noAntiwarpOverridden.Count > 0)
         {
             var overridden = new HashSet<PlayerKey>(_respawnOverridden);
             overridden.UnionWith(_noItemsOverridden);
+            overridden.UnionWith(_noAntiwarpOverridden);
             foreach (var k in overridden)
                 ClearClientSettingOverrides(k);
         }

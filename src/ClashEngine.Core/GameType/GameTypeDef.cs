@@ -51,7 +51,8 @@ public sealed record GameTypeDef(
     bool EarlyExitPenalty = false,
     TimeSpan? EarlyExitMinimumDuration = null,
     bool TeamkillPenalty = false,
-    int? TeamkillThreshold = null);
+    int? TeamkillThreshold = null,
+    bool DisallowAntiwarp = false);
 
 /// <summary>
 /// Auto-derived <c>metadata</c> blob attached to the gametype-registration POST. Follows the

@@ -120,6 +120,9 @@ internal static class GameTypeParser
         // No-items mode: the orchestrator zeroes every participant's per-ship item-max client
         // settings (BurstMax/RepelMax/DecoyMax/BrickMax/ThorMax/RocketMax/PortalMax) for the match.
         bool disallowItems = config.GetInt(handle, ConfigConstants.Section, p + "DisallowItems", 0) != 0;
+        // No-antiwarp mode: the orchestrator zeroes every participant's per-ship AntiWarpStatus
+        // client setting for the match (no ship can carry, green, or start with antiwarp).
+        bool disallowAntiwarp = config.GetInt(handle, ConfigConstants.Section, p + "DisallowAntiwarp", 0) != 0;
         // Presence zone ("stay in the zone or lose"): a team with no active player inside the box
         // for ZoneForfeitTimeout forfeits the match.
         var (presenceZone, presenceZoneTimeout) = ReadPresenceZone(config, handle, p, log);
@@ -164,7 +167,8 @@ internal static class GameTypeParser
             teamCollapseGrace, shipChangeGracePeriod,
             returnItemsAction, eliminationCooldown, disallowItems,
             presenceZone, presenceZoneTimeout,
-            earlyExitPenalty, earlyExitMinimumDuration, teamkillPenalty, teamkillThreshold);
+            earlyExitPenalty, earlyExitMinimumDuration, teamkillPenalty, teamkillThreshold,
+            DisallowAntiwarp: disallowAntiwarp);
     }
 
     /// <summary>
@@ -282,6 +286,7 @@ internal static class GameTypeParser
             $"EliminationCooldown={(def.EliminationCooldown is { } ec ? (ec == TimeSpan.Zero ? "0 (disabled)" : ec.ToString()) : "(default 1m)")}, " +
             $"ReturnItemsAction={def.ReturnItemsAction}, " +
             $"DisallowItems={def.DisallowItems}, " +
+            $"DisallowAntiwarp={def.DisallowAntiwarp}, " +
             $"EarlyExitPenalty={def.EarlyExitPenalty}, " +
             $"EarlyExitMinimumDuration={(def.EarlyExitMinimumDuration is { } eem ? eem.ToString() : "(default 2m)")}, " +
             $"TeamkillPenalty={def.TeamkillPenalty}, " +

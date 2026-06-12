@@ -38,7 +38,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     private readonly MatchFreqAllocator? _freqAllocator;
     private readonly MatchStatsRegistry? _matchStats;
     private readonly ClashEngine.Adapter.SpawnSettingsApplier? _spawnApplier;
-    private readonly ClashEngine.Adapter.NoItemsSettingsApplier? _noItemsApplier;
+    private readonly ClashEngine.Adapter.ShipSettingsZeroApplier? _noItemsApplier;
+    private readonly ClashEngine.Adapter.ShipSettingsZeroApplier? _noAntiwarpApplier;
     private readonly ClashEngine.Persistence.PersistLastShipStore? _lastShips;
     private readonly MatchFreqAdvisor? _freqAdvisor;
     private bool _registeredCallback;
@@ -58,7 +59,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         MatchFreqAllocator? freqAllocator = null,
         MatchStatsRegistry? matchStats = null,
         ClashEngine.Adapter.SpawnSettingsApplier? spawnApplier = null,
-        ClashEngine.Adapter.NoItemsSettingsApplier? noItemsApplier = null,
+        ClashEngine.Adapter.ShipSettingsZeroApplier? noItemsApplier = null,
+        ClashEngine.Adapter.ShipSettingsZeroApplier? noAntiwarpApplier = null,
         ClashEngine.Persistence.PersistLastShipStore? lastShips = null,
         MatchFreqAdvisor? freqAdvisor = null)
     {
@@ -77,6 +79,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         _matchStats = matchStats;
         _spawnApplier = spawnApplier;
         _noItemsApplier = noItemsApplier;
+        _noAntiwarpApplier = noAntiwarpApplier;
         _lastShips = lastShips;
         _freqAdvisor = freqAdvisor;
     }
@@ -114,7 +117,8 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         var orchestrator = new MatchOrchestrator(
             matchId, queueDef, proposal, _engine, _game, _chat, _timer, _arenaManager, _clock, _log,
             _resolver, _verbose, _audience, _freqAllocator, matchStats: _matchStats, broker: _broker,
-            spawnApplier: _spawnApplier, noItemsApplier: _noItemsApplier, lastShips: _lastShips,
+            spawnApplier: _spawnApplier, noItemsApplier: _noItemsApplier,
+            noAntiwarpApplier: _noAntiwarpApplier, lastShips: _lastShips,
             freqAdvisor: _freqAdvisor);
         _orchestrators[matchId] = orchestrator;
 

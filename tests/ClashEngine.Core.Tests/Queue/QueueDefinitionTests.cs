@@ -51,6 +51,21 @@ public class QueueDefinitionTests
     }
 
     [Fact]
+    public void Default_disallow_antiwarp_is_off()
+    {
+        // Antiwarp follows the arena's ship settings unless the game type disables it explicitly.
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy());
+        Assert.False(def.DisallowAntiwarp);
+    }
+
+    [Fact]
+    public void Disallow_antiwarp_round_trips()
+    {
+        var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), disallowAntiwarp: true);
+        Assert.True(def.DisallowAntiwarp);
+    }
+
+    [Fact]
     public void Casual_rating_weight_can_be_below_one()
     {
         var def = new QueueDefinition("q", new MatchShape(2, 2), Policy(), ratingWeight: 0.5);

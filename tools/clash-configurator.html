@@ -950,6 +950,7 @@ function newGameType() {
     eliminationCooldownSec: null,
     returnItemsAction: "full",
     disallowItems: false,
+    disallowAntiwarp: false,
     warpOnSpawn: false,
     teamSpawns: [[], []],
     maxSpawnDriftTiles: 0,
@@ -1758,6 +1759,17 @@ function renderGameTypeCard(gt, index) {
     )
   ));
 
+  // DisallowAntiwarp
+  body.appendChild(simpleField("DisallowAntiwarp", "No-antiwarp mode: every participant's per-ship AntiWarpStatus is overridden to 0 for the match (no ship can carry, green, or start with antiwarp).",
+    el("label", { class: "checkbox-row" },
+      el("input", {
+        type: "checkbox", checked: gt.disallowAntiwarp,
+        onchange: e => { gt.disallowAntiwarp = e.target.checked; render(); }
+      }),
+      "Enabled"
+    )
+  ));
+
   // --- Spawns subgroup ---
   const spawnGroup = el("div", { class: "subgroup" }, el("h4", {}, "Start locations & respawn boxes"));
   spawnGroup.appendChild(simpleField("UseStartLocation", "Master switch: warp every team member to a chosen team start location at setup. Drift-back enforced before GO.",
@@ -2463,6 +2475,7 @@ function emitGameType(out, gt, idx) {
   if (gt.shipChangeGraceSec !== null) out.push(line(`${p}ShipChangeGracePeriod`, formatTime(gt.shipChangeGraceSec)));
   if (gt.returnItemsAction !== "full") out.push(line(`${p}ReturnItemsAction`, gt.returnItemsAction));
   if (gt.disallowItems) out.push(line(`${p}DisallowItems`, "1"));
+  if (gt.disallowAntiwarp) out.push(line(`${p}DisallowAntiwarp`, "1"));
   if (gt.warpOnSpawn) {
     out.push(line(`${p}UseStartLocation`, "1"));
     for (let t = 0; t < gt.teamCount; t++) {
