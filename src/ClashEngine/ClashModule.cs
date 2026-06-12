@@ -81,6 +81,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private DelegatePersistentData<Player>? _autoQueueRegistration;
     private DelegatePersistentData<Player>? _lastShipRegistration;
     private MatchmakingCommands? _commandHandlers;
+    private ArenaQueueGreeter? _queueGreeter;
     private MatchStatsRegistry? _matchStats;
     private ClashStatsTelemetry? _matchStatsTelemetry;
     private StatsListener? _statsListener;
@@ -553,6 +554,12 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             _ratingsCoordinator, _mainloop);
         _commandHandlers.RegisterGlobal();
         _unregisterActions.Add(_commandHandlers.UnregisterGlobal);
+
+        // Auto-show the arena's queue table (the naked-?queue view) to each player on EnterGame,
+        // so the matchmaking surface is discoverable without knowing the command.
+        _queueGreeter = new ArenaQueueGreeter(broker, _engine, _commandHandlers, _resolver);
+        _queueGreeter.Register();
+        _unregisterActions.Add(_queueGreeter.Unregister);
 
         // Game types and queues are arena-scoped only: each must be declared in the arena.conf
         // [ClashEngine] section of the arena that uses it. We deliberately do NOT parse game

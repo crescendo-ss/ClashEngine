@@ -418,7 +418,13 @@ public sealed class MatchmakingCommands
         ShowQueueDetail(player, def, _clock.UtcNow);
     }
 
-    private void ListAllQueues(Player player, Arena arena)
+    /// <summary>
+    /// The naked-<c>?queue</c> listing: every queue owned by <paramref name="arena"/>'s base
+    /// arena as an aligned table. Also invoked by <see cref="Adapter.ArenaQueueGreeter"/> on
+    /// arena entry, which passes <paramref name="silentWhenEmpty"/> so arenas without queues
+    /// greet with nothing instead of a "no queues" notice.
+    /// </summary>
+    public void ListAllQueues(Player player, Arena arena, bool silentWhenEmpty = false)
     {
         var defs = new List<QueueDefinition>();
         foreach (var d in _engine.Queues.Definitions)
@@ -430,7 +436,8 @@ public sealed class MatchmakingCommands
             string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
         if (defs.Count == 0)
         {
-            _chat.SendMessage(player, "No queues are configured for this arena.");
+            if (!silentWhenEmpty)
+                _chat.SendMessage(player, "No queues are configured for this arena.");
             return;
         }
 
