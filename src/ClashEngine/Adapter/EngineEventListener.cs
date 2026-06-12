@@ -158,9 +158,11 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
     {
         if (_verbose.IsDebug)
             _verbose.Debug(LogCategory, $"QueueDwellWarning: {player.Name} in {queueName} for {Format(dwell)}");
+        // DM format (not SendMessage): the recipient is by definition idle and likely tabbed out,
+        // so this needs the incoming-private beep / taskbar flash to actually reach them.
         if (_resolver.Resolve(player) is { } p)
-            _chat.SendMessage(p,
-                $"You've been in {FormatQueueDescriptor(queueName)} for {Format(dwell)} -- still around? " +
+            ChatDm.Send(_chat, p,
+                $"You've been in {FormatQueueDescriptor(queueName)} for a while -- still around? " +
                 "Turn your ship, fire, or chat (or ?play again), or you'll be removed for inactivity.");
     }
 

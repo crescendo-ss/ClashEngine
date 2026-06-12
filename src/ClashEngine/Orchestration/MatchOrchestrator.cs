@@ -1067,23 +1067,15 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// Deliver <paramref name="message"/> to each resolvable participant as a senderless
-    /// RemotePrivate chat line, mirroring SS.Matchmaking.TeamVersusMatch's match-found notice
-    /// (<c>TeamVersusMatch.cs:4842</c>): <see cref="IChat.SendAnyMessage"/> with
-    /// <see cref="ChatMessageType.RemotePrivate"/>, no <c>from</c>, and
-    /// <see cref="ChatSound.None"/>. Continuum plays its standard incoming-private sound (the
-    /// "beep") on receipt; with no sender it lands as a bare line rather than the prior
-    /// "(theirname)>message" self-echo, which clients muted as an outbound echo.
+    /// Deliver <paramref name="message"/> to each resolvable participant in the wake-up DM format
+    /// (see <see cref="ChatDm"/>): a senderless RemotePrivate line that beeps and flashes the
+    /// taskbar for tabbed-out clients, mirroring SS.Matchmaking.TeamVersusMatch's match-found
+    /// notice.
     /// </summary>
     private void SendDmToParticipants(string message)
     {
-        var set = new HashSet<Player>();
         foreach (var p in ResolveParticipants())
-        {
-            set.Clear();
-            set.Add(p);
-            _chat.SendAnyMessage(set, ChatMessageType.RemotePrivate, ChatSound.None, null, message);
-        }
+            ChatDm.Send(_chat, p, message);
     }
 
     /// <summary>
