@@ -223,6 +223,7 @@ public sealed class MatchmakingCommands
             requestedBaseName = defaultQueue.Trim();
         }
 
+        requestedBaseName = StripOwnArenaPrefix(requestedBaseName, arena.BaseName);
         var qualified = QueueRegistry.QualifyName(arena.BaseName, requestedBaseName);
         if (!_engine.Queues.TryGet(qualified, out var def))
         {
@@ -414,6 +415,7 @@ public sealed class MatchmakingCommands
             return;
         }
 
+        requestedBaseName = StripOwnArenaPrefix(requestedBaseName, arena.BaseName);
         if (!_engine.Queues.TryGet(QueueRegistry.QualifyName(arena.BaseName, requestedBaseName), out var def))
         {
             _chat.SendMessage(player, $"Queue '{requestedBaseName}' is not defined for this arena. Type ?queue to see what's available here.");
@@ -476,7 +478,23 @@ public sealed class MatchmakingCommands
                 $"{row.Shape.PadRight(maxShape)}   " +
                 $"{row.Waiting.ToString().PadLeft(countWidth)} waiting");
         }
-        _chat.SendMessage(player, "Use ?queue <name> to see who is waiting; ?play <name> to join.");
+        _chat.SendMessage(player, "Use ?queue <id> to see who is waiting; ?play <id> to join.");
+    }
+
+    /// <summary>
+    /// The naked-<c>?queue</c> table advertises each queue's <see cref="QueueDefinition.UniqueId"/>
+    /// ("<c>{arena}/{base}</c>"), so accept that form back in <c>?play</c>/<c>?queue</c> by
+    /// stripping the player's own arena prefix before re-qualifying. Other arenas' ids still
+    /// fail the arena-local lookup, preserving the existing admission scope.
+    /// </summary>
+    private static string StripOwnArenaPrefix(string requestedBaseName, string arenaBaseName)
+    {
+        int prefixLength = arenaBaseName.Length + 1;
+        return requestedBaseName.Length > prefixLength
+            && requestedBaseName[arenaBaseName.Length] == '/'
+            && requestedBaseName.StartsWith(arenaBaseName, StringComparison.OrdinalIgnoreCase)
+            ? requestedBaseName[prefixLength..]
+            : requestedBaseName;
     }
 
     private void ShowQueueDetail(Player player, QueueDefinition def, DateTimeOffset now)
