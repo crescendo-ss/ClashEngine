@@ -507,8 +507,11 @@ public sealed class MatchOrchestrator
         var itemsDesc = GetItemsActionDescription(_queue.ReturnItemsAction);
         if (!string.IsNullOrEmpty(itemsDesc))
             returnNotice += $" [{itemsDesc}]";
+        // LivesRemaining counts respawns left, not lives (LivesPerPlayer=3 seeds 2), so add 1
+        // for the life the returner is about to be playing on. The KnockedOut guard above means
+        // every player reaching this point still has a life in flight.
         if (match.LivesPerPlayer.HasValue && match.LivesRemaining.TryGetValue(key, out var lives))
-            returnNotice += $" [Lives: {lives}]";
+            returnNotice += $" [Lives: {lives + 1}]";
         BroadcastToAll(returnNotice);
 
         // If this player specced before the countdown's GO! tick, the engine deferred its
