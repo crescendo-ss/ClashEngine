@@ -172,6 +172,43 @@ public class QueueRegistryTests
     }
 
     [Fact]
+    public void ApplyArenaContribution_keeps_live_instance_and_waiters_of_unchanged_queues()
+    {
+        var r = new QueueRegistry();
+        var old = new QueueDefinition(QueueRegistry.QualifyName("lobby", "4v4"),
+            new MatchShape(2, 4), Policy(), ownerArenaName: "lobby");
+        r.Add(old);
+        Assert.True(old.Queue.Add(new QueueEntry(
+            new("P1"), new(25, 0.0, 0, default), new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero))));
+
+        // A reconcile re-parses config into fresh (empty) definition objects. Shape-matched
+        // queues must keep the existing instance so waiters survive.
+        var reparsed = new QueueDefinition(QueueRegistry.QualifyName("lobby", "4v4"),
+            new MatchShape(2, 4), Policy(), ownerArenaName: "lobby");
+        r.ApplyArenaContribution("lobby", new[] { reparsed });
+
+        Assert.True(r.TryGet("lobby/4v4", out var got));
+        Assert.Same(old, got);
+        Assert.Equal(1, got.Queue.Count);
+    }
+
+    [Fact]
+    public void ApplyArenaContribution_swaps_in_the_new_instance_when_the_queue_changed()
+    {
+        var r = new QueueRegistry();
+        var old = new QueueDefinition(QueueRegistry.QualifyName("lobby", "4v4"),
+            new MatchShape(2, 4), Policy(), ownerArenaName: "lobby", label: "4v4");
+        r.Add(old);
+
+        var changed = new QueueDefinition(QueueRegistry.QualifyName("lobby", "4v4"),
+            new MatchShape(2, 4), Policy(), ownerArenaName: "lobby", label: "4v4 (Competitive)");
+        r.ApplyArenaContribution("lobby", new[] { changed });
+
+        Assert.True(r.TryGet("lobby/4v4", out var got));
+        Assert.Same(changed, got);
+    }
+
+    [Fact]
     public void Diff_treats_label_change_as_a_swap_so_hot_reload_drops_waiters()
     {
         var r = new QueueRegistry();

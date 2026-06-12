@@ -189,8 +189,11 @@ public sealed class QueueRegistry
     /// <summary>
     /// Applies the contribution swap -- removes every queue currently owned by
     /// <paramref name="ownerArenaName"/> and adds the contents of <paramref name="newDefs"/>.
-    /// Pairs with <see cref="TryComputeArenaContributionDiff"/>: callers should preview, drain
-    /// waiters from the to-be-removed queues, and only then apply. Skips internal validation
+    /// An incoming definition that shape-matches the existing queue of the same name keeps the
+    /// existing instance instead of replacing it, so a live queue (and every waiter in it)
+    /// survives a reconcile that didn't actually change it; only genuinely changed queues -- the
+    /// ones <see cref="TryComputeArenaContributionDiff"/> reports, whose waiters the caller has
+    /// already drained -- get the freshly-parsed (empty) instance. Skips internal validation
     /// (assumes the caller already validated via <see cref="TryComputeArenaContributionDiff"/>).
     /// </summary>
     public void ApplyArenaContribution(string ownerArenaName, IReadOnlyList<QueueDefinition> newDefs)
@@ -198,18 +201,23 @@ public sealed class QueueRegistry
         ArgumentException.ThrowIfNullOrEmpty(ownerArenaName);
         ArgumentNullException.ThrowIfNull(newDefs);
 
-        // Remove existing owned entries.
-        var keysToDrop = new List<string>();
+        // Remove existing owned entries, keeping them at hand for the shape-match check below.
+        var dropped = new Dictionary<string, QueueDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in _byName)
         {
             if (string.Equals(kvp.Value.OwnerArenaName, ownerArenaName, StringComparison.OrdinalIgnoreCase))
-                keysToDrop.Add(kvp.Key);
+                dropped[kvp.Key] = kvp.Value;
         }
-        foreach (var k in keysToDrop) _byName.Remove(k);
+        foreach (var k in dropped.Keys) _byName.Remove(k);
 
-        // Add new entries.
+        // Add new entries, re-using the dropped instance wherever nothing actually changed.
         for (int i = 0; i < newDefs.Count; i++)
-            _byName[newDefs[i].UniqueId] = newDefs[i];
+        {
+            var d = newDefs[i];
+            _byName[d.UniqueId] = dropped.TryGetValue(d.UniqueId, out var prev) && QueueShapeMatches(prev, d)
+                ? prev
+                : d;
+        }
     }
 
     /// <summary>
