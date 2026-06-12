@@ -84,6 +84,27 @@ public class MatchmakingEngineTests
     }
 
     [Fact]
+    public void QueuesFor_reflects_enqueue_dequeue_and_match_pop()
+    {
+        var h = new Harness();
+        h.Connect("A", "B", "C", "D");
+        Assert.Empty(h.Engine.QueuesFor(K("A")));
+
+        h.Enqueue("A");
+        Assert.Equal(new[] { "2v2" }, h.Engine.QueuesFor(K("A")));
+
+        h.Engine.DequeueEverywhere(K("A"), T0);
+        Assert.Empty(h.Engine.QueuesFor(K("A")));
+
+        // A popped proposal pulls its players out of every queue, so membership empties.
+        foreach (var n in new[] { "A", "B", "C", "D" }) h.Enqueue(n);
+        h.Engine.Tick(T0);
+        Assert.Single(h.Telemetry.Proposed);
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            Assert.Empty(h.Engine.QueuesFor(K(n)));
+    }
+
+    [Fact]
     public void OnPlayerJoinedArena_does_not_flip_to_Live_without_MarkMatchLive()
     {
         // Engine state is gameplay-live only after the orchestrator's GO! call. Up to then we

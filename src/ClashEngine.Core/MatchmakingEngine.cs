@@ -324,6 +324,13 @@ public sealed class MatchmakingEngine
         => _matcher.TouchEverywhere(player, at) > 0;
 
     /// <summary>
+    /// The unique ids of every queue <paramref name="player"/> currently occupies (empty when
+    /// not queued anywhere). Ids resolve back to definitions via <see cref="Queues"/>. This is
+    /// a live view of engine state -- read it promptly rather than caching across mutations.
+    /// </summary>
+    public IReadOnlySet<string> QueuesFor(PlayerKey player) => _multiQueue.QueuesFor(player);
+
+    /// <summary>
     /// Adds <paramref name="player"/> to <paramref name="queueName"/> if eligible. Returns
     /// <see langword="true"/> on success.
     /// </summary>

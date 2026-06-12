@@ -81,12 +81,15 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("queue", Queue, helpText:
             "?queue [name] -- List all queues defined for this arena, or inspect a single queue's " +
             "waiting players. Multi-word lookup joins with '_' (e.g. ?queue casual 4v4).");
+        _commands.AddCommand("showline", ShowLine, helpText:
+            "?showline -- Show the detailed state (waiting players, matchmaking status) of every " +
+            "queue you're currently in; the same view ?queue <name> gives, once per queue.");
         _commands.AddCommand("connect", Connect, helpText:
             "?connect discord <alias> -- Link your in-game name to a Discord alias so the Discord " +
             "bot can DM you about queues and matches. The alias is relayed to the bot service, " +
             "which performs the actual link -- ClashEngine itself stores nothing.");
-        _commands.AddCommand("autoqueue", AutoQueue, helpText:
-            "?autoqueue [on|off] -- Set auto-queue, or toggle it with no argument. When on, you're " +
+        _commands.AddCommand("auto", AutoQueue, helpText:
+            "?auto [on|off] -- Set auto-queue, or toggle it with no argument. When on, you're " +
             "automatically put back into a match's queue when it ends. Persists across sessions. " +
             "Auto-disabled if you're flagged AFK.");
     }
@@ -95,8 +98,9 @@ public sealed class MatchmakingCommands
     {
         _commands.RemoveCommand("play", Next);
         _commands.RemoveCommand("queue", Queue);
+        _commands.RemoveCommand("showline", ShowLine);
         _commands.RemoveCommand("connect", Connect);
-        _commands.RemoveCommand("autoqueue", AutoQueue);
+        _commands.RemoveCommand("auto", AutoQueue);
     }
 
     /// <summary>
@@ -430,17 +434,35 @@ public sealed class MatchmakingCommands
             return;
         }
 
-        _chat.SendMessage(player, $"Queues ({defs.Count}):");
-        foreach (var d in defs)
+        // Four aligned columns (label / unique id / shape / waiting count) -- the chat client's
+        // font is monospace, so PadRight lines them up (same technique as ?helpclash's table).
+        var rows = new (string Label, string Id, string Shape, int Waiting)[defs.Count];
+        int maxLabel = 0, maxId = 0, maxShape = 0, maxWaiting = 0;
+        for (int i = 0; i < defs.Count; i++)
         {
+            var d = defs[i];
             var shape = d.Shape;
             // Spell the shape out so the "v" in queue labels (versus) is never confused with the
             // team/per-team split. TeamCount is always >= 2; PlayersPerTeam can be 1 (e.g. 1v1 ->
             // "2 teams of 1 player").
             var shapeTag = $"{shape.TeamCount} teams of {shape.PlayersPerTeam} " +
-                (shape.PlayersPerTeam == 1 ? "player" : "players");
+                (shape.PlayersPerTeam == 1 ? "pilot" : "pilots");
             int waiting = d.Queue.Snapshot().Count;
-            _chat.SendMessage(player, $"  {d.Label} [{shapeTag}]: {waiting} waiting");
+            rows[i] = (d.Label, d.UniqueId, shapeTag, waiting);
+            if (d.Label.Length > maxLabel) maxLabel = d.Label.Length;
+            if (d.UniqueId.Length > maxId) maxId = d.UniqueId.Length;
+            if (shapeTag.Length > maxShape) maxShape = shapeTag.Length;
+            if (waiting > maxWaiting) maxWaiting = waiting;
+        }
+        int countWidth = maxWaiting.ToString().Length;
+
+        _chat.SendMessage(player, $"Queues ({defs.Count}):");
+        foreach (var row in rows)
+        {
+            _chat.SendMessage(player,
+                $"  {row.Label.PadRight(maxLabel)}   {row.Id.PadRight(maxId)}   " +
+                $"{row.Shape.PadRight(maxShape)}   " +
+                $"{row.Waiting.ToString().PadLeft(countWidth)} waiting");
         }
         _chat.SendMessage(player, "Use ?queue <name> to see who is waiting; ?play <name> to join.");
     }
@@ -453,7 +475,7 @@ public sealed class MatchmakingCommands
             _chat.SendMessage(player, $"{def.Label}: empty.");
             return;
         }
-        _chat.SendMessage(player, $"{def.Label}: {snap.Count} player(s) waiting.");
+        _chat.SendMessage(player, $"{def.Label}: {snap.Count} pilot(s) waiting.");
         for (int i = 0; i < snap.Count; i++)
         {
             var entry = snap[i];
@@ -470,7 +492,7 @@ public sealed class MatchmakingCommands
         if (snap.Count < needed)
         {
             int more = needed - snap.Count;
-            _chat.SendMessage(player, $"Need {more} more player{(more == 1 ? "" : "s")} to start.");
+            _chat.SendMessage(player, $"Need {more} more pilot{(more == 1 ? "" : "s")} to start.");
             return;
         }
 
@@ -481,13 +503,45 @@ public sealed class MatchmakingCommands
         int extra = def.LookAheadWindow - needed;
         int pool = Math.Min(snap.Count, def.LookAheadWindow);
         _chat.SendMessage(player, pool < snap.Count
-            ? $"Only considering the first {pool} of {snap.Count} players for matchmaking (LookAhead={extra}). Raise LookAhead to widen the pool."
-            : $"Considering all {snap.Count} players for matchmaking (LookAhead={extra}).");
+            ? $"Only considering the first {pool} of {snap.Count} pilots for matchmaking (LookAhead={extra}). Raise LookAhead to widen the pool."
+            : $"Considering all {snap.Count} pilots for matchmaking (LookAhead={extra}).");
         if (!def.AlwaysChooseLongestWaiter)
-            _chat.SendMessage(player, "The longest-waiting player may be passed over for a better-balanced match (AlwaysChooseLongestWaiter=0).");
+            _chat.SendMessage(player, "The longest-waiting pilot may be passed over for a better-balanced match (AlwaysChooseLongestWaiter=0).");
 
         if (_engine.TryGetQueueBlockStatus(def.UniqueId, out var status))
             _chat.SendMessage(player, QueueBlockMessage.Format(status, now));
+    }
+
+    // ---- ?showline
+
+    /// <summary>
+    /// Detailed queue state for every queue the issuer currently occupies -- the loop-over-
+    /// <c>?queue &lt;name&gt;</c> a queued player would otherwise type by hand. Unlike ?queue's
+    /// listing this is membership-driven, so it works regardless of which arena the player is
+    /// sitting in (queue ids are zone-unique).
+    /// </summary>
+    private void ShowLine(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
+    {
+        LogCommand("showline", player, parameters);
+        if (_resolver.KeyOf(player) is not PlayerKey key) return;
+
+        var queueNames = _engine.QueuesFor(key);
+        if (queueNames.Count == 0)
+        {
+            _chat.SendMessage(player, "You're not in any queue. Use ?play <queue name> to join; ?queue lists this arena's queues.");
+            return;
+        }
+
+        // Stable alphabetical order so repeated invocations read the same; the index's set has
+        // no meaningful order of its own.
+        var sorted = new List<string>(queueNames);
+        sorted.Sort(StringComparer.OrdinalIgnoreCase);
+        var now = _clock.UtcNow;
+        foreach (var queueName in sorted)
+        {
+            if (_engine.Queues.TryGet(queueName, out var def))
+                ShowQueueDetail(player, def, now);
+        }
     }
 
     // ---- ?rating
@@ -868,11 +922,11 @@ public sealed class MatchmakingCommands
         }
     }
 
-    // ---- ?autoqueue [on|off]
+    // ---- ?auto [on|off]
 
     private void AutoQueue(ReadOnlySpan<char> name, ReadOnlySpan<char> parameters, Player player, ITarget target)
     {
-        LogCommand("autoqueue", player, parameters);
+        LogCommand("auto", player, parameters);
         if (_resolver.KeyOf(player) is not PlayerKey k) return;
 
         var arg = parameters.Trim().ToString().ToLowerInvariant();
@@ -893,20 +947,20 @@ public sealed class MatchmakingCommands
             };
             if (requested is not bool e)
             {
-                _chat.SendMessage(player, "Usage: ?autoqueue [on|off] -- no argument toggles.");
+                _chat.SendMessage(player, "Usage: ?auto [on|off] -- no argument toggles.");
                 return;
             }
             enable = e;
         }
         _engine.AutoQueue.Set(k, enable);
         if (_log.IsDebug)
-            _log.Debug(LogCategory, $"?autoqueue {k.Name} -> {(enable ? "on" : "off")}{(arg.Length == 0 ? " (toggled)" : "")}");
+            _log.Debug(LogCategory, $"?auto {k.Name} -> {(enable ? "on" : "off")}{(arg.Length == 0 ? " (toggled)" : "")}");
 
         // Always report the resulting state. The "is now ON" / "is now OFF" wording is the contract
         // the bot harness (ClashRig RegressionZone) keys on -- keep it intact when editing.
         _chat.SendMessage(player, _engine.AutoQueue.IsEnabled(k)
             ? "Auto-queue is now ON -- after each match you'll be put back into its queue " +
-              "automatically. Use ?autoqueue off to stop, or ?cancel to leave a queue."
+              "automatically. Use ?auto off to stop, or ?cancel to leave a queue."
             : "Auto-queue is now OFF -- you won't be put back into the queue after matches.");
     }
 
@@ -1120,9 +1174,10 @@ public sealed class MatchmakingCommands
             ("?cancel",                      "Leave every ClashEngine queue."),
             ("?return",                      "Rejoin the match you were specced from."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),
+            ("?showline",                    "Show the detailed state of every queue you're in."),
             ("?rating",                      "Show your skill rating per game type."),
             ("?connect discord <alias>",     "Relay a request to link your name to a Discord alias (the bot confirms)."),
-            ("?autoqueue [on|off]",          "Auto re-queue when a match ends; no argument toggles (persists; off if flagged AFK)."),
+            ("?auto [on|off]",               "Auto re-queue when a match ends; no argument toggles (persists; off if flagged AFK)."),
             ("?chart",                       "Show the live scoreboard for your match (or one you're spectating)."),
             ("?party",                       "List your current party's members (leader marked if closed)."),
             ("?party <p1>[,<p2>,...]",       "Invite one or more players to your party."),

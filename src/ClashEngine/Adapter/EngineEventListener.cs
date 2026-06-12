@@ -203,7 +203,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         var descriptor = FormatQueueDescriptor(queueName);
         _pendingAutoQueueDms.Add((p,
             $"Auto-queued for {descriptor} -- you're at the back of the line. " +
-            "Use ?cancel to leave, or ?autoqueue off to stop."));
+            "Use ?cancel to leave, or ?auto off to stop."));
     }
 
     public void OnAutoQueueDisabledByAfk(PlayerKey player, DateTimeOffset at)
@@ -211,7 +211,7 @@ public sealed class EngineEventListener : IMatchmakingTelemetry
         if (_verbose.IsDebug) _verbose.Debug(LogCategory, $"AutoQueueDisabledByAfk: {player.Name}");
         if (_resolver.Resolve(player) is not { } p) return;
         _pendingAutoQueueDms.Add((p,
-            "Auto-queue was turned off because you were flagged AFK. Use ?autoqueue on to re-enable it."));
+            "Auto-queue was turned off because you were flagged AFK. Use ?auto on to re-enable it."));
     }
 
     public void OnQueueNearFull(string queueName, IReadOnlyList<PlayerKey> waiting, int waitingCount, int needed)

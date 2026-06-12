@@ -114,7 +114,8 @@ cmd_party
 cmd_partymode
 cmd_leaveparty
 cmd_queue
-cmd_autoqueue
+cmd_showline
+cmd_auto
 cmd_rating
 cmd_cancel
 cmd_accept
@@ -411,6 +412,7 @@ v1 emits:
 |---|---|---|
 | `?play <queue name>` | player | Queue for the next match. Multiple space-separated tokens are joined with `_` before lookup (so `?play casual 4v4` looks up `casual_4v4`). Without a name, falls back to the arena's `DefaultQueue`. |
 | `?queue [name]` | player | List queues defined for the current arena, or show who's queued and how long they've been waiting in `<name>`. Same multi-word lookup as `?play`. When a queue has enough players but no match has started, the reply explains why: too few players (how many more are needed), teams too imbalanced to meet the quality threshold (with the best achievable quality), no viable team assignment, or matchmaking succeeded and is holding for better arrivals (with the remaining seconds). The same explanation is logged at `Verbose` whenever the reason changes. |
+| `?showline` | player | Show the detailed `?queue <name>` view for every queue you're currently in, one after another — works from any arena, since it's driven by your queue membership rather than the current arena's queue list. |
 | `?cancel` | player | Leave every queue you're in. |
 | `?return` | player | Rejoin the match you were specced from. Bypasses the per-match freq lock by placing you directly on your assigned ship and team freq. |
 | `?party` / `?party <p1>[,<p2>,...]` | player | List your current party's members, or invite one or more players to your party. |
@@ -420,7 +422,7 @@ v1 emits:
 | `?partymode [open\|closed]` | player | View or change your party's mode. Closed parties have a leader who controls invites. |
 | `?rating` | player | Show your skill rating per game type. |
 | `?connect discord <alias>` | player | Relay a request to link your in-game name to a Discord alias, so the [event-stream](#event-stream) consumer (e.g. a Discord bot) can notify you. ClashEngine stores nothing — it emits a `player.discord_link_requested` event and the bot service performs the link/opt-in. |
-| `?autoqueue [on\|off]` | player | Set auto-queue, or **toggle** it with no argument. When **on**, you're automatically re-queued into a match's queue when it ends (the same queue you popped out of), so you keep cycling through matches without re-issuing `?play`. Persists across sessions. Independent of the KOTH `Queue<i>PromoteWinners` setting, and applies to winners and losers alike (added at the back, not the head). Auto-disabled — with a notice to turn it back on — if you're flagged for a staging AFK violation. |
+| `?auto [on\|off]` | player | Set auto-queue, or **toggle** it with no argument. When **on**, you're automatically re-queued into a match's queue when it ends (the same queue you popped out of), so you keep cycling through matches without re-issuing `?play`. Persists across sessions. Independent of the KOTH `Queue<i>PromoteWinners` setting, and applies to winners and losers alike (added at the back, not the head). Auto-disabled — with a notice to turn it back on — if you're flagged for a staging AFK violation. |
 | `?chart` | player | Show the live scoreboard for the match you're in or spectating. |
 | `?forgive <player>` | player | Vote to overturn a pending griefing penalty against a match participant. |
 | `?penalties` | player | List every player with live queue-timeout penalty state, one line per penalty ladder: the reason (abandonment, griefing, elimination cooldown, staging AFK), time remaining on the timeout (or "timeout served"), and the escalation multiplier with how long until it resets (the policy's memory window since the last offense). Players still serving a timeout sort first. |
