@@ -198,4 +198,38 @@ public class AutoQueueTests
         Assert.Empty(h.Telemetry.AutoQueueDisabledByAfk);
         Assert.False(h.Engine.AutoQueue.IsEnabled(K("D")));
     }
+
+    [Fact]
+    public void Voluntary_spec_during_staging_keeps_autoqueue_while_in_ship_afk_loses_it()
+    {
+        var h = new Harness(killTarget: 1);
+        h.ConnectAll("A", "B", "C", "D");
+        h.Engine.AutoQueue.Set(K("C"), true);   // C: sat in-ship, never moved -> genuine AFK
+        h.Engine.AutoQueue.Set(K("D"), true);   // D: specced out -> a deliberate departure
+
+        h.EnqueueAll("A", "B", "C", "D");
+        h.Engine.Tick(h.Clock.UtcNow);
+        var matchId = h.Engine.ActiveMatches.Keys.Single();
+        foreach (var n in new[] { "A", "B", "C", "D" })
+            h.Engine.OnPlayerJoinedArena(K(n), h.Clock.UtcNow);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        // Both C and D failed staging and are penalised, but only C is named in the confirmed-AFK
+        // subset; D specced out (something an idle player can't do) and so is a voluntary leaver.
+        Assert.True(h.Engine.CancelMatchAsAfk(
+            matchId, new[] { K("C"), K("D") }, h.Clock.UtcNow, idleAfkPlayers: new[] { K("C") }));
+
+        // Genuine AFK: ?auto forced off + the player is notified to re-enable it.
+        Assert.False(h.Engine.AutoQueue.IsEnabled(K("C")));
+        Assert.Contains(K("C"), h.Telemetry.AutoQueueDisabledByAfk);
+
+        // Voluntary leaver: ?auto survives and no disable notice is sent -- they chose to leave,
+        // they aren't away from the keyboard.
+        Assert.True(h.Engine.AutoQueue.IsEnabled(K("D")));
+        Assert.DoesNotContain(K("D"), h.Telemetry.AutoQueueDisabledByAfk);
+
+        // Both still took the StagingAfk timeout -- the distinction is ?auto-only, not penalty.
+        Assert.True(h.Engine.Penalties.IsInTimeout(K("C"), h.Clock.UtcNow));
+        Assert.True(h.Engine.Penalties.IsInTimeout(K("D"), h.Clock.UtcNow));
+    }
 }

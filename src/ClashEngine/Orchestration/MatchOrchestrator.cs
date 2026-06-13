@@ -828,7 +828,10 @@ public sealed class MatchOrchestrator
                         if (notReady.Contains(k)) continue;
                         _engine.OnPlayerJoinedArena(k, _clock.UtcNow);
                     }
-                _engine.CancelMatchAsAfk(_matchId, notReady, _clock.UtcNow);
+                // Pass the in-ship AFK subset separately: every no-show gets the StagingAfk
+                // penalty, but only the genuine AFKs (not the voluntary spec-out leavers in
+                // `departed`) have their ?auto preference disabled by the engine.
+                _engine.CancelMatchAsAfk(_matchId, notReady, _clock.UtcNow, afk);
                 // Cleanup is invoked by the registry's OnMatchEnded handler.
                 return false;
             }

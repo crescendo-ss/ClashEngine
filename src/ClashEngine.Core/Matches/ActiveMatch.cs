@@ -984,13 +984,27 @@ public sealed class ActiveMatch
     }
 
     /// <summary>
+    /// The subset of <see cref="MatchOutcome.AbandonedBy"/> confirmed away-from-keyboard during
+    /// staging: present in their ship but never moved. Populated only by the staging-idle cancel
+    /// path (<see cref="CancelAsAfk"/>) and null for every other finalization. The engine uses it
+    /// to scope the <c>?auto</c> auto-disable to genuine AFKs -- a voluntary leaver who specced out
+    /// performed a deliberate action an idle player can't, so they keep their preference.
+    /// </summary>
+    public IReadOnlyList<PlayerKey>? IdleAbandoners { get; private set; }
+
+    /// <summary>
     /// Cancels a Forming match because the orchestrator detected one or more idle players in
     /// the staging window. Every player named in <paramref name="afkPlayers"/> is marked as an
     /// abandoner regardless of their current status (Active players who got placed but didn't
     /// ready up are just as responsible as Pending no-shows whose placement never landed).
     /// Any remaining Pending player not in the AFK list is still marked as a no-show.
     /// </summary>
-    public void CancelAsAfk(IEnumerable<PlayerKey> afkPlayers, DateTimeOffset at)
+    /// <param name="idleAfkPlayers">The subset of <paramref name="afkPlayers"/> confirmed AFK
+    /// (in-ship, no input) as opposed to voluntarily specced/departed. Recorded on
+    /// <see cref="IdleAbandoners"/> for the engine's <c>?auto</c> scoping. Null means the caller
+    /// didn't distinguish, in which case the engine falls back to treating every abandoner as AFK.</param>
+    public void CancelAsAfk(IEnumerable<PlayerKey> afkPlayers, DateTimeOffset at,
+        IEnumerable<PlayerKey>? idleAfkPlayers = null)
     {
         ArgumentNullException.ThrowIfNull(afkPlayers);
         if (State != MatchState.Forming) return;
@@ -1002,6 +1016,7 @@ public sealed class ActiveMatch
             _everAbandoned.Add(p);
             _candidateAbandoners.Add(p);
         }
+        IdleAbandoners = idleAfkPlayers is null ? null : new List<PlayerKey>(idleAfkPlayers);
         FinalizeCancellation(at);
     }
 

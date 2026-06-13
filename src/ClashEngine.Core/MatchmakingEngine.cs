@@ -577,7 +577,13 @@ public sealed class MatchmakingEngine
     /// assessed a <see cref="PenaltyKind.StagingAfk"/> penalty (a milder ladder than the
     /// in-match <see cref="PenaltyKind.Abandonment"/> kind, since the match never started).
     /// </summary>
-    public bool CancelMatchAsAfk(Guid matchId, IReadOnlyList<PlayerKey> afkPlayers, DateTimeOffset at)
+    /// <param name="idleAfkPlayers">The subset of <paramref name="afkPlayers"/> confirmed AFK --
+    /// present in their ship but never moved -- as distinct from players who voluntarily specced
+    /// out (a deliberate action an idle player can't perform). Both subsets get the StagingAfk
+    /// penalty, but only confirmed AFKs have their <c>?auto</c> preference disabled. Null means the
+    /// caller didn't distinguish, in which case every abandoner is treated as AFK (legacy callers).</param>
+    public bool CancelMatchAsAfk(Guid matchId, IReadOnlyList<PlayerKey> afkPlayers, DateTimeOffset at,
+        IReadOnlyList<PlayerKey>? idleAfkPlayers = null)
     {
         if (!_matches.TryGetValue(matchId, out var match)) return false;
         if (match.State != MatchState.Forming) return false;
@@ -595,7 +601,7 @@ public sealed class MatchmakingEngine
                 if (!afkSet.Contains(p)) readied.Add(p);
             }
 
-        match.CancelAsAfk(afkPlayers, at);
+        match.CancelAsAfk(afkPlayers, at, idleAfkPlayers);
         FinalizeMatch(match, at);
 
         if (queueDef is not null)
@@ -1084,6 +1090,11 @@ public sealed class MatchmakingEngine
         var abandonKind = m.Outcome.FinalState == MatchState.Cancelled && _penalties.HasPolicy(PenaltyKind.StagingAfk)
             ? PenaltyKind.StagingAfk
             : PenaltyKind.Abandonment;
+        // The confirmed away-from-keyboard subset (in-ship, never moved) for a staging-idle cancel.
+        // A null IdleAbandoners means the canceller didn't distinguish voluntary leavers from AFKs,
+        // so every abandoner is treated as AFK (legacy behaviour); when present, only its members
+        // get their ?auto preference disabled.
+        var idleAbandoners = m.IdleAbandoners is null ? null : new HashSet<PlayerKey>(m.IdleAbandoners);
         for (int i = 0; i < m.Outcome.AbandonedBy.Count; i++)
         {
             var p = m.Outcome.AbandonedBy[i];
@@ -1091,8 +1102,11 @@ public sealed class MatchmakingEngine
             var until = _penalties.TimeoutUntil(p)!.Value;
             // A staging-AFK violation auto-disables the player's auto-queue preference: leaving it
             // on would keep dragging an away-from-keyboard player into matches they'll just AFK
-            // again. Only act (and notify) when it was actually on.
-            if (abandonKind == PenaltyKind.StagingAfk && _autoQueue.IsEnabled(p))
+            // again. A voluntary spec-out is a deliberate action (an idle player can't change
+            // ships), so those leavers keep ?auto -- they still get the StagingAfk penalty above,
+            // just not the preference reset. Only act (and notify) when it was actually on.
+            bool confirmedAfk = idleAbandoners is null || idleAbandoners.Contains(p);
+            if (abandonKind == PenaltyKind.StagingAfk && confirmedAfk && _autoQueue.IsEnabled(p))
             {
                 _autoQueue.Set(p, false);
                 _telemetry.OnAutoQueueDisabledByAfk(p, at);
