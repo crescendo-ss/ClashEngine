@@ -79,6 +79,13 @@
           "source": "src/ClashEngine/ClashModule.cs:386"
         },
         {
+          "key": "ShowQueueOnEnter",
+          "type": "bool",
+          "default": 1,
+          "description": "Auto-show each player the arena's ?queue table on EnterGame so the matchmaking surface is discoverable without knowing the command. 0 disables the greeting; players see the queue only when they issue ?queue themselves.",
+          "source": "src/ClashEngine/ClashModule.cs:578"
+        },
+        {
           "key": "EventStreamUrl",
           "type": "url",
           "default": null,

@@ -23,6 +23,7 @@ Read **only** from `global.conf`. Flat keys, not indexed.
 | `RecordReplays` | 0/1 | `1` | Record matches with MatchRecorder |
 | `ReplayRecordingDir` | path | `<BaseDir>/clash-replays` | Where in-flight `.replay` files land |
 | `DistanceSampleHz` | int 1–50 (0 disables) | `5` | Scoreboard distance-sampler frequency |
+| `ShowQueueOnEnter` | 0/1 | `1` | Auto-show the `?queue` table on arena entry |
 | `EventStreamUrl` | URL | unset | Outbound queue/match event-stream endpoint |
 | `EventStreamApiKey` | string | unset | `X-Api-Key` for events (falls back to `UploadApiKey`) |
 

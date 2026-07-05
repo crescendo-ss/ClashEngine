@@ -119,7 +119,8 @@ public sealed class MatchmakingCommands
         _commands.AddCommand("rating", Rating, arena, helpText:
             "?rating -- Show your skill rating per game type.");
         _commands.AddCommand("cancel", Cancel, arena, helpText:
-            "?cancel -- Leave every ClashEngine matchmaking queue.");
+            "?cancel [queue] -- Leave one matchmaking queue by id (the id ?queue shows / ?play takes), " +
+            "or every ClashEngine queue when no id is given.");
         _commands.AddCommand("return", Return, arena, helpText:
             "?return -- Rejoin the match you were specced from. Bypasses the per-match freq lock " +
             "by placing you directly on your assigned ship and team freq.");
@@ -448,10 +449,17 @@ public sealed class MatchmakingCommands
             return;
         }
 
-        // Four aligned columns (label / unique id / shape / waiting count) -- the chat client's
-        // font is monospace, so PadRight lines them up (same technique as ?helpclash's table).
+        // Four aligned columns (name / id / shape / waiting count) under a header row -- the chat
+        // client's font is monospace, so PadRight lines them up (same technique as ?helpclash's
+        // table). Each column width starts at its header label's length so the header never
+        // truncates a narrow column.
+        const string HeaderName = "Queue";
+        const string HeaderId = "Id";
+        const string HeaderShape = "Format";
+        const string HeaderWaiting = "Waiting";
+
         var rows = new (string Label, string Id, string Shape, int Waiting)[defs.Count];
-        int maxLabel = 0, maxId = 0, maxShape = 0, maxWaiting = 0;
+        int maxLabel = HeaderName.Length, maxId = HeaderId.Length, maxShape = HeaderShape.Length, maxWaiting = 0;
         for (int i = 0; i < defs.Count; i++)
         {
             var d = defs[i];
@@ -462,30 +470,36 @@ public sealed class MatchmakingCommands
             var shapeTag = $"{shape.TeamCount} teams of {shape.PlayersPerTeam} " +
                 (shape.PlayersPerTeam == 1 ? "pilot" : "pilots");
             int waiting = d.Queue.Snapshot().Count;
-            rows[i] = (d.Label, d.UniqueId, shapeTag, waiting);
+            // Id column shows the arena-local BaseName (no "{arena}/" prefix); ?queue/?play/?cancel
+            // all accept that bare form back.
+            rows[i] = (d.Label, d.BaseName, shapeTag, waiting);
             if (d.Label.Length > maxLabel) maxLabel = d.Label.Length;
-            if (d.UniqueId.Length > maxId) maxId = d.UniqueId.Length;
+            if (d.BaseName.Length > maxId) maxId = d.BaseName.Length;
             if (shapeTag.Length > maxShape) maxShape = shapeTag.Length;
             if (waiting > maxWaiting) maxWaiting = waiting;
         }
-        int countWidth = maxWaiting.ToString().Length;
+        int waitingWidth = Math.Max(HeaderWaiting.Length, maxWaiting.ToString().Length);
 
-        _chat.SendMessage(player, $"Queues ({defs.Count}):");
+        _chat.SendMessage(player, "Matchmaking Queues:");
+        _chat.SendMessage(player,
+            $"  {HeaderName.PadRight(maxLabel)}   {HeaderId.PadRight(maxId)}   " +
+            $"{HeaderShape.PadRight(maxShape)}   {HeaderWaiting.PadLeft(waitingWidth)}");
         foreach (var row in rows)
         {
             _chat.SendMessage(player,
                 $"  {row.Label.PadRight(maxLabel)}   {row.Id.PadRight(maxId)}   " +
-                $"{row.Shape.PadRight(maxShape)}   " +
-                $"{row.Waiting.ToString().PadLeft(countWidth)} waiting");
+                $"{row.Shape.PadRight(maxShape)}   {row.Waiting.ToString().PadLeft(waitingWidth)}");
         }
         _chat.SendMessage(player, "Use ?queue <id> to see who is waiting; ?play <id> to join.");
     }
 
     /// <summary>
-    /// The naked-<c>?queue</c> table advertises each queue's <see cref="QueueDefinition.UniqueId"/>
-    /// ("<c>{arena}/{base}</c>"), so accept that form back in <c>?play</c>/<c>?queue</c> by
-    /// stripping the player's own arena prefix before re-qualifying. Other arenas' ids still
-    /// fail the arena-local lookup, preserving the existing admission scope.
+    /// <c>?play</c>/<c>?queue</c>/<c>?cancel</c> take a queue's arena-local
+    /// <see cref="QueueDefinition.BaseName"/> (what the naked-<c>?queue</c> table advertises), but
+    /// also tolerate the fully-qualified <see cref="QueueDefinition.UniqueId"/>
+    /// ("<c>{arena}/{base}</c>") form by stripping the player's own arena prefix before
+    /// re-qualifying. Other arenas' ids still fail the arena-local lookup, preserving the existing
+    /// admission scope.
     /// </summary>
     private static string StripOwnArenaPrefix(string requestedBaseName, string arenaBaseName)
     {
@@ -602,6 +616,15 @@ public sealed class MatchmakingCommands
 
         var now = _clock.UtcNow;
 
+        // ?cancel <id> leaves only that one queue; a naked ?cancel leaves every queue the caller
+        // is searching in. Same id form as ?queue/?play (bare BaseName or the fully-qualified id).
+        var requestedBaseName = QueueRegistry.JoinTokensToQueueName(parameters);
+        if (requestedBaseName.Length > 0)
+        {
+            CancelOne(player, k, requestedBaseName, now);
+            return;
+        }
+
         // Mirror ?play's group-vs-solo dispatch: ?play routes a grouped caller through
         // TryEnqueueGroup (atomic), so ?cancel must dequeue every party member to keep the
         // queue entry consistent. The matcher tracks per-player entries and won't cascade.
@@ -638,6 +661,60 @@ public sealed class MatchmakingCommands
         if (_log.IsDebug)
             _log.Debug(LogCategory, $"?cancel {k.Name} removed from {removed.Count} queue(s): [{string.Join(",", removed)}]");
         if (removed.Count == 0) _chat.SendMessage(player, "You weren't in any queue.");
+    }
+
+    /// <summary>
+    /// <c>?cancel &lt;id&gt;</c>: leave one named queue while staying in any others. Resolves the
+    /// id against the caller's current arena exactly like <c>?play</c>/<c>?queue</c> (bare
+    /// <see cref="QueueDefinition.BaseName"/> or the fully-qualified id). A grouped caller leaves
+    /// the whole party from that queue, mirroring the atomic party enqueue <c>?play</c> performs.
+    /// </summary>
+    private void CancelOne(Player player, PlayerKey k, string requestedBaseName, DateTimeOffset now)
+    {
+        var arena = player.Arena;
+        if (arena is null)
+        {
+            _chat.SendMessage(player, "Join an arena to cancel a specific queue.");
+            return;
+        }
+
+        requestedBaseName = StripOwnArenaPrefix(requestedBaseName, arena.BaseName);
+        if (!_engine.Queues.TryGet(QueueRegistry.QualifyName(arena.BaseName, requestedBaseName), out var def))
+        {
+            _chat.SendMessage(player, $"Queue '{requestedBaseName}' is not defined for this arena. Type ?queue to see what's available here.");
+            return;
+        }
+
+        if (_engine.Groups.GroupOf(k) is GroupId g)
+        {
+            var members = new List<PlayerKey>(_engine.Groups.MembersOf(g));
+            int removed = 0;
+            foreach (var m in members)
+                if (_engine.Dequeue(m, def.UniqueId, now)) removed++;
+            if (_log.IsDebug)
+                _log.Debug(LogCategory, $"?cancel(party) {k.Name} -> {def.UniqueId}: removed {removed} member(s)");
+
+            if (removed == 0)
+            {
+                _chat.SendMessage(player, $"Your party isn't in {def.Label}.");
+                return;
+            }
+
+            // Notify the rest of the party. Caller stays silent on success, matching the
+            // solo path's existing convention.
+            foreach (var m in members)
+            {
+                if (m.Equals(k)) continue;
+                if (_resolver.Resolve(m) is { } pp)
+                    _chat.SendMessage(pp, $"{k.Name} cancelled the party's spot in {def.Label}.");
+            }
+            return;
+        }
+
+        bool wasRemoved = _engine.Dequeue(k, def.UniqueId, now);
+        if (_log.IsDebug)
+            _log.Debug(LogCategory, $"?cancel {k.Name} -> {def.UniqueId}: removed={wasRemoved}");
+        if (!wasRemoved) _chat.SendMessage(player, $"You weren't in {def.Label}.");
     }
 
     // ---- ?connect discord <alias>
@@ -1225,7 +1302,7 @@ public sealed class MatchmakingCommands
         var rows = new (string Cmd, string Desc)[]
         {
             ("?play <queue name>",           "Queue for the next match. Spaces map to underscores in the lookup."),
-            ("?cancel",                      "Leave every ClashEngine queue."),
+            ("?cancel [queue]",              "Leave one queue by id, or every ClashEngine queue when no id is given."),
             ("?return",                      "Rejoin the match you were specced from."),
             ("?forfeit",                     "Vote to forfeit your match; unanimous (non-eliminated) team = immediate loss, no penalty."),
             ("?queue [name]",                "List all queues (no arg) or show who is waiting in <name>."),

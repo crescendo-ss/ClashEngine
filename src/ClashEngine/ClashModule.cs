@@ -570,10 +570,16 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _unregisterActions.Add(_commandHandlers.UnregisterGlobal);
 
         // Auto-show the arena's queue table (the naked-?queue view) to each player on EnterGame,
-        // so the matchmaking surface is discoverable without knowing the command.
-        _queueGreeter = new ArenaQueueGreeter(broker, _engine, _commandHandlers, _resolver);
-        _queueGreeter.Register();
-        _unregisterActions.Add(_queueGreeter.Unregister);
+        // so the matchmaking surface is discoverable without knowing the command. Zone-scope kill
+        // switch: when 0 the greeter isn't constructed, so the EnterGame callback isn't subscribed
+        // and players see the queue only when they issue ?queue themselves.
+        bool showQueueOnEnter = _config.GetInt(_config.Global, "ClashEngine", "ShowQueueOnEnter", 1) != 0;
+        if (showQueueOnEnter)
+        {
+            _queueGreeter = new ArenaQueueGreeter(broker, _engine, _commandHandlers, _resolver);
+            _queueGreeter.Register();
+            _unregisterActions.Add(_queueGreeter.Unregister);
+        }
 
         // Game types and queues are arena-scoped only: each must be declared in the arena.conf
         // [ClashEngine] section of the arena that uses it. We deliberately do NOT parse game
