@@ -949,24 +949,30 @@ public sealed class ActiveMatch
         Outcome = Enrich(outcome with { FinalState = MatchState.Completed, EndedAt = at }, at);
     }
 
-    private void FinalizeCancellation(DateTimeOffset at)
+    private void FinalizeCancellation(DateTimeOffset at, bool blameless = false)
     {
-        // Mark every player who never reached Active as a no-show abandoner.
-        var keys = new List<PlayerKey>(_status.Keys);
-        foreach (var p in keys)
+        if (!blameless)
         {
-            if (_status[p] == PlayerStatus.Pending)
+            // Mark every player who never reached Active as a no-show abandoner.
+            var keys = new List<PlayerKey>(_status.Keys);
+            foreach (var p in keys)
             {
-                _status[p] = PlayerStatus.Abandoned;
-                _everAbandoned.Add(p);
-                _candidateAbandoners.Add(p);  // no-shows always count as abandoners
+                if (_status[p] == PlayerStatus.Pending)
+                {
+                    _status[p] = PlayerStatus.Abandoned;
+                    _everAbandoned.Add(p);
+                    _candidateAbandoners.Add(p);  // no-shows always count as abandoners
+                }
             }
         }
         State = MatchState.Cancelled;
         EndedAt = at;
         CloseAllOpenParticipations(at);
-        // Includes both pre-match leavers (caught at OnPlayerLeft) and no-shows (just marked above).
-        Outcome = new MatchOutcome(MatchId, GameType, Array.Empty<RankedTeam>(), CollectAbandoners(), MatchState.Cancelled, at);
+        // Includes both pre-match leavers (caught at OnPlayerLeft) and no-shows (just marked
+        // above). A blameless cancel voids the whole match instead: no abandoners, no penalties,
+        // even for players who had already walked out of the doomed staging.
+        IReadOnlyList<PlayerKey> abandonedBy = blameless ? Array.Empty<PlayerKey>() : CollectAbandoners();
+        Outcome = new MatchOutcome(MatchId, GameType, Array.Empty<RankedTeam>(), abandonedBy, MatchState.Cancelled, at);
     }
 
     /// <summary>
@@ -1027,10 +1033,14 @@ public sealed class ActiveMatch
     /// leaver who stranded no viable teammate stays penalty-free) but immediate, rather than after
     /// the full <see cref="JoinTimeout"/>. No-op once the match has left Forming.
     /// </summary>
-    public void Cancel(DateTimeOffset at)
+    /// <param name="blameless">When set, nobody is flagged: the cancellation was an external
+    /// authority voiding the match (e.g. a private-match organizer disbanding the lobby via the
+    /// control surface), not a player failing to show, so the outcome carries no abandoners and
+    /// no penalties follow.</param>
+    public void Cancel(DateTimeOffset at, bool blameless = false)
     {
         if (State != MatchState.Forming) return;
-        FinalizeCancellation(at);
+        FinalizeCancellation(at, blameless);
     }
 
     /// <summary>

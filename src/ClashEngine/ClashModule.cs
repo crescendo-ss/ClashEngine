@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using ClashEngine.Adapter;
 using ClashEngine.Commands;
 using ClashEngine.Config;
+using ClashEngine.Control;
 using ClashEngine.Core;
+using ClashEngine.Core.Control;
 using ClashEngine.Core.Events;
 using ClashEngine.Core.GameType;
 using ClashEngine.Core.Identity;
@@ -96,6 +98,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
     private IEventSink? _eventSink;
     private RatingsCoordinator? _ratingsCoordinator;
     private ClashReplayRecorder? _replayRecorder;
+    private ControlHttpListener? _controlListener;
 
     // Penalty-tracker memory grows unbounded without periodic pruning. Pruning on every 500 ms
     // tick is overkill -- penalty memory windows run for hours -- so we throttle to one sweep
@@ -569,6 +572,16 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _commandHandlers.RegisterGlobal();
         _unregisterActions.Add(_commandHandlers.UnregisterGlobal);
 
+        // Inbound control surface (optional): an HTTP listener external services use to
+        // manipulate queue state and form private matches (schema/command.schema.json) and to
+        // pull a full state snapshot (schema/snapshot.schema.json) -- the write half of the
+        // integration surface, mirroring the outbound event stream. Requests are marshaled onto
+        // the mainloop; the listener owns background accept/worker tasks, so its disposal
+        // registers LIFO like every other Register() callsite.
+        _controlListener = BuildControlListener();
+        if (_controlListener is not null)
+            _unregisterActions.Add(_controlListener.Dispose);
+
         // Auto-show the arena's queue table (the naked-?queue view) to each player on EnterGame,
         // so the matchmaking surface is discoverable without knowing the command. Zone-scope kill
         // switch: when 0 the greeter isn't constructed, so the EnterGame callback isn't subscribed
@@ -754,6 +767,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _eventSink = null;
         _ratingsCoordinator = null;
         _replayRecorder = null;
+        _controlListener = null;
 
         _log.LogM(LogLevel.Info, LogCategory, "ClashEngine unloaded.");
         return Task.FromResult(true);
@@ -1166,5 +1180,47 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         _log.LogM(LogLevel.Info, LogCategory,
             "Event stream not configured (EventStreamUrl unset); queue/match event emission disabled.");
         return NoOpEventSink.Instance;
+    }
+
+    /// <summary>
+    /// Starts the inbound control listener when configured. Requires <c>ControlListenUrl</c>
+    /// (e.g. <c>http://127.0.0.1:9550/clash/</c>; loopback strongly recommended -- the paired
+    /// service is expected to run on the same box) plus an api key -- a dedicated
+    /// <c>ControlApiKey</c>, falling back to <c>UploadApiKey</c> so a single-gateway setup needs
+    /// no extra config. Unset URL or key = the control surface is simply off. A bind failure
+    /// (port in use) is logged and disables the surface rather than failing the module load.
+    /// </summary>
+    private ControlHttpListener? BuildControlListener()
+    {
+        var url = _config.GetStr(_config.Global, "ClashEngine", "ControlListenUrl");
+        var apiKey = _config.GetStr(_config.Global, "ClashEngine", "ControlApiKey");
+        if (string.IsNullOrWhiteSpace(apiKey))
+            apiKey = _config.GetStr(_config.Global, "ClashEngine", "UploadApiKey");
+
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(apiKey))
+        {
+            _log.LogM(LogLevel.Info, LogCategory,
+                "Control surface not configured (ControlListenUrl/api key unset); inbound commands disabled.");
+            return null;
+        }
+
+        var listener = new ControlHttpListener(
+            url, apiKey, _engine!, new ControlCommandDispatcher(_engine!),
+            _ratingsCoordinator!, new MainloopDispatcher(_mainloop), _clock!, _log);
+        try
+        {
+            listener.Start();
+        }
+        catch (Exception ex)
+        {
+            _log.LogM(LogLevel.Error, LogCategory,
+                $"Control surface failed to bind '{url}': {ex.Message}; inbound commands disabled.");
+            listener.Dispose();
+            return null;
+        }
+
+        _log.LogM(LogLevel.Info, LogCategory,
+            $"Control surface enabled -> POST {url.TrimEnd('/')}/commands, GET {url.TrimEnd('/')}/state");
+        return listener;
     }
 }

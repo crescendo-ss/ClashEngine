@@ -78,15 +78,18 @@ See `README.md` for the full key-by-key reference and a worked 1v1 example.
 
 ## Integration surface (the only extensibility points)
 
-Per `docs/INTEGRATION.md`, exactly three Core interfaces are pluggable I/O edges; everything else (matchmaking, scoring, penalties, lifecycle, replay format, persistence) is internal and not meant to be swapped:
+Per `docs/INTEGRATION.md`, exactly four Core interfaces are pluggable I/O edges, plus one inbound HTTP surface the engine hosts; everything else (matchmaking, scoring, penalties, lifecycle, replay format, persistence) is internal and not meant to be swapped:
 
 | Interface | Direction | Wire schema |
 |---|---|---|
 | `IMatchUploader` (`Core/Stats`) | push, per finalized match | `schema/match.schema.json` |
 | `IGameTypeRegistrar` (`Core/GameType`) | push w/ accept/reject, per config load | `schema/gametype.schema.json` |
 | `IRatingsProvider` (`Core/Ratings`) | pull, per gametype on first connect | `schema/rating.schema.json` |
+| `IEventSink` (`Core/Events`) | push, per queue/match/player event | `schema/event.schema.json` |
 
-`ClashModule.Build*()` picks the HTTP-backed impl when `UploadUrl`+`UploadApiKey` are set, otherwise a local fallback (`JsonFileMatchUploader` / `NoStatsServer*`). The DTOs match the `schema/*.json` files 1:1 — keep them in sync when changing wire shapes.
+`ClashModule.Build*()` picks the HTTP-backed impl when `UploadUrl`+`UploadApiKey` are set, otherwise a local fallback (`JsonFileMatchUploader` / `NoStatsServer*` / `NoOpEventSink`). The DTOs match the `schema/*.json` files 1:1 — keep them in sync when changing wire shapes.
+
+**Control surface (inbound).** With `ControlListenUrl`(+`ControlApiKey`) set, `ClashModule.BuildControlListener()` hosts a BCL `HttpListener` (`src/ClashEngine/Control/`; deliberately no ASP.NET Core in the plug-in ALC) serving `POST /commands` (`schema/command.schema.json` → `schema/commandresponse.schema.json`) and `GET /state` (`schema/snapshot.schema.json`); the REST contract is published as `schema/control.openapi.yaml`, which `$ref`s those schema files — update it alongside them. The command→engine mapping and snapshot builder are Core and unit-tested (`ClashEngine.Core/Control/`: `ControlCommandDispatcher`, `StateSnapshotBuilder`) — the listener only does transport + marshaling: every engine touch bounces onto the mainloop via `MainloopDispatcher` (`QueueMainWorkItem` + `TaskCompletionSource`), and enqueue-flavored commands first run the same rating pre-pull `?play` does (`PlanRatingSeed`). `form_match` is the private-matchmaking seam: `MatchmakingEngine.TryFormMatch` forms a match from an externally-supplied roster anchored on a queue's rules, and the ordinary orchestrator lifecycle takes over; finalization skips KOTH/auto re-adds for such matches and `cancel_match` cancels blamelessly.
 
 ## OpenSkillSharp ALC gotcha
 

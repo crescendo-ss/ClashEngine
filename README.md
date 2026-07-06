@@ -148,6 +148,8 @@ cmd_penalties
 | `ShowQueueOnEnter` | 0/1 | 1 | Automatically show each player the arena's `?queue` table when they enter the game, so the matchmaking surface is discoverable without knowing the command. `0` disables the greeting (the EnterGame callback isn't subscribed); players then see the queue only when they issue `?queue` themselves. |
 | `EventStreamUrl` | URL | (unset) | Outbound [event stream](#event-stream) endpoint. Receives one `application/json` POST per queue/match/player event for live advertising/notification (e.g. a Discord bot). Unset disables event emission. Never derived from `UploadUrl` — point it at the consuming service. |
 | `EventStreamApiKey` | string | (unset) | Sent as `X-Api-Key` on event POSTs. Falls back to `UploadApiKey` when unset, so a single gateway terminating both needs no extra config. |
+| `ControlListenUrl` | URL prefix | (unset) | Inbound [control surface](#control-surface) listener, e.g. `http://127.0.0.1:9550/clash/`. ClashEngine serves `POST <prefix>commands` (manipulate queue state, form/cancel private matches; `schema/command.schema.json`) and `GET <prefix>state` (full state snapshot; `schema/snapshot.schema.json`). Unset disables the listener. Bind loopback — the consuming service is expected to run on the same box; a non-loopback bind logs a warning. |
+| `ControlApiKey` | string | (unset) | Required (via `X-Api-Key`) on every control request. Falls back to `UploadApiKey` when unset. |
 
 ### Game types
 
@@ -284,6 +286,13 @@ DistanceSampleHz    = 5
 ; EventStreamApiKey is omitted here, so it falls back to UploadApiKey above. Set it explicitly
 ; only when the event consumer needs a different key from the stats server.
 EventStreamUrl      = http://localhost:9090/api/events
+
+; --- Inbound control surface (optional) ---
+; HTTP listener the same external service uses to change matchmaking state: enqueue/dequeue
+; players, form private matches from self-organized teams, cancel Forming matches, toggle ?auto.
+; Bind loopback -- the service is expected to run on the same box. ControlApiKey is omitted
+; here, so it falls back to UploadApiKey above.
+ControlListenUrl    = http://127.0.0.1:9550/clash/
 ```
 
 `Zone/arenas/1v1comp/arena.conf` — the standard arena conf plus the game type and the two queues owned by this arena:
@@ -405,6 +414,23 @@ v1 emits:
 **ClashEngine is identity-agnostic:** events are keyed by in-game player name. Any Discord-account link and per-player opt-in live entirely in the consuming service — `?connect discord` just relays the alias; the engine stores nothing.
 
 **AFK watchdog.** Players who sit in a queue too long are nudged then culled, per-queue via `Queue<i>AfkWarn` / `Queue<i>AfkCull` (defaults 15 min / 20 min; `AfkWarn = 0` disables). The warning surfaces as a `queue.dwell_warning` event and an in-game DM; the cull dequeues the player and surfaces as `queue.left` with `reason = afk_cull`. The timer resets on any proof of presence: in-game activity (turning your ship, firing any weapon, or sending any chat message — zone-wide toggle `QueueActivityRefresh`, on by default) or re-issuing `?play`. Deliberate input is required — a motionless client's keep-alive packets and a drifting ship's position changes don't count, and spectators (who emit no position data) refresh via chat or `?play` only.
+
+---
+
+## Control surface
+
+The write half of the external-service integration: where the [event stream](#event-stream) *broadcasts* state out, the control surface lets the service *change* it — so users can queue, party up, and start private matches from a web page or Discord instead of typing `?commands`. The in-game text commands and the control surface are two front-ends over the same engine calls: a player queued via HTTP shows up in `?queue`, fires the same `queue.joined` event, and is matched identically.
+
+Set `ControlListenUrl` (+ `ControlApiKey`, or it reuses `UploadApiKey`) under `[ClashEngine]` in global.conf and ClashEngine hosts a small HTTP listener (BCL `HttpListener`, no extra dependencies) with two routes, both requiring `X-Api-Key`:
+
+- **`POST <prefix>commands`** — one command per request (`schema/command.schema.json`), answered with `schema/commandresponse.schema.json`. v1 commands: `enqueue` (expands to the player's party exactly like `?play`), `enqueue_group` (atomic all-or-nothing party enqueue by name list), `dequeue` (one queue or everywhere; idempotent), `form_match`, `cancel_match`, and `set_auto` (the `?auto` preference).
+- **`GET <prefix>state`** — a full snapshot (`schema/snapshot.schema.json`): every queue with its waiters, every in-flight match, every active penalty timeout. The event stream is fire-and-forget and may drop under backpressure; a consumer rebuilds from the snapshot on (re)connect and applies events from there.
+
+The complete REST contract — routes, auth, status-code semantics, request/response examples — is captured in [`schema/control.openapi.yaml`](schema/control.openapi.yaml) (OpenAPI 3.1, `$ref`ing the JSON Schema files, so the schemas stay the single source of truth). Point a client generator or Swagger UI at it to build against the API.
+
+**Private matches (`form_match`).** The headline feature: players self-organize into full teams (say 8 names arranged as two 4s) and the service starts the match the moment the set is complete — no queue wait, no matcher. The command names an **anchor queue** whose game type, arena, and rules the match runs under; the rostered players don't need to be members of it. The engine stays the authority on validity: everyone must be connected, not already in a match, and (unless the anchor queue sets `IgnorePenalties`) not serving a timeout — rejections name the blocking player. From there the ordinary lifecycle runs: staging, countdown, GO!, stats, rating updates (per the anchor queue's `RatingWeight` — anchor on a `RatingWeight = 0` queue for unrated scrims), match upload, events. Differences from a matcher-formed match: roster players waiting in any queues are swept out for the duration and **restored to all of them** afterwards, and finalization skips KOTH promotion / `?auto` re-enqueue into the anchor queue (the roster never held a spot in that line). `cancel_match` (Forming matches only) is **blameless**: the organizer voiding the lobby flags nobody and assesses no penalties.
+
+Requests are handled off the mainloop and marshaled onto it per command; enqueue-flavored commands run the same rating pre-pull `?play` does. HTTP status is transport-only (`401` bad key, `400` undecodable body, `503` engine busy) — a processed command always answers `200` with `status` = `ok` / `rejected` / `error` in the body. Commands address players by in-game name and queues by their registry id (`{ownerArena}/{baseName}`, the same key the event stream and snapshot use).
 
 ---
 

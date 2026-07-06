@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clashengine.dev/schema/commandresponse.schema.json",
+  "title": "CommandResponse",
+  "description": "The application/json body ClashEngine returns for every command POST (command.schema.json). HTTP status stays 200 whenever a well-formed command was processed -- `status` carries the semantic outcome; non-200 is reserved for transport-level faults (401 bad api key, 400 undecodable body, 404 unknown path, 503 engine busy). Consumers should key their handling on `status` + `result`, treating `detail` as human-readable explanation only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire format version, shared with command.schema.json."
+    },
+    "commandId": {
+      "type": ["string", "null"],
+      "description": "The request's commandId, echoed verbatim (null when the request carried none or was undecodable)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "rejected", "error"],
+      "description": "ok: the desired state now holds (including idempotent no-ops like dequeueing a player who wasn't queued). rejected: the engine refused the change -- `result` says why. error: the command itself was malformed (unknown type, missing field, bad version); nothing was attempted."
+    },
+    "result": {
+      "type": ["string", "null"],
+      "enum": [
+        "queued",
+        "already_queued",
+        "already_queued_refreshed",
+        "dequeued",
+        "match_formed",
+        "match_cancelled",
+        "auto_set",
+        "unknown_queue",
+        "not_connected",
+        "in_match",
+        "in_timeout",
+        "group_too_large",
+        "shape_mismatch",
+        "duplicate_player",
+        "unknown_match",
+        "not_forming",
+        "unsupported_schema_version",
+        "unknown_type",
+        "missing_field",
+        "invalid_field",
+        "internal_error",
+        null
+      ],
+      "description": "Machine-readable outcome. For status=ok, one of the first block (already_queued_refreshed = the repeat enqueue refreshed the AFK dwell clock). For status=rejected, the engine's reason; not_connected / in_match / in_timeout / duplicate_player name the offending player in `player`. For status=error, what was wrong with the command."
+    },
+    "detail": {
+      "type": ["string", "null"],
+      "description": "Human-readable elaboration (e.g. which field was missing, the offending player's remaining timeout). Never required for correct handling."
+    },
+    "player": {
+      "type": ["string", "null"],
+      "description": "On per-player rejections (not_connected / in_match / in_timeout / duplicate_player), the in-game name of the player that caused it -- for group and form_match commands this may be someone other than the caller."
+    },
+    "matchId": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "On form_match ok: the new match's id, correlating to match.started / match.ended events and cancel_match."
+    },
+    "removedQueues": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "On dequeue ok: the registry ids of the queues the player was actually removed from (empty when they weren't queued anywhere the command covered)."
+    }
+  }
+}

@@ -1,0 +1,256 @@
+openapi: 3.1.0
+
+info:
+  title: ClashEngine control surface
+  version: "1"
+  description: |
+    The inbound REST half of ClashEngine's external-service integration: an HTTP listener the
+    engine hosts (when `[ClashEngine] ControlListenUrl` is set in global.conf) that lets a paired
+    matchmaking service — a web UI, a Discord bot — manipulate queue state, form private matches
+    from self-organized teams, and pull a full state snapshot.
+
+    This spec `$ref`s the JSON Schema files next to it (`command.schema.json`,
+    `commandresponse.schema.json`, `snapshot.schema.json`); those files are the wire-contract
+    source of truth and match the engine's DTOs 1:1. The `version` above tracks the shared
+    `schemaVersion` field (currently `1`).
+
+    ### How this API is meant to be used
+
+    The control surface is the *write* half of a loop. The *read* half is the outbound event
+    stream (`event.schema.json`): ClashEngine POSTs queue/match/player events to your service's
+    `EventStreamUrl` as state changes — including changes this API caused. A typical service:
+
+    1. On (re)connect, rebuilds its world from `GET /state` (the event stream is fire-and-forget
+       and may drop under backpressure, so the snapshot is the self-heal anchor).
+    2. Applies events incrementally as they arrive.
+    3. Drives changes with `POST /commands` when users click buttons.
+
+    ### Semantics, not transport
+
+    The HTTP status code is transport-only. Any well-formed command that reaches the engine
+    answers **200** — the semantic outcome is in the response body's `status` field:
+    `ok` (the desired state now holds, including idempotent no-ops), `rejected` (the engine
+    refused; `result` says why, `player` names the blocker where known), or `error` (the command
+    itself was malformed). Non-200 codes mean the command was NOT processed: 400 undecodable
+    body, 401 bad api key, 404 unknown path, 405 wrong method, 413 oversized body, 500 unhandled
+    server error, 503 engine busy (result unknown — the work item may still run; re-sync from
+    `GET /state` rather than blindly retrying).
+
+    Every error-shaped reply, whatever the status code, uses the same
+    `commandresponse.schema.json` envelope.
+
+    ### Addressing
+
+    Players are addressed by in-game name (the engine is identity-agnostic; any Discord/web
+    account linkage lives in your service). Queues are addressed by registry id
+    (`{ownerArena}/{baseName}`, e.g. `lobby/casual_4v4`) — the same key the event stream and the
+    snapshot use. Match ids are lowercase dashed UUIDs, minted on `form_match` (and on
+    matcher-formed matches, carried by `match.started` events).
+
+servers:
+  - url: http://127.0.0.1:9550/clash
+    description: |
+      The operator-configured `[ClashEngine] ControlListenUrl` prefix (this default matches the
+      README example). Bind loopback — the paired service is expected to run on the same box.
+
+security:
+  - apiKey: []
+
+paths:
+  /commands:
+    post:
+      operationId: executeCommand
+      summary: Execute one control command
+      description: |
+        One command per request. `type` selects the action; which other fields are required
+        depends on it (see the command schema's per-field descriptions):
+
+        - `enqueue` — add `player` to `queue`. Expands to the player's in-game party exactly
+          like `?play`, so the two front-ends can't diverge.
+        - `enqueue_group` — atomically add `players` to `queue` as one group (all-or-nothing).
+        - `dequeue` — remove `player` from `queue`, or from every queue when `queue` is absent.
+          Idempotent: "not queued" already is the requested state, so it answers `ok` with an
+          empty `removedQueues`.
+        - `form_match` — start a private match, bypassing the matcher: the exact `teams`
+          rosters play under the rules (game type, arena, lives, staging, …) of the anchor
+          `queue`, whose members they need not be. The engine remains the authority: everyone
+          must be connected, not in a match, and (unless the queue ignores penalties) not in
+          timeout — rejections name the blocking player. On `ok`, `matchId` correlates to
+          `match.started` / `match.ended` events and to `cancel_match`.
+        - `cancel_match` — cancel a still-Forming match by `matchId`. Blameless: nobody is
+          flagged as an abandoner and no penalties follow.
+        - `set_auto` — set `player`'s auto-requeue preference to `enabled`.
+
+        Effects surface on the outbound event stream (`queue.joined`, `queue.left`,
+        `match.teams_locked`, …) like any other state change. `commandId` is echoed verbatim for
+        correlation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./command.schema.json"
+            examples:
+              enqueue:
+                summary: Queue a player (party-expanding, like ?play)
+                value:
+                  schemaVersion: 1
+                  type: enqueue
+                  commandId: req-101
+                  player: SomePilot
+                  queue: lobby/casual_4v4
+              formMatch:
+                summary: Start a private 4v4 from self-organized teams
+                value:
+                  schemaVersion: 1
+                  type: form_match
+                  commandId: req-102
+                  queue: lobby/casual_4v4
+                  teams:
+                    - [p1, p2, p3, p4]
+                    - [p5, p6, p7, p8]
+              cancelMatch:
+                summary: Organizer disbands the lobby before GO! (blameless)
+                value:
+                  schemaVersion: 1
+                  type: cancel_match
+                  commandId: req-103
+                  matchId: 8b34f35d-b3b5-4747-941a-5cb96153641e
+              dequeueEverywhere:
+                summary: Leave every queue
+                value:
+                  schemaVersion: 1
+                  type: dequeue
+                  commandId: req-104
+                  player: SomePilot
+      responses:
+        "200":
+          description: |
+            Command processed. Read the body's `status` for the semantic outcome — a `rejected`
+            command is still a 200.
+          content:
+            application/json:
+              schema:
+                $ref: "./commandresponse.schema.json"
+              examples:
+                queued:
+                  summary: Enqueue succeeded
+                  value:
+                    schemaVersion: 1
+                    commandId: req-101
+                    status: ok
+                    result: queued
+                matchFormed:
+                  summary: Private match formed
+                  value:
+                    schemaVersion: 1
+                    commandId: req-102
+                    status: ok
+                    result: match_formed
+                    matchId: 8b34f35d-b3b5-4747-941a-5cb96153641e
+                rejectedInTimeout:
+                  summary: A roster member is serving a penalty
+                  value:
+                    schemaVersion: 1
+                    commandId: req-102
+                    status: rejected
+                    result: in_timeout
+                    detail: "'p6' is serving a queue timeout."
+                    player: p6
+                errorMissingField:
+                  summary: Malformed command
+                  value:
+                    schemaVersion: 1
+                    commandId: req-101
+                    status: error
+                    result: missing_field
+                    detail: "enqueue requires 'queue'."
+        "400":
+          $ref: "#/components/responses/BadBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/WrongMethod"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/EngineBusy"
+
+  /state:
+    get:
+      operationId: getStateSnapshot
+      summary: Pull a full state snapshot
+      description: |
+        Full point-in-time matchmaking state: every registered queue with its waiters (FIFO
+        order), every in-flight (Forming/Live) match, every active penalty timeout. Use it to
+        (re)build your world on connect, then apply the event stream incrementally — every queue
+        event carries the queue's post-change `count`/`capacity`, so a board self-heals from the
+        next event after any gap.
+      responses:
+        "200":
+          description: The snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "./snapshot.schema.json"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/WrongMethod"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/EngineBusy"
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: |
+        `[ClashEngine] ControlApiKey` from global.conf (falling back to `UploadApiKey`).
+        Compared constant-time; required on every request.
+
+  responses:
+    BadBody:
+      description: The body was not decodable JSON (or was empty). Nothing was attempted.
+      content:
+        application/json:
+          schema:
+            $ref: "./commandresponse.schema.json"
+    Unauthorized:
+      description: Missing or wrong `X-Api-Key`.
+      content:
+        application/json:
+          schema:
+            $ref: "./commandresponse.schema.json"
+    WrongMethod:
+      description: Wrong HTTP method for this path (`/commands` is POST-only, `/state` GET-only).
+      content:
+        application/json:
+          schema:
+            $ref: "./commandresponse.schema.json"
+    BodyTooLarge:
+      description: Body exceeded the 256 KiB ceiling; a legitimate command is a few hundred bytes.
+      content:
+        application/json:
+          schema:
+            $ref: "./commandresponse.schema.json"
+    ServerError:
+      description: Unhandled server error; check the zone log.
+      content:
+        application/json:
+          schema:
+            $ref: "./commandresponse.schema.json"
+    EngineBusy:
+      description: |
+        The mainloop did not service the request in time. Result unknown — the queued work item
+        may still execute later, so do NOT assume "not applied"; re-sync from `GET /state`
+        instead of blindly retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "./commandresponse.schema.json"

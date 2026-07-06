@@ -54,6 +54,13 @@ public sealed class MatchmakingEngine
     // mechanically. Only matches with at least one multi-queue searcher have an entry.
     private readonly Dictionary<Guid, IReadOnlyDictionary<PlayerKey, IReadOnlyList<string>>> _otherQueuesAtPop = new();
     private readonly Dictionary<PlayerKey, Guid> _matchOf = new();
+
+    // Matches created by TryFormMatch (an external authority's pre-formed roster -- private
+    // matchmaking) rather than by the matcher. Consulted (and removed) at finalization:
+    // externally-formed matches skip the formation-queue re-adds (KOTH promotion, ?auto
+    // re-enqueue, AFK-cancel front-requeue) because their players never actually queued there;
+    // other-queue restoration still runs.
+    private readonly HashSet<Guid> _externallyFormed = new();
     private readonly HashSet<PlayerKey> _connected = new();
     private readonly Dictionary<(Guid MatchId, PlayerKey Target), PendingGriefingPenalty> _pendingGriefs = new();
     private readonly GroupRegistry _groups;
@@ -132,6 +139,18 @@ public sealed class MatchmakingEngine
     /// </summary>
     public IAutoQueueStore AutoQueue => _autoQueue;
     public IReadOnlyDictionary<Guid, ActiveMatch> ActiveMatches => _matches;
+
+    /// <summary>
+    /// The queue definition an in-flight match formed from (for <see cref="TryFormMatch"/>
+    /// matches, the anchor queue supplying its rules). Returns <see langword="false"/> once the
+    /// match has finalized, or for unknown ids.
+    /// </summary>
+    public bool TryGetMatchQueue(Guid matchId, out QueueDefinition definition)
+    {
+        var found = _matchQueue.TryGetValue(matchId, out var def);
+        definition = def!;
+        return found;
+    }
 
     /// <summary>
     /// Replace the telemetry sink at runtime. Used by the host to swap in a real listener
@@ -590,8 +609,12 @@ public sealed class MatchmakingEngine
 
         // Snapshot the queue and the readied (= rostered minus AFK) set before FinalizeMatch
         // tears down _matchQueue and clears _matchOf. We re-enqueue these players AFTER
-        // finalization so the eligibility check sees them as no-longer-in-match.
-        var queueDef = _matchQueue.TryGetValue(matchId, out var qd) ? qd : null;
+        // finalization so the eligibility check sees them as no-longer-in-match. Externally-formed
+        // matches skip the re-queue outright -- their readied players never held a spot in the
+        // anchor queue (their real memberships come back via RestoreOtherQueues).
+        var queueDef = _matchQueue.TryGetValue(matchId, out var qd) && !_externallyFormed.Contains(matchId)
+            ? qd
+            : null;
         var afkSet = new HashSet<PlayerKey>(afkPlayers);
         var readied = new List<PlayerKey>();
         for (int t = 0; t < match.Teams.Count; t++)
@@ -619,11 +642,14 @@ public sealed class MatchmakingEngine
     /// force-flags the absentee nor re-queues anyone -- it is purely "do the join-timeout cancel
     /// now." Returns false if the match is unknown or already past Forming.
     /// </summary>
-    public bool CancelForming(Guid matchId, DateTimeOffset at)
+    /// <param name="blameless">When set, nobody is flagged and no penalties follow: the caller is
+    /// an external authority voiding the match (the control surface's <c>cancel_match</c>, e.g. a
+    /// private-match organizer disbanding the lobby before GO!), not a readiness failure.</param>
+    public bool CancelForming(Guid matchId, DateTimeOffset at, bool blameless = false)
     {
         if (!_matches.TryGetValue(matchId, out var match)) return false;
         if (match.State != MatchState.Forming) return false;
-        match.Cancel(at);
+        match.Cancel(at, blameless);
         FinalizeMatch(match, at);
         return true;
     }
@@ -648,6 +674,91 @@ public sealed class MatchmakingEngine
             if (_matcher.EnqueuePriority(p, rating, queue.UniqueId, groupId))
                 _telemetry.OnQueueAdded(p, queue.UniqueId, at);
         }
+    }
+
+    /// <summary>
+    /// Forms a match directly from an externally-supplied roster, bypassing the queues and the
+    /// matcher -- the seam for private matchmaking (players self-organize into full teams and
+    /// start when they have a complete set) and for an external service acting as the pairing
+    /// authority. <paramref name="queueName"/> names the anchor queue whose game type, arena, and
+    /// match rules the match runs under; the rostered players do NOT need to be members of it.
+    /// Validation mirrors <see cref="TryEnqueue"/>: every player must be connected, not already in
+    /// a match, and (unless the anchor queue ignores penalties) not serving a timeout -- the
+    /// engine stays the authority on validity even when an external service owns the pairing. On
+    /// success the match starts Forming and the ordinary lifecycle takes over: the emitted
+    /// <see cref="IMatchmakingTelemetry.OnMatchProposed"/> drives the orchestrator's staging /
+    /// countdown, then <see cref="MarkMatchLive"/> at GO!. Roster players waiting in any queues
+    /// are swept out (reason <see cref="QueueRemovalReason.Matched"/>) and -- since this match
+    /// consumed none of those spots -- restored to all of them when it ends. Unlike matcher-formed
+    /// matches, finalization skips the formation-queue re-adds (KOTH promotion, <c>?auto</c>
+    /// re-enqueue, AFK-cancel front-requeue): the roster never queued there.
+    /// </summary>
+    /// <remarks>The engine takes ownership of <paramref name="teams"/> (the ActiveMatch holds it
+    /// by reference); callers must not mutate it afterwards. Ratings still update on completion
+    /// per the anchor queue's <see cref="QueueDefinition.RatingWeight"/> -- operators who want
+    /// unrated private matches should anchor them on a queue with <c>RatingWeight = 0</c>.</remarks>
+    public FormMatchOutcome TryFormMatch(
+        string queueName, IReadOnlyList<IReadOnlyList<PlayerKey>> teams, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(teams);
+
+        if (!_queues.TryGet(queueName, out var def))
+            return new FormMatchOutcome(FormMatchResult.UnknownQueue);
+
+        if (teams.Count != def.Shape.TeamCount)
+            return new FormMatchOutcome(FormMatchResult.ShapeMismatch);
+        for (int t = 0; t < teams.Count; t++)
+            if (teams[t] is null || teams[t].Count != def.Shape.PlayersPerTeam)
+                return new FormMatchOutcome(FormMatchResult.ShapeMismatch);
+
+        // Single validation pass: reject duplicates and fail fast on the worst eligibility status
+        // encountered, naming the offender (mirrors TryEnqueueGroup's up-front member check).
+        var seen = new HashSet<PlayerKey>();
+        for (int t = 0; t < teams.Count; t++)
+            for (int j = 0; j < teams[t].Count; j++)
+            {
+                var p = teams[t][j];
+                if (p.IsDefault) throw new ArgumentException("Roster must not contain default players.", nameof(teams));
+                if (!seen.Add(p)) return new FormMatchOutcome(FormMatchResult.DuplicatePlayer, Player: p);
+
+                var status = CheckEligibility(p).Status switch
+                {
+                    EligibilityStatus.Disconnected => FormMatchResult.NotConnected,
+                    EligibilityStatus.InMatch => FormMatchResult.InMatch,
+                    EligibilityStatus.InTimeout when !def.IgnorePenalties => FormMatchResult.InTimeout,
+                    _ => FormMatchResult.Ok,
+                };
+                if (status != FormMatchResult.Ok) return new FormMatchOutcome(status, Player: p);
+            }
+
+        // Sweep every roster player out of every queue they were waiting in. Unlike a matcher pop
+        // no queue "consumed" this roster, so ALL removed memberships go into AlsoRemovedFrom --
+        // FinalizeMatch's RestoreOtherQueues gives every one of them back when the match ends.
+        Dictionary<PlayerKey, IReadOnlyList<string>>? removedFrom = null;
+        for (int t = 0; t < teams.Count; t++)
+            for (int j = 0; j < teams[t].Count; j++)
+            {
+                var p = teams[t][j];
+                var removed = _matcher.DequeueEverywhere(p);
+                if (removed.Count > 0) (removedFrom ??= new())[p] = removed;
+            }
+
+        var proposal = new MatchProposal(
+            def.UniqueId, def.Shape, teams,
+            Quality: 1.0,   // by fiat: the players chose these teams themselves
+            ProposedAt: at,
+            AlsoRemovedFrom: removedFrom ?? MatchProposal.NoOtherQueues);
+
+        var matchId = RegisterFormedMatch(def, proposal, at);
+        _externallyFormed.Add(matchId);
+
+        if (removedFrom is not null)
+            foreach (var (p, queues) in removedFrom)
+                for (int i = 0; i < queues.Count; i++)
+                    _telemetry.OnQueueRemoved(p, queues[i], at, QueueRemovalReason.Matched);
+
+        _telemetry.OnMatchProposed(proposal);
+        return new FormMatchOutcome(FormMatchResult.Ok, matchId);
     }
 
     /// <summary>Removes a player from <paramref name="queueName"/> if they were enqueued.</summary>
@@ -1018,6 +1129,37 @@ public sealed class MatchmakingEngine
     {
         if (!_queues.TryGet(proposal.QueueName, out var def)) return;
 
+        RegisterFormedMatch(def, proposal, at);
+
+        // The matcher already dequeued these players from every queue they were searching; surface
+        // a removal (reason=Matched) for the queue this match formed from AND for any other queues
+        // they were searching (carried on proposal.AlsoRemovedFrom) so the event stream's queue board
+        // reflects every drop, not just the one on the queue this match formed from.
+        for (int t = 0; t < proposal.Teams.Count; t++)
+            for (int j = 0; j < proposal.Teams[t].Count; j++)
+            {
+                var p = proposal.Teams[t][j];
+                _telemetry.OnQueueRemoved(p, proposal.QueueName, at, QueueRemovalReason.Matched);
+                if (proposal.AlsoRemovedFrom.TryGetValue(p, out var otherQueues))
+                    for (int q = 0; q < otherQueues.Count; q++)
+                        _telemetry.OnQueueRemoved(p, otherQueues[q], at, QueueRemovalReason.Matched);
+            }
+
+        _telemetry.OnMatchProposed(proposal);
+    }
+
+    /// <summary>
+    /// Shared tail of match formation: mints the id, constructs the <see cref="ActiveMatch"/>
+    /// from the anchor queue's rules + the proposal's rosters, and indexes it
+    /// (<see cref="_matches"/>, <see cref="_matchQueue"/>, <see cref="_matchOf"/>,
+    /// <see cref="_otherQueuesAtPop"/>). The ActiveMatch holds the proposal's Teams list by
+    /// reference -- the orchestrator registry correlates proposal to match id through that
+    /// identity. Callers emit the queue-removal telemetry themselves (a matcher pop and an
+    /// external formation differ there) and MUST fire
+    /// <see cref="IMatchmakingTelemetry.OnMatchProposed"/> after those removals.
+    /// </summary>
+    private Guid RegisterFormedMatch(QueueDefinition def, MatchProposal proposal, DateTimeOffset at)
+    {
         var matchId = Guid.NewGuid();
         var match = new ActiveMatch(
             matchId,
@@ -1037,22 +1179,11 @@ public sealed class MatchmakingEngine
         if (proposal.AlsoRemovedFrom.Count > 0)
             _otherQueuesAtPop[matchId] = proposal.AlsoRemovedFrom;
 
-        // The matcher already dequeued these players from every queue they were searching; surface
-        // a removal (reason=Matched) for the queue this match formed from AND for any other queues
-        // they were searching (carried on proposal.AlsoRemovedFrom) so the event stream's queue board
-        // reflects every drop, not just the one on the queue this match formed from.
         for (int t = 0; t < proposal.Teams.Count; t++)
             for (int j = 0; j < proposal.Teams[t].Count; j++)
-            {
-                var p = proposal.Teams[t][j];
-                _matchOf[p] = matchId;
-                _telemetry.OnQueueRemoved(p, proposal.QueueName, at, QueueRemovalReason.Matched);
-                if (proposal.AlsoRemovedFrom.TryGetValue(p, out var otherQueues))
-                    for (int q = 0; q < otherQueues.Count; q++)
-                        _telemetry.OnQueueRemoved(p, otherQueues[q], at, QueueRemovalReason.Matched);
-            }
+                _matchOf[proposal.Teams[t][j]] = matchId;
 
-        _telemetry.OnMatchProposed(proposal);
+        return matchId;
     }
 
     /// <summary>
@@ -1139,8 +1270,14 @@ public sealed class MatchmakingEngine
         _matchQueue.Remove(m.MatchId);
         _otherQueuesAtPop.Remove(m.MatchId, out var otherQueuesAtPop);
 
+        // Externally-formed (TryFormMatch) matches skip the formation-queue re-adds below: their
+        // players never queued in the anchor queue, so promoting winners into it or ?auto-adding
+        // them would jump them into a public line they never joined.
+        bool externallyFormed = _externallyFormed.Remove(m.MatchId);
+
         // KOTH re-enqueue: winners go to the head of the queue, capped by MaxConsecutiveDefenses.
-        if (queueDef is { PromoteWinnersToFront: true }
+        if (!externallyFormed
+            && queueDef is { PromoteWinnersToFront: true }
             && m.Outcome.FinalState == MatchState.Completed
             && m.Outcome.RankedTeams.Count > 0)
         {
@@ -1152,7 +1289,7 @@ public sealed class MatchmakingEngine
         // auto-queue on is already queued (priority) and won't be added a second time. Cancelled
         // matches are excluded -- their readied players are handled by ReQueueReadiedAtFront, and an
         // AFK violator already had auto-queue switched off in the abandon loop above.
-        if (queueDef is not null && m.Outcome.FinalState != MatchState.Cancelled)
+        if (!externallyFormed && queueDef is not null && m.Outcome.FinalState != MatchState.Cancelled)
             ApplyAutoQueueReenqueue(queueDef, m, at);
 
         // Restore the *other* queue memberships the pop revoked. Unlike ?auto this is
@@ -1456,6 +1593,35 @@ public readonly record struct ResetSummary(
     int PenaltyEventsCleared,
     int RatingsCleared,
     int PendingGriefsCleared);
+
+/// <summary>Outcome of a <see cref="MatchmakingEngine.TryFormMatch"/> call. <see cref="MatchId"/>
+/// is set only on <see cref="FormMatchResult.Ok"/>; <see cref="Player"/> names the offending
+/// roster member for the per-player rejections (NotConnected / InMatch / InTimeout /
+/// DuplicatePlayer) so the caller can report exactly who blocked the private match.</summary>
+public readonly record struct FormMatchOutcome(
+    FormMatchResult Result,
+    Guid MatchId = default,
+    PlayerKey Player = default);
+
+/// <summary>Result of a <see cref="MatchmakingEngine.TryFormMatch"/> call.</summary>
+public enum FormMatchResult
+{
+    Ok,
+
+    /// <summary>The anchor queue is not registered.</summary>
+    UnknownQueue,
+
+    /// <summary>The roster does not match the anchor queue's shape (TeamCount teams of
+    /// PlayersPerTeam each).</summary>
+    ShapeMismatch,
+
+    /// <summary>The same player appears more than once in the roster.</summary>
+    DuplicatePlayer,
+
+    NotConnected,
+    InMatch,
+    InTimeout,
+}
 
 /// <summary>Outcome of a <see cref="MatchmakingEngine.TryEnqueue"/> call.</summary>
 public enum EnqueueResult

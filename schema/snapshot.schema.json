@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clashengine.dev/schema/snapshot.schema.json",
+  "title": "Snapshot",
+  "description": "Full point-in-time matchmaking state, returned by GET /state on ClashEngine's ControlListenUrl (X-Api-Key authenticated). This is the self-heal companion to the outbound event stream (event.schema.json): the stream is fire-and-forget and may drop events under backpressure, so a consumer rebuilds its world from a snapshot on (re)connect and then applies events incrementally. Players are in-game names; queue ids match the event stream's queueName.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "capturedAt", "queues", "matches", "penalties"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire format version, shared with command.schema.json."
+    },
+    "capturedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the snapshot was taken (engine clock)."
+    },
+    "queues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/queueState" },
+      "description": "Every registered queue, including empty ones, ordered by queueName."
+    },
+    "matches": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/matchState" },
+      "description": "Every in-flight (Forming or Live) match. Finalized matches never appear -- they arrive as match.ended events and match uploads."
+    },
+    "penalties": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/penaltyState" },
+      "description": "Every currently-active queue-timeout: one entry per (player, penalty kind) whose timeout has not yet expired."
+    }
+  },
+  "$defs": {
+    "queueState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queueName", "queueLabel", "capacity", "members"],
+      "properties": {
+        "queueName": { "type": "string", "description": "Registry id (\"{ownerArena}/{baseName}\"), the same key events and commands use." },
+        "queueLabel": { "type": "string", "description": "Operator-chosen display string, falling back to the queue's base name." },
+        "gameType": { "type": ["string", "null"], "description": "Registry name of the queue's game type; null for legacy/test queues." },
+        "capacity": { "type": "integer", "minimum": 0, "description": "Total players the queue's match shape needs (TeamCount * PlayersPerTeam)." },
+        "members": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/queueMember" },
+          "description": "Waiting players in queue (FIFO) order."
+        }
+      }
+    },
+    "queueMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["player", "enqueuedAt"],
+      "properties": {
+        "player": { "type": "string", "description": "In-game player name." },
+        "enqueuedAt": { "type": "string", "format": "date-time", "description": "When the player first joined the queue (liveness refreshes don't move this)." },
+        "group": { "type": ["string", "null"], "description": "Opaque group tag shared by party members who queued together; null for solo entries." }
+      }
+    },
+    "matchState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matchId", "gameType", "state", "teams"],
+      "properties": {
+        "matchId": { "type": "string", "format": "uuid", "description": "Match id, correlating to match.started/match.ended events and cancel_match commands." },
+        "gameType": { "type": "string", "description": "Registry name of the game type." },
+        "queueName": { "type": ["string", "null"], "description": "Registry id of the queue the match formed from (for form_match matches, the anchor queue). Null only if the queue was since removed by a config reload." },
+        "state": { "type": "string", "enum": ["Forming", "Live"], "description": "Engine match state. Forming = between teams-locked and GO!; Live = playing." },
+        "startedAt": { "type": ["string", "null"], "format": "date-time", "description": "When the match went live; null while Forming." },
+        "teams": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "string" } },
+          "description": "Rosters, one inner array of in-game names per team, in team-index order."
+        }
+      }
+    },
+    "penaltyState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["player", "kind", "offenseCount", "timeoutUntil"],
+      "properties": {
+        "player": { "type": "string", "description": "In-game name of the penalized player." },
+        "kind": {
+          "type": "string",
+          "enum": ["abandonment", "griefing", "elimination_cooldown", "staging_afk"],
+          "description": "Which penalty ladder the timeout comes from."
+        },
+        "offenseCount": { "type": "integer", "minimum": 1, "description": "Position on the ladder: consecutive offenses within the policy's memory window." },
+        "timeoutUntil": { "type": "string", "format": "date-time", "description": "When the queue-timeout ends." }
+      }
+    }
+  }
+}
