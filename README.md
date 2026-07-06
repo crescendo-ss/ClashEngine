@@ -409,7 +409,7 @@ v1 emits:
 
 - **Queue membership** — `queue.joined`, `queue.left` (with a `reason`: `cancel` / `disconnect` / `matched` / `afk_cull` / `group_change` / `reset`), `queue.near_full`, and `queue.dwell_warning`.
 - **Match lifecycle** — `match.teams_locked` (proposal), `match.started` (GO), `match.ended` (outcome + ranked teams + duration).
-- **Player** — `player.discord_link_requested` from `?connect discord <alias>`.
+- **Player** — `player.discord_link_requested` from `?connect discord <alias>`; `player.penalized` when a queue timeout is assessed (`penaltyReason` `abandonment`/`griefing`, `penaltyUntil`, and `offenseCount` for abandonment — a consumer shows "in timeout until X" live). Confirmed griefing only, so a veto never leaves a phantom timeout.
 
 **ClashEngine is identity-agnostic:** events are keyed by in-game player name. Any Discord-account link and per-player opt-in live entirely in the consuming service — `?connect discord` just relays the alias; the engine stores nothing.
 

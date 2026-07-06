@@ -52,12 +52,20 @@ link and per-player opt-in live entirely in the consuming service. The
 `?connect discord <alias>` command is a pure relay: it emits a
 `player.discord_link_requested` event and stores nothing.
 
-**Future extensions (not in v1):** the stream does not yet emit queue
-created/removed (hot-reload) lifecycle events, periodic full-state snapshots,
-or social/penalty events (group invites, abandonment, griefing, KOTH winner
-promotion, team-collapse). Those telemetry events exist and could be mapped
-later; the v1 stream covers queue membership, match lifecycle, and the Discord
-link relay.
+**Queue-timeout penalties** surface as `player.penalized` (`penaltyReason`
+`abandonment` — covering the abandonment and staging-AFK ladders — or
+`griefing`, with `penaltyUntil` and, for abandonment, `offenseCount`). Only a
+*confirmed* griefing penalty is emitted, so a later veto never leaves a phantom
+timeout on the wire. The timeout is assessed and escalated regardless of
+`Queue<i>IgnorePenalties`; that flag only governs whether a queue *admits* a
+penalized player.
+
+**Future extensions (not yet emitted):** queue created/removed (hot-reload)
+lifecycle events, periodic full-state snapshots, and the remaining social
+events (group invites, KOTH winner promotion, team-collapse, veto progress).
+Those telemetry events exist and could be mapped later; the stream currently
+covers queue membership, match lifecycle, queue-timeout penalties, and the
+Discord link relay.
 
 Replay files (`.replay`) are emitted alongside the match envelope. They are
 captured by the host's `ClashReplayRecorder` and referenced by

@@ -61,11 +61,18 @@ public sealed record MatchEventPayload(
     IReadOnlyList<string>? AbandonedBy = null);
 
 /// <summary>
-/// Payload for <c>player.*</c> events. Carries the in-game player name and, for
-/// <c>player.discord_link_requested</c>, the Discord alias the player asked to be linked with.
-/// ClashEngine neither stores nor validates the alias — the external consumer performs the link.
+/// Payload for <c>player.*</c> events. Carries the in-game player name and, per event, either the
+/// Discord alias (<c>player.discord_link_requested</c>) or the queue-timeout fields
+/// (<c>player.penalized</c>: <see cref="PenaltyReason"/> / <see cref="PenaltyUntil"/> /
+/// <see cref="OffenseCount"/>). ClashEngine neither stores nor validates the alias — the external
+/// consumer performs the link.
 /// </summary>
-public sealed record PlayerEventPayload(string Player, string? DiscordAlias = null);
+public sealed record PlayerEventPayload(
+    string Player,
+    string? DiscordAlias = null,
+    string? PenaltyReason = null,
+    DateTimeOffset? PenaltyUntil = null,
+    int? OffenseCount = null);
 
 /// <summary>One team's roster in a match event. <see cref="Rank"/> is 1-based; for
 /// <c>match.teams_locked</c>/<c>match.started</c> it's the team index +1 with <see cref="Score"/>
@@ -90,4 +97,5 @@ public static class ClashEventTypes
     public const string MatchStarted = "match.started";
     public const string MatchEnded = "match.ended";
     public const string PlayerDiscordLinkRequested = "player.discord_link_requested";
+    public const string PlayerPenalized = "player.penalized";
 }

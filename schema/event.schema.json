@@ -22,7 +22,8 @@
         "match.teams_locked",
         "match.started",
         "match.ended",
-        "player.discord_link_requested"
+        "player.discord_link_requested",
+        "player.penalized"
       ],
       "description": "Discriminator selecting which payload object is present: queue.* -> `queue`, match.* -> `match`, player.* -> `player`."
     },
@@ -149,6 +150,21 @@
         "discordAlias": {
           "type": ["string", "null"],
           "description": "On player.discord_link_requested, the Discord alias the player asked (via ?connect discord) to be linked with. ClashEngine neither stores nor validates it; the consumer performs the link."
+        },
+        "penaltyReason": {
+          "type": ["string", "null"],
+          "enum": ["abandonment", "griefing", null],
+          "description": "On player.penalized, why the queue timeout was assessed. \"abandonment\" covers the abandonment and staging-AFK ladders (the engine does not distinguish them on this event); \"griefing\" is a confirmed griefing penalty. Null on other player events."
+        },
+        "penaltyUntil": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "On player.penalized, when the player's queue timeout ends. A queue that does not set IgnorePenalties will reject their enqueue with result in_timeout until then; the timeout is still assessed and escalated even on queues that ignore it. Null on other player events."
+        },
+        "offenseCount": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "On player.penalized (abandonment), the player's position on the escalation ladder (consecutive offenses within the policy's memory window). Null for griefing and other events."
         }
       }
     }

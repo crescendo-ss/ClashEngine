@@ -5,6 +5,7 @@ using ClashEngine.Core.GameType;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
+using ClashEngine.Core.Penalties;
 using ClashEngine.Core.Queue;
 
 namespace ClashEngine.Core.Events;
@@ -17,12 +18,13 @@ namespace ClashEngine.Core.Events;
 /// lives in the plug-in.
 /// </summary>
 /// <remarks>
-/// v1 maps exactly the queue-membership events (<see cref="OnQueueAdded"/>,
-/// <see cref="OnQueueRemoved"/>, <see cref="OnQueueNearFull"/>, <see cref="OnQueueDwellWarning"/>)
-/// and the match-lifecycle events (<see cref="OnMatchProposed"/>, <see cref="OnMatchStarted"/>,
-/// <see cref="OnMatchEnded"/>). Every other telemetry event keeps the interface's default no-op
-/// body (social / penalty / KOTH / team-collapse / hold events are intentionally not emitted in
-/// v1).
+/// Maps the queue-membership events (<see cref="OnQueueAdded"/>, <see cref="OnQueueRemoved"/>,
+/// <see cref="OnQueueNearFull"/>, <see cref="OnQueueDwellWarning"/>), the match-lifecycle events
+/// (<see cref="OnMatchProposed"/>, <see cref="OnMatchStarted"/>, <see cref="OnMatchEnded"/>), the
+/// Discord-link relay, and the queue-timeout penalties (<see cref="OnAbandonment"/> and
+/// <see cref="OnGriefingConfirmed"/> → <c>player.penalized</c>). The remaining telemetry events
+/// (KOTH promotion, team-collapse, hold, group-social, veto progress) keep the interface's default
+/// no-op body and are not emitted.
 /// </remarks>
 public sealed class EventStreamTelemetry : IMatchmakingTelemetry
 {
@@ -93,6 +95,25 @@ public sealed class EventStreamTelemetry : IMatchmakingTelemetry
     {
         _sink.Emit(new EventEnvelope(EventSchema.Version, ClashEventTypes.PlayerDiscordLinkRequested,
             _clock.UtcNow, Player: new PlayerEventPayload(player.Name, discordAlias)));
+    }
+
+    // Penalty events: a player was assessed a queue timeout. Consumers (e.g. a queue board) use
+    // these to show "in timeout until X" live rather than waiting for the next state snapshot. The
+    // timeout is assessed and escalated regardless of whether the queues in play set
+    // IgnorePenalties; only admission to an IgnorePenalties queue disregards it.
+    public void OnAbandonment(PlayerKey player, int offenseCount, DateTimeOffset timeoutUntil) =>
+        EmitPenalized(player, "abandonment", timeoutUntil, offenseCount);
+
+    // Only the *confirmed* griefing penalty is emitted (not OnGriefingFlagged), so a consumer never
+    // shows a timeout that a pending veto then rescinds. offenseCount isn't carried on the griefing
+    // path.
+    public void OnGriefingConfirmed(PendingGriefingPenalty pending, DateTimeOffset timeoutUntil) =>
+        EmitPenalized(pending.Target, "griefing", timeoutUntil, offenseCount: null);
+
+    private void EmitPenalized(PlayerKey player, string reason, DateTimeOffset until, int? offenseCount)
+    {
+        _sink.Emit(new EventEnvelope(EventSchema.Version, ClashEventTypes.PlayerPenalized, _clock.UtcNow,
+            Player: new PlayerEventPayload(player.Name, PenaltyReason: reason, PenaltyUntil: until, OffenseCount: offenseCount)));
     }
 
     public void OnMatchProposed(MatchProposal proposal)

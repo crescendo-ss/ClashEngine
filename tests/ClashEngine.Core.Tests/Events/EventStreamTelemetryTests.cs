@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using ClashEngine.Core;
@@ -286,7 +287,13 @@ public class EventStreamTelemetryTests
         IMatchmakingTelemetry t = mapper;
         t.OnInviteSent(K("A"), K("B"), clock.UtcNow, TimeSpan.FromSeconds(15));
         t.OnQueueHoldStarted("2v2", new[] { K("A") }, 0.5, TimeSpan.FromSeconds(10));
-        t.OnAbandonment(K("A"), 1, clock.UtcNow);
+        t.OnTeammateAbandoned(new[] { K("A") }, K("B"), System.Guid.NewGuid(), clock.UtcNow);
+        // Only *confirmed* griefing emits player.penalized; a staged (flagged, veto-open) one stays
+        // a no-op so a later veto can't leave a phantom timeout on the wire.
+        t.OnGriefingFlagged(
+            new PendingGriefingPenalty(System.Guid.NewGuid(), K("B"), "tk", clock.UtcNow, clock.UtcNow,
+                2, new HashSet<PlayerKey>(), new HashSet<PlayerKey>()),
+            clock.UtcNow);
         Assert.Empty(sink.Events);
     }
 
@@ -424,6 +431,62 @@ public class EventStreamTelemetryTests
                 Match: new MatchEventPayload(MatchId: null, GameType: "elim")),
             options);
         Assert.DoesNotContain("\"gameLabel\"", withoutLabel);
+    }
+
+    [Fact]
+    public void OnAbandonment_emits_player_penalized_with_reason_until_and_offense()
+    {
+        var (mapper, sink, _) = DirectMapper();
+        var until = T0.AddMinutes(5);
+        mapper.OnAbandonment(K("A"), 2, until);
+
+        var e = sink.Events.Single(x => x.Type == ClashEventTypes.PlayerPenalized);
+        Assert.Equal(EventSchema.Version, e.SchemaVersion);
+        Assert.NotNull(e.Player);
+        Assert.Equal("A", e.Player!.Player);
+        Assert.Equal("abandonment", e.Player.PenaltyReason);
+        Assert.Equal(until, e.Player.PenaltyUntil);
+        Assert.Equal(2, e.Player.OffenseCount);
+        Assert.Null(e.Queue);
+        Assert.Null(e.Match);
+    }
+
+    [Fact]
+    public void OnGriefingConfirmed_emits_player_penalized_griefing_without_offense()
+    {
+        var (mapper, sink, _) = DirectMapper();
+        var until = T0.AddMinutes(30);
+        var pending = new PendingGriefingPenalty(
+            MatchId: System.Guid.NewGuid(), Target: K("Griefer"), Reason: "teamkills",
+            PenaltyAppliedAt: T0, VetoWindowEndsAt: T0, VetoesRequired: 2,
+            EligibleVoters: new HashSet<PlayerKey>(), VotesReceived: new HashSet<PlayerKey>());
+        mapper.OnGriefingConfirmed(pending, until);
+
+        var e = sink.Events.Single(x => x.Type == ClashEventTypes.PlayerPenalized);
+        Assert.Equal("Griefer", e.Player!.Player);
+        Assert.Equal("griefing", e.Player.PenaltyReason);
+        Assert.Equal(until, e.Player.PenaltyUntil);
+        Assert.Null(e.Player.OffenseCount);
+    }
+
+    [Fact]
+    public void Player_penalized_serializes_camelCase_and_drops_null_alias()
+    {
+        var (mapper, sink, _) = DirectMapper();
+        mapper.OnAbandonment(K("A"), 1, new DateTimeOffset(2026, 1, 1, 0, 5, 0, TimeSpan.Zero));
+        var e = sink.Events.Single(x => x.Type == ClashEventTypes.PlayerPenalized);
+
+        var options = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        };
+        var json = JsonSerializer.Serialize(e, options);
+        Assert.Contains("\"type\":\"player.penalized\"", json);
+        Assert.Contains("\"penaltyReason\":\"abandonment\"", json);
+        Assert.Contains("\"penaltyUntil\":", json);
+        Assert.Contains("\"offenseCount\":1", json);
+        Assert.DoesNotContain("discordAlias", json);   // null -> dropped
     }
 
     private static (EventStreamTelemetry Mapper, RecordingEventSink Sink, FakeClock Clock) DirectMapper()
