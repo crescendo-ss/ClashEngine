@@ -45,6 +45,7 @@
         "capacity": { "type": "integer", "minimum": 0, "description": "Total players the queue's match shape needs (teamCount * playersPerTeam)." },
         "teamCount": { "type": "integer", "minimum": 2, "description": "Number of teams in the queue's match shape. With playersPerTeam, tells a consumer how to lay out form_match rosters and team-slot UI." },
         "playersPerTeam": { "type": "integer", "minimum": 1, "description": "Players on each team in the queue's match shape." },
+        "ignorePenalties": { "type": "boolean", "description": "When true, this queue admits players who are serving a queue timeout (enqueue is not gated on penalties here). A consumer can use this to disable Join only on the enforcing queues while a player is penalized." },
         "members": {
           "type": "array",
           "items": { "$ref": "#/$defs/queueMember" },

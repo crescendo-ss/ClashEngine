@@ -71,7 +71,7 @@ public class ControlWireFormatTests
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new[]
             {
-                new QueueStateSnapshot("lobby/2v2", "2v2", null, 4, 2, 2,
+                new QueueStateSnapshot("lobby/2v2", "2v2", null, 4, 2, 2, false,
                     new[] { new QueueMemberSnapshot("A", new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)) }),
             },
             Array.Empty<MatchStateSnapshot>(),

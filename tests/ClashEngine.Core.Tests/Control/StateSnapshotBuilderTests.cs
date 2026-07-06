@@ -64,6 +64,7 @@ public class StateSnapshotBuilderTests
         Assert.Equal(4, q.Capacity);
         Assert.Equal(2, q.TeamCount);
         Assert.Equal(2, q.PlayersPerTeam);
+        Assert.False(q.IgnorePenalties);   // enforced by default
         Assert.Equal(new[] { "A", "B" }, q.Members.Select(m => m.Player).ToArray());
         Assert.Equal(T0, q.Members[0].EnqueuedAt);
         Assert.NotNull(q.Members[0].Group);
@@ -126,5 +127,16 @@ public class StateSnapshotBuilderTests
         Assert.Empty(q.Members);
         Assert.Empty(snap.Matches);
         Assert.Empty(snap.Penalties);
+    }
+    [Fact]
+    public void Snapshot_reports_ignore_penalties_per_queue()
+    {
+        var h = new Harness();
+        h.Engine.Queues.Register("2v2free", new MatchShape(2, 2),
+            new PartitionQualityPolicy(0.5, 0.15, TimeSpan.FromSeconds(90)), "gt1", ignorePenalties: true);
+
+        var snap = StateSnapshotBuilder.Build(h.Engine, h.Clock.UtcNow);
+        Assert.False(snap.Queues.Single(q => q.QueueName == "2v2").IgnorePenalties);
+        Assert.True(snap.Queues.Single(q => q.QueueName == "2v2free").IgnorePenalties);
     }
 }

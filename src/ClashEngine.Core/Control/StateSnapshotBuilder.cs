@@ -36,6 +36,7 @@ public static class StateSnapshotBuilder
                 def.Shape.TotalPlayers,
                 def.Shape.TeamCount,
                 def.Shape.PlayersPerTeam,
+                def.IgnorePenalties,
                 members));
         }
         queues.Sort(static (a, b) =>

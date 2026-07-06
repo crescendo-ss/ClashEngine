@@ -30,6 +30,7 @@ public sealed record QueueStateSnapshot(
     int Capacity,
     int TeamCount,
     int PlayersPerTeam,
+    bool IgnorePenalties,
     IReadOnlyList<QueueMemberSnapshot> Members);
 
 /// <summary>One waiting player. <see cref="Group"/> is an opaque tag shared by party members who
