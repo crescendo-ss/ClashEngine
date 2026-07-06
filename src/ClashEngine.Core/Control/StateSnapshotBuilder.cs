@@ -34,6 +34,8 @@ public static class StateSnapshotBuilder
                 def.Label,
                 string.IsNullOrEmpty(def.GameType) ? null : def.GameType,
                 def.Shape.TotalPlayers,
+                def.Shape.TeamCount,
+                def.Shape.PlayersPerTeam,
                 members));
         }
         queues.Sort(static (a, b) =>

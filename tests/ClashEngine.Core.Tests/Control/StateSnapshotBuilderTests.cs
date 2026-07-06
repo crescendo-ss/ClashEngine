@@ -62,6 +62,8 @@ public class StateSnapshotBuilderTests
         Assert.Equal("2v2", q.QueueName);
         Assert.Equal("gt1", q.GameType);
         Assert.Equal(4, q.Capacity);
+        Assert.Equal(2, q.TeamCount);
+        Assert.Equal(2, q.PlayersPerTeam);
         Assert.Equal(new[] { "A", "B" }, q.Members.Select(m => m.Player).ToArray());
         Assert.Equal(T0, q.Members[0].EnqueuedAt);
         Assert.NotNull(q.Members[0].Group);

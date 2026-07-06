@@ -20,12 +20,16 @@ public sealed record StateSnapshot(
 
 /// <summary>One queue's registration + membership. <see cref="Members"/> is in queue (FIFO)
 /// order. Present for every registered queue, including empty ones, so a consumer can render
-/// the full queue board from a single snapshot.</summary>
+/// the full queue board from a single snapshot. <see cref="TeamCount"/> ×
+/// <see cref="PlayersPerTeam"/> is the match shape (= <see cref="Capacity"/>), telling a
+/// consumer how to lay out <c>form_match</c> rosters and team-slot UI.</summary>
 public sealed record QueueStateSnapshot(
     string QueueName,
     string QueueLabel,
     string? GameType,
     int Capacity,
+    int TeamCount,
+    int PlayersPerTeam,
     IReadOnlyList<QueueMemberSnapshot> Members);
 
 /// <summary>One waiting player. <see cref="Group"/> is an opaque tag shared by party members who

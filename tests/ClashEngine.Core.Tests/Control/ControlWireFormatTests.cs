@@ -71,7 +71,7 @@ public class ControlWireFormatTests
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new[]
             {
-                new QueueStateSnapshot("lobby/2v2", "2v2", null, 4,
+                new QueueStateSnapshot("lobby/2v2", "2v2", null, 4, 2, 2,
                     new[] { new QueueMemberSnapshot("A", new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)) }),
             },
             Array.Empty<MatchStateSnapshot>(),
@@ -82,6 +82,8 @@ public class ControlWireFormatTests
         Assert.Contains("\"capturedAt\":", json);
         Assert.Contains("\"queueName\":\"lobby/2v2\"", json);
         Assert.Contains("\"capacity\":4", json);
+        Assert.Contains("\"teamCount\":2", json);
+        Assert.Contains("\"playersPerTeam\":2", json);
         Assert.Contains("\"player\":\"A\"", json);
         Assert.DoesNotContain("gameType", json);   // null -> dropped
         Assert.DoesNotContain("\"group\"", json);  // null -> dropped
