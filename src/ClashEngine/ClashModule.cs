@@ -12,6 +12,7 @@ using ClashEngine.Core;
 using ClashEngine.Core.Control;
 using ClashEngine.Core.Events;
 using ClashEngine.Core.GameType;
+using ClashEngine.Core.Matching;
 using ClashEngine.Core.Identity;
 using ClashEngine.Core.Penalties;
 using ClashEngine.Core.Preferences;
@@ -280,6 +281,13 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             PenaltyPolicy.DefaultEliminationCooldown.WithMaxTimeout(maxPenalty),
         };
 
+        // Engine-wide match-quality function. Zone-scope because the engine holds a single instance
+        // shared by every queue. OrdinalSpread (default) scores on mu-3sigma team-mean spread;
+        // PredictDraw uses OpenSkill's win-probability balance (see PredictDrawQuality). Note the two
+        // score on different scales, so the qStart/qFloor bands mean different things under each.
+        var quality = BuildQualityFunction();
+        _clashLog.Info(LogCategory, $"Match-quality function = {quality.GetType().Name}.");
+
         // Engine is constructed with a no-op telemetry sink so that listeners (which need the
         // engine reference) can be wired up below; once they exist we swap in the real
         // composite via SetTelemetry. Events fired before that swap (none, in practice -- the
@@ -288,6 +296,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             ratings: ratingStore,
             clock: _clock,
             penaltyPolicies: penaltyPolicies,
+            quality: quality,
             invitationTtl: TimeSpan.FromSeconds(15),
             autoQueue: autoQueueStore);
 
@@ -1083,6 +1092,25 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
             _log.LogM(LogLevel.Error, LogCategory, $"Tick failed: {ex}");
         }
         return true;
+    }
+
+    /// <summary>
+    /// Picks the engine-wide match-quality function from <c>[ClashEngine] QualityFunction</c>:
+    /// <c>PredictDraw</c> -> <see cref="PredictDrawQuality"/>; anything else (incl. unset) ->
+    /// <see cref="OrdinalSpreadQuality"/>. An unrecognized non-empty value warns and defaults.
+    /// </summary>
+    private IMatchQualityFunction BuildQualityFunction()
+    {
+        var kind = _config.GetStr(_config.Global, "ClashEngine", "QualityFunction");
+        if (string.IsNullOrWhiteSpace(kind) ||
+            string.Equals(kind, "OrdinalSpread", StringComparison.OrdinalIgnoreCase))
+            return new OrdinalSpreadQuality();
+        if (string.Equals(kind, "PredictDraw", StringComparison.OrdinalIgnoreCase))
+            return new PredictDrawQuality();
+
+        _clashLog?.Warn(LogCategory,
+            $"QualityFunction='{kind}' not recognized (expected OrdinalSpread|PredictDraw); using OrdinalSpread.");
+        return new OrdinalSpreadQuality();
     }
 
     /// <summary>
