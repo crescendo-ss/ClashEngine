@@ -20,8 +20,9 @@ public enum QueueBlockReason
     /// <summary>
     /// No valid team assignment exists at all -- e.g. a party is only partially inside the
     /// look-ahead pool, or <see cref="MatchShape.MaxOrdinalSpread"/> / <see cref="MatchShape.MaxLiabilityGap"/>
-    /// reject every partition. Distinct from <see cref="BelowQualityThreshold"/>, where a partition
-    /// exists but is too imbalanced.
+    /// reject every partition. Distinct from <see cref="BelowQualityThreshold"/> (a partition exists
+    /// but is too imbalanced) and <see cref="SkillSpreadTooWide"/> (only the <see cref="MatchShape.MaxMuSpread"/>
+    /// cap blocks, and it will relax on wait).
     /// </summary>
     NoViableTeams,
 
@@ -31,6 +32,15 @@ public enum QueueBlockReason
     /// effectively succeeded; it is intentionally waiting (see <see cref="QueueBlockStatus.HoldUntil"/>).
     /// </summary>
     HoldingForArrivals,
+
+    /// <summary>
+    /// No roster survives the <see cref="MatchShape.MaxMuSpread"/> eligibility cap -- the waiting
+    /// players are too far apart in raw mu -- though a team would form with the cap forgone. Unlike
+    /// <see cref="NoViableTeams"/> (teams impossible even without the cap), this clears itself once
+    /// the cap relaxes past the queue's RelaxTime, so <see cref="QueueBlockStatus.HoldUntil"/> carries
+    /// that relaxation time for a live countdown.
+    /// </summary>
+    SkillSpreadTooWide,
 }
 
 /// <summary>
@@ -51,8 +61,10 @@ public enum QueueBlockReason
 /// evaluated at the longest waiter's wait time.
 /// </param>
 /// <param name="HoldUntil">
-/// For <see cref="QueueBlockReason.HoldingForArrivals"/>, the absolute time the hold window expires
-/// (the adapter renders the live remaining seconds against "now"). <see langword="null"/> otherwise.
+/// An absolute time the adapter renders as live remaining seconds against "now": for
+/// <see cref="QueueBlockReason.HoldingForArrivals"/> the hold window's expiry, and for
+/// <see cref="QueueBlockReason.SkillSpreadTooWide"/> when the <see cref="MatchShape.MaxMuSpread"/>
+/// cap relaxes. <see langword="null"/> for the other reasons.
 /// </param>
 public readonly record struct QueueBlockStatus(
     QueueBlockReason Reason,

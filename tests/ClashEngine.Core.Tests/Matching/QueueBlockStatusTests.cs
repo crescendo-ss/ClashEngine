@@ -32,6 +32,7 @@ public class QueueBlockStatusTests
         public Harness(
             int lookAhead = 4,
             double? maxOrdinalSpread = null,
+            double? maxMuSpread = null,
             TimeSpan? holdWindow = null,
             double qualityCeiling = 0.99,
             double qStart = 0.4,
@@ -40,7 +41,7 @@ public class QueueBlockStatusTests
             Matcher = new Matcher(Registry, Index, Balancer, Quality, Clock, () => Telemetry);
             Registry.Register(
                 "2v2",
-                new MatchShape(2, 2, maxOrdinalSpread: maxOrdinalSpread),
+                new MatchShape(2, 2, maxOrdinalSpread: maxOrdinalSpread, maxMuSpread: maxMuSpread),
                 new PartitionQualityPolicy(qStart, qFloor, TimeSpan.FromSeconds(60)),
                 "gt1",
                 lookAheadWindow: lookAhead,
@@ -107,6 +108,58 @@ public class QueueBlockStatusTests
         Assert.Equal(QueueBlockReason.NoViableTeams, s.Reason);
         Assert.Equal(0.0, s.BestQuality, 6);
         Assert.Single(h.Telemetry.MatchmakingBlocked);
+    }
+
+    [Fact]
+    public void MaxMuSpread_block_reports_skill_spread_too_wide_with_relax_countdown()
+    {
+        // Only subset is {50,50,50,10}; its 40-point mu spread exceeds the 15 cap, so no roster
+        // survives -- but one forms with the cap forgone. That's specifically a MaxMuSpread block,
+        // so the reason is SkillSpreadTooWide and HoldUntil carries the relax time (enqueue + 60s).
+        var h = new Harness(maxMuSpread: 15);
+        h.Enqueue("A", 50);
+        h.Enqueue("B", 50);
+        h.Enqueue("C", 50);
+        h.Enqueue("D", 10);
+
+        Assert.Null(h.Matcher.TryProposeMatch());
+
+        Assert.True(h.Matcher.TryGetBlockStatus("2v2", out var s));
+        Assert.Equal(QueueBlockReason.SkillSpreadTooWide, s.Reason);
+        Assert.Equal(T0.AddSeconds(60), s.HoldUntil);
+        Assert.Single(h.Telemetry.MatchmakingBlocked);
+    }
+
+    [Fact]
+    public void Skill_spread_block_relaxes_and_forms_a_match_after_relax_time()
+    {
+        var h = new Harness(maxMuSpread: 15);
+        h.Enqueue("A", 50);
+        h.Enqueue("B", 50);
+        h.Enqueue("C", 50);
+        h.Enqueue("D", 10);
+
+        Assert.Null(h.Matcher.TryProposeMatch());                 // blocked: SkillSpreadTooWide
+
+        h.Clock.Advance(TimeSpan.FromSeconds(60));                // reach RelaxTime -> cap forgone
+        Assert.NotNull(h.Matcher.TryProposeMatch());              // now forms a match
+        Assert.False(h.Matcher.TryGetBlockStatus("2v2", out _));  // cleared on pop
+    }
+
+    [Fact]
+    public void MaxMuSpread_set_but_below_floor_still_reports_below_threshold()
+    {
+        // The roster is within the mu cap (spread 20 <= 25), so MaxMuSpread is NOT the blocker;
+        // the teams are just imbalanced -> BelowQualityThreshold, not SkillSpreadTooWide.
+        var h = new Harness(maxMuSpread: 25, qStart: 0.9);        // threshold 0.9 at t0
+        h.Enqueue("A", 20);
+        h.Enqueue("B", 0);
+        h.Enqueue("C", 0);
+        h.Enqueue("D", 0);                                        // best pairs to 10 vs 0 -> q 0.8 < 0.9
+
+        Assert.Null(h.Matcher.TryProposeMatch());
+        Assert.True(h.Matcher.TryGetBlockStatus("2v2", out var s));
+        Assert.Equal(QueueBlockReason.BelowQualityThreshold, s.Reason);
     }
 
     [Fact]
