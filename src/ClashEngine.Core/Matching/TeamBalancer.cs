@@ -28,7 +28,8 @@ public sealed class TeamBalancer
         IMatchQualityFunction quality,
         bool requireGroupsTogether = false,
         IReadOnlyDictionary<GroupId, int>? fullGroupSizes = null,
-        bool requireLongestWaiter = true)
+        bool requireLongestWaiter = true,
+        bool enforceMuSpread = true)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(shape);
@@ -61,6 +62,15 @@ public sealed class TeamBalancer
 
             // Per-subset MaxOrdinalSpread check.
             if (shape.MaxOrdinalSpread is double cap && SubsetSpread(pool, subset) > cap)
+                continue;
+
+            // Per-subset MaxMuSpread check: the highest-mu player in the roster sets the bar, and
+            // every other selected player must be within MaxMuSpread of them. A subset that spans
+            // too far in raw mu is not an eligible match roster at all, so a too-weak player is
+            // never pulled into a much stronger match -- independent of how teams would be split.
+            // enforceMuSpread=false is the caller's relaxation escape hatch (see the Matcher's
+            // RelaxTime-driven fallback): it forgoes this cap so a long-waiting pool can still form.
+            if (enforceMuSpread && shape.MaxMuSpread is double muCap && SubsetMuSpread(pool, subset) > muCap)
                 continue;
 
             // Party integrity: a group is selected all-or-nothing. Skip any subset that includes
@@ -143,6 +153,23 @@ public sealed class TeamBalancer
             if (o > maxOrd) maxOrd = o;
         }
         return maxOrd - minOrd;
+    }
+
+    /// <summary>
+    /// The subset's spread in raw <c>mu</c>: highest-mu player minus lowest-mu player. Gates on
+    /// the skill estimate itself (not ordinal), so a strong-but-uncertain player still sets a high
+    /// bar -- see <see cref="MatchShape.MaxMuSpread"/>.
+    /// </summary>
+    private static double SubsetMuSpread(QueueEntry[] pool, int[] subset)
+    {
+        double minMu = double.PositiveInfinity, maxMu = double.NegativeInfinity;
+        for (int i = 0; i < subset.Length; i++)
+        {
+            double mu = pool[subset[i]].Rating.Mu;
+            if (mu < minMu) minMu = mu;
+            if (mu > maxMu) maxMu = mu;
+        }
+        return maxMu - minMu;
     }
 
     /// <summary>

@@ -85,9 +85,14 @@ internal static class QueueParser
         // admits penalized players (penalties still accrue and other queues still enforce them).
         bool ignorePenalties = config.GetBool(
             handle, ConfigConstants.Section, p + "IgnorePenalties", defaultValue: false);
+        // Opt-in roster mu-eligibility cap (default off): the highest-mu player sets the bar and
+        // everyone else must be within this many mu points. Relaxes after RelaxTime -- see MatchShape.
+        double? maxMuSpread = ReadMaxMuSpread(config, handle, p, log);
 
-        // Preset defaults (only used when the corresponding explicit key wasn't set). Each row
-        // is overridable -- explicit Queue<i><Key> always wins.
+        // qStart/qFloor and MaxLiabilityGap are preset-driven with NO per-queue override key --
+        // fixed entirely by whether Preset=casual is set. (The individually tunable knobs --
+        // RelaxTime, HoldWindow, QualityCeiling, MaxMuSpread -- are resolved above via their Read*
+        // helpers; relaxTime here is the already-resolved Queue<i>RelaxTime value.)
         var quality = new PartitionQualityPolicy(
             qStart: casual ? 0.4 : 0.6,
             qFloor: casual ? 0.10 : 0.30,
@@ -95,7 +100,8 @@ internal static class QueueParser
         var shape = new MatchShape(
             teamCount: gt.TeamCount,
             playersPerTeam: gt.PlayersPerTeam,
-            maxLiabilityGap: casual ? null : 8.0);
+            maxLiabilityGap: casual ? null : 8.0,
+            maxMuSpread: maxMuSpread);
 
         var (endPolicy, endPolicyDesc) = BuildEndPolicy(gt);
         Func<IGriefingHeuristic> griefing = () => GriefingHeuristicSelector.Build(
@@ -165,6 +171,7 @@ internal static class QueueParser
                 $"MatchArena={(string.IsNullOrWhiteSpace(arenaName) ? "(none)" : arenaName)}, " +
                 $"LookAhead=+{lookAhead.Extra}{Note(lookAhead.Defaulted)} (pool={lookAhead.EffectiveTotal}), " +
                 $"AlwaysChooseLongestWaiter={alwaysChooseLongestWaiter}, " +
+                $"MaxMuSpread={(maxMuSpread is { } ms ? ms.ToString("0.##") : "(off)")}, " +
                 $"RelaxTime={effectiveRelax}{Note(relaxDefaulted)}, " +
                 $"HoldWindow={effectiveHold}{Note(holdDefaulted)}, " +
                 $"QualityCeiling={effectiveQc:F2}{Note(qcDefaulted)}, " +
@@ -183,9 +190,11 @@ internal static class QueueParser
     /// <summary>
     /// Reads the optional <c>Queue&lt;i&gt;Preset</c> shortcut. <c>casual</c> is the only legal
     /// value today and expands into the lenient bundle of defaults (q-bands, MaxLiabilityGap,
-    /// RelaxTime, RatingWeight, griefing threshold). Each individual knob can still be
-    /// overridden by an explicit per-key setting. Unknown preset values log a Warn and apply
-    /// nothing.
+    /// RelaxTime, RatingWeight, griefing threshold). Of these, only <c>RelaxTime</c> has a
+    /// per-queue override key (<c>Queue&lt;i&gt;RelaxTime</c>); the q-bands, MaxLiabilityGap, and
+    /// RatingWeight are set solely by this preset (the griefing threshold is settable per game
+    /// type via <c>&lt;GameType&gt;TeamkillThreshold</c>). Unknown preset values log a Warn and
+    /// apply nothing.
     /// </summary>
     private static bool ReadPreset(IConfigManager config, ConfigHandle handle, string p, ClashLog? log)
     {
@@ -248,6 +257,21 @@ internal static class QueueParser
             raw = null;
         }
         return (raw ?? 0.9, Defaulted: raw is null);
+    }
+
+    /// <summary>
+    /// Optional per-queue mu-eligibility cap (<c>Queue&lt;i&gt;MaxMuSpread</c>). Returns
+    /// <see langword="null"/> (no cap) when unset or invalid.
+    /// </summary>
+    private static double? ReadMaxMuSpread(IConfigManager config, ConfigHandle handle, string p, ClashLog? log)
+    {
+        var raw = ConfigReadHelpers.TryReadDouble(config, handle, p + "MaxMuSpread");
+        if (raw is { } ms && ms < 0)
+        {
+            log?.Warn(ConfigConstants.LogCategory, $"{p}MaxMuSpread={ms} must be >= 0; ignoring (no cap).");
+            return null;
+        }
+        return raw;
     }
 
     private static (int Effective, bool Defaulted) ReadVetoesRequired(IConfigManager config, ConfigHandle handle, string p, ClashLog? log)

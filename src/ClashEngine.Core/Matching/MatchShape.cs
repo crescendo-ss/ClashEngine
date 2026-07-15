@@ -20,11 +20,24 @@ public sealed record MatchShape
     /// </summary>
     public double? MaxLiabilityGap { get; }
 
+    /// <summary>
+    /// Reject any match roster whose players span more than this in raw <c>mu</c>. The highest-mu
+    /// player in the candidate set sets the bar: every other player must be within
+    /// <see cref="MaxMuSpread"/> of them to be eligible for the match. Unlike the ordinal caps
+    /// (which fold sigma into a conservative estimate), this gates on the skill estimate itself, so
+    /// a strong-but-uncertain player still raises the floor. Checked on the candidate subset before
+    /// teams are formed, so a too-weak player is never pulled into a much stronger match at all;
+    /// when no subset clears the cap, the balancer forms no match and the pool keeps waiting.
+    /// <see langword="null"/> = no cap.
+    /// </summary>
+    public double? MaxMuSpread { get; }
+
     public MatchShape(
         int teamCount,
         int playersPerTeam,
         double? maxOrdinalSpread = null,
-        double? maxLiabilityGap = null)
+        double? maxLiabilityGap = null,
+        double? maxMuSpread = null)
     {
         if (teamCount < 2)
             throw new ArgumentOutOfRangeException(nameof(teamCount), "Need at least 2 teams.");
@@ -34,11 +47,14 @@ public sealed record MatchShape
             throw new ArgumentOutOfRangeException(nameof(maxOrdinalSpread), "Must be non-negative.");
         if (maxLiabilityGap is { } gap && gap < 0)
             throw new ArgumentOutOfRangeException(nameof(maxLiabilityGap), "Must be non-negative.");
+        if (maxMuSpread is { } muSpread && muSpread < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxMuSpread), "Must be non-negative.");
 
         TeamCount = teamCount;
         PlayersPerTeam = playersPerTeam;
         MaxOrdinalSpread = maxOrdinalSpread;
         MaxLiabilityGap = maxLiabilityGap;
+        MaxMuSpread = maxMuSpread;
     }
 
     public int TotalPlayers => TeamCount * PlayersPerTeam;
