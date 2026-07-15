@@ -282,9 +282,11 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         };
 
         // Engine-wide match-quality function. Zone-scope because the engine holds a single instance
-        // shared by every queue. OrdinalSpread (default) scores on mu-3sigma team-mean spread;
-        // PredictDraw uses OpenSkill's win-probability balance (see PredictDrawQuality). Note the two
-        // score on different scales, so the qStart/qFloor bands mean different things under each.
+        // shared by every queue. PredictDraw (default) uses OpenSkill's win-probability balance (see
+        // PredictDrawQuality); OrdinalSpread is the opt-out and scores on mu-3sigma team-mean spread.
+        // Note the two score on different scales, so the qStart/qFloor bands mean different things
+        // under each -- under PredictDraw a band value v means "no worse than a (1+v)/2 : (1-v)/2 win
+        // split" (0.6 -> 70/30, 0.30 -> 85/15).
         var quality = BuildQualityFunction();
         _clashLog.Info(LogCategory, $"Match-quality function = {quality.GetType().Name}.");
 
@@ -1096,21 +1098,22 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
 
     /// <summary>
     /// Picks the engine-wide match-quality function from <c>[ClashEngine] QualityFunction</c>:
-    /// <c>PredictDraw</c> -> <see cref="PredictDrawQuality"/>; anything else (incl. unset) ->
-    /// <see cref="OrdinalSpreadQuality"/>. An unrecognized non-empty value warns and defaults.
+    /// <c>OrdinalSpread</c> -> <see cref="OrdinalSpreadQuality"/>; anything else (incl. unset) ->
+    /// <see cref="PredictDrawQuality"/> (the default). An unrecognized non-empty value warns and
+    /// falls back to the default.
     /// </summary>
     private IMatchQualityFunction BuildQualityFunction()
     {
         var kind = _config.GetStr(_config.Global, "ClashEngine", "QualityFunction");
         if (string.IsNullOrWhiteSpace(kind) ||
-            string.Equals(kind, "OrdinalSpread", StringComparison.OrdinalIgnoreCase))
-            return new OrdinalSpreadQuality();
-        if (string.Equals(kind, "PredictDraw", StringComparison.OrdinalIgnoreCase))
+            string.Equals(kind, "PredictDraw", StringComparison.OrdinalIgnoreCase))
             return new PredictDrawQuality();
+        if (string.Equals(kind, "OrdinalSpread", StringComparison.OrdinalIgnoreCase))
+            return new OrdinalSpreadQuality();
 
         _clashLog?.Warn(LogCategory,
-            $"QualityFunction='{kind}' not recognized (expected OrdinalSpread|PredictDraw); using OrdinalSpread.");
-        return new OrdinalSpreadQuality();
+            $"QualityFunction='{kind}' not recognized (expected PredictDraw|OrdinalSpread); using PredictDraw.");
+        return new PredictDrawQuality();
     }
 
     /// <summary>
