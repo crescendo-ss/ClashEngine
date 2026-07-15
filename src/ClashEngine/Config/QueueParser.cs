@@ -85,14 +85,18 @@ internal static class QueueParser
         // admits penalized players (penalties still accrue and other queues still enforce them).
         bool ignorePenalties = config.GetBool(
             handle, ConfigConstants.Section, p + "IgnorePenalties", defaultValue: false);
-        // Opt-in roster mu-eligibility cap (default off): the highest-mu player sets the bar and
-        // everyone else must be within this many mu points. Relaxes after RelaxTime -- see MatchShape.
-        double? maxMuSpread = ReadMaxMuSpread(config, handle, p, log);
+        // MaxMuSpread roster cap: an explicit positive Queue<i>MaxMuSpread wins, 0 disables it for
+        // this queue, and when unset a preset default applies -- 10 mu (~100 leaderboard-rating
+        // points, since rating ~= 10*(mu-3sigma)) for standard queues, off for casual. The highest-mu
+        // player sets the bar and everyone else must be within this many mu points; relaxes after
+        // RelaxTime -- see MatchShape.
+        double? maxMuSpread = ReadMaxMuSpread(config, handle, p, casual);
 
-        // qStart/qFloor and MaxLiabilityGap are preset-driven with NO per-queue override key --
-        // fixed entirely by whether Preset=casual is set. (The individually tunable knobs --
-        // RelaxTime, HoldWindow, QualityCeiling, MaxMuSpread -- are resolved above via their Read*
-        // helpers; relaxTime here is the already-resolved Queue<i>RelaxTime value.)
+        // qStart/qFloor are preset-driven with NO per-queue override key -- fixed entirely by whether
+        // Preset=casual is set. (The individually tunable knobs -- RelaxTime, HoldWindow,
+        // QualityCeiling, MaxMuSpread -- are resolved above via their Read* helpers; relaxTime here is
+        // the already-resolved Queue<i>RelaxTime value.) MaxLiabilityGap is off by default now that
+        // MaxMuSpread is the roster guard; it has no override key, so leaving it unset disables it.
         var quality = new PartitionQualityPolicy(
             qStart: casual ? 0.4 : 0.6,
             qFloor: casual ? 0.10 : 0.30,
@@ -100,7 +104,6 @@ internal static class QueueParser
         var shape = new MatchShape(
             teamCount: gt.TeamCount,
             playersPerTeam: gt.PlayersPerTeam,
-            maxLiabilityGap: casual ? null : 8.0,
             maxMuSpread: maxMuSpread);
 
         var (endPolicy, endPolicyDesc) = BuildEndPolicy(gt);
@@ -260,18 +263,16 @@ internal static class QueueParser
     }
 
     /// <summary>
-    /// Optional per-queue mu-eligibility cap (<c>Queue&lt;i&gt;MaxMuSpread</c>). Returns
-    /// <see langword="null"/> (no cap) when unset or invalid.
+    /// Resolves the per-queue mu-eligibility cap. An explicit positive
+    /// <c>Queue&lt;i&gt;MaxMuSpread</c> wins; <c>0</c> (or negative) disables the cap for this queue;
+    /// when the key is unset the preset default applies -- <c>10</c> mu for standard queues, off
+    /// (<see langword="null"/>) with <c>Preset = casual</c>.
     /// </summary>
-    private static double? ReadMaxMuSpread(IConfigManager config, ConfigHandle handle, string p, ClashLog? log)
+    private static double? ReadMaxMuSpread(IConfigManager config, ConfigHandle handle, string p, bool casual)
     {
         var raw = ConfigReadHelpers.TryReadDouble(config, handle, p + "MaxMuSpread");
-        if (raw is { } ms && ms < 0)
-        {
-            log?.Warn(ConfigConstants.LogCategory, $"{p}MaxMuSpread={ms} must be >= 0; ignoring (no cap).");
-            return null;
-        }
-        return raw;
+        if (raw is null) return casual ? null : 10.0;
+        return raw.Value > 0 ? raw.Value : null;
     }
 
     private static (int Effective, bool Defaulted) ReadVetoesRequired(IConfigManager config, ConfigHandle handle, string p, ClashLog? log)
