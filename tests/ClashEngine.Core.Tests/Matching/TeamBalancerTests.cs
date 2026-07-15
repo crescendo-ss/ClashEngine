@@ -161,6 +161,67 @@ public class TeamBalancerTests
     }
 
     [Fact]
+    public void MaxMuSpread_excludes_a_player_too_far_below_the_best()
+    {
+        // Best mu in any 4-player roster is 40; a 15-point cap sets the floor at 25, so the mu=10
+        // player can never be in the match. With only these 4 candidates that leaves too few, so
+        // no match forms. Widen the cap past 30 and the same roster becomes eligible.
+        var balancer = new TeamBalancer();
+        var candidates = new[] { E("A", 40), E("B", 38), E("C", 36), E("D", 10) };
+
+        var blocked = balancer.FindBest(candidates, new MatchShape(2, 2, maxMuSpread: 15), Quality);
+        Assert.Null(blocked);
+
+        var allowed = balancer.FindBest(candidates, new MatchShape(2, 2, maxMuSpread: 40), Quality);
+        Assert.NotNull(allowed);
+    }
+
+    [Fact]
+    public void MaxMuSpread_forms_a_match_from_the_within_threshold_players_when_pool_is_deep_enough()
+    {
+        // Six waiting: four bunched near the top (within 8 mu of the best=42) plus two far below.
+        // A 10-point cap floors eligibility at 32, so the mu=12 and mu=8 players are excluded and
+        // the match is formed from the four top players -- the low pair keeps waiting.
+        var balancer = new TeamBalancer();
+        var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var candidates = new[]
+        {
+            E("A", 42, t0), E("B", 40, t0.AddSeconds(1)), E("C", 38, t0.AddSeconds(2)),
+            E("D", 34, t0.AddSeconds(3)), E("Low1", 12, t0.AddSeconds(4)), E("Low2", 8, t0.AddSeconds(5)),
+        };
+
+        var result = balancer.FindBest(
+            candidates, new MatchShape(2, 2, maxMuSpread: 10), Quality, requireLongestWaiter: false);
+
+        Assert.NotNull(result);
+        var chosen = result!.Teams.SelectMany(t => t).Select(p => p.Name).ToHashSet();
+        Assert.True(chosen.SetEquals(new[] { "A", "B", "C", "D" }),
+            $"Expected the four top players; got {string.Join(",", chosen)}");
+    }
+
+    [Fact]
+    public void MaxMuSpread_gates_on_mu_not_ordinal()
+    {
+        // Two players share the top mu (40) but one is far more uncertain (sigma 10 -> ordinal 10)
+        // than the other (sigma 1 -> ordinal 37). An ordinal-spread cap would treat the uncertain
+        // ace as "weak" and reject pairing them with the low player; the mu-spread cap does not,
+        // because on raw skill they set the same bar. mu spread here is 40-30 = 10.
+        var balancer = new TeamBalancer();
+        var candidates = new[]
+        {
+            new QueueEntry(new PlayerKey("AceCertain"),   new Rating(40, 1.0, 0, default), default),
+            new QueueEntry(new PlayerKey("AceUncertain"), new Rating(40, 10.0, 0, default), default),
+            new QueueEntry(new PlayerKey("MidA"),         new Rating(30, 1.0, 0, default), default),
+            new QueueEntry(new PlayerKey("MidB"),         new Rating(30, 1.0, 0, default), default),
+        };
+
+        // mu spread = 10 -> a 12-point mu cap admits the roster...
+        Assert.NotNull(balancer.FindBest(candidates, new MatchShape(2, 2, maxMuSpread: 12), Quality));
+        // ...even though the ordinal spread (37 - 10 = 27) would have failed a comparable ordinal cap.
+        Assert.Null(balancer.FindBest(candidates, new MatchShape(2, 2, maxOrdinalSpread: 12), Quality));
+    }
+
+    [Fact]
     public void Three_team_partition_works()
     {
         var balancer = new TeamBalancer();
