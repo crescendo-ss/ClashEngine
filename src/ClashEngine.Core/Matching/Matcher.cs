@@ -188,22 +188,37 @@ public sealed class Matcher
             // it's why nothing could form. Trades the "don't mix these skill tiers" guarantee for
             // "don't leave someone stuck forever" once they've waited it out. The quality floor
             // (already at qFloor by now) still applies, so a truly lopsided roster stays blocked.
+            bool muRelaxed = false;
             if (current is null
                 && def.Shape.MaxMuSpread is not null
                 && longestWait >= def.QualityPolicy.RelaxTime)
             {
                 (current, bestEffort) = FindBestWithDiagnostics(snapshot, def, minQuality, fullGroupSizes, enforceMuSpread: false);
+                muRelaxed = true;
             }
 
             if (current is null)
             {
-                // Enough players, but nothing poppable: either every partition is too imbalanced
-                // (a best-effort partition exists but scores below the floor) or no valid assignment
-                // exists at all (party split across the look-ahead, or spread/liability caps reject
-                // everything). Record why so the Verbose log and ?queue can explain the stall.
-                var status = bestEffort is null
-                    ? new QueueBlockStatus(QueueBlockReason.NoViableTeams, 0, minQuality, null)
-                    : new QueueBlockStatus(QueueBlockReason.BelowQualityThreshold, bestEffort.Quality, minQuality, null);
+                // Enough players, but nothing poppable. Classify the stall for the Verbose log and
+                // ?queue: a below-floor partition exists (too imbalanced), or none exists at all --
+                // and when the only thing blocking is MaxMuSpread (a roster forms once the cap is
+                // forgone) say so specifically and note when the cap relaxes, rather than lumping it
+                // into the generic party-split / spread-cap NoViableTeams bucket.
+                QueueBlockStatus status;
+                if (bestEffort is not null)
+                {
+                    status = new QueueBlockStatus(QueueBlockReason.BelowQualityThreshold, bestEffort.Quality, minQuality, null);
+                }
+                else if (!muRelaxed && def.Shape.MaxMuSpread is not null
+                         && MuCapIsSoleBlocker(snapshot, def, minQuality, fullGroupSizes))
+                {
+                    var relaxAt = snapshot[0].EnqueuedAt + def.QualityPolicy.RelaxTime;
+                    status = new QueueBlockStatus(QueueBlockReason.SkillSpreadTooWide, 0, minQuality, relaxAt);
+                }
+                else
+                {
+                    status = new QueueBlockStatus(QueueBlockReason.NoViableTeams, 0, minQuality, null);
+                }
                 SetBlockStatus(def.UniqueId, status, now);
                 _held.Remove(def.UniqueId);
                 continue;
@@ -300,6 +315,22 @@ public sealed class Matcher
         var bestEffort = split ?? grouped;
         if (split is not null && split.Quality >= minQuality) return (split, bestEffort);
         return (null, bestEffort);
+    }
+
+    /// <summary>
+    /// True when the enforced search found no viable roster but one exists with the MaxMuSpread cap
+    /// forgone -- i.e. that cap (not a party split or another spread/liability limit) is what's
+    /// blocking the match. Lets the caller attribute the stall to
+    /// <see cref="QueueBlockReason.SkillSpreadTooWide"/>. Callers should only reach here after the
+    /// enforced search returned no best-effort partition and the queue actually sets a cap.
+    /// </summary>
+    private bool MuCapIsSoleBlocker(
+        IReadOnlyList<QueueEntry> snapshot, QueueDefinition def, double minQuality,
+        IReadOnlyDictionary<GroupId, int>? fullGroupSizes)
+    {
+        var (_, bestEffortNoCap) = FindBestWithDiagnostics(
+            snapshot, def, minQuality, fullGroupSizes, enforceMuSpread: false);
+        return bestEffortNoCap is not null;
     }
 
     /// <summary>

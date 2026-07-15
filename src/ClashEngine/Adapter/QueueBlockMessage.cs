@@ -21,6 +21,10 @@ internal static class QueueBlockMessage
             "Sufficient players, but no balanced team assignment is possible right now " +
             "(party grouping or rating-spread limits). Waiting for the queue to change.",
 
+        QueueBlockReason.SkillSpreadTooWide =>
+            "Sufficient players, but the skill gap between them is too wide (waiting for a " +
+            $"closer-rated player). This limit relaxes in {RemainingSeconds(status.HoldUntil, now)} s.",
+
         QueueBlockReason.HoldingForArrivals =>
             "Sufficient players, matchmaking succeeded. Waiting " +
             $"{RemainingSeconds(status.HoldUntil, now)} more seconds for potential additions to " +
