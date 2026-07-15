@@ -86,8 +86,10 @@ internal static class QueueParser
         bool ignorePenalties = config.GetBool(
             handle, ConfigConstants.Section, p + "IgnorePenalties", defaultValue: false);
 
-        // Preset defaults (only used when the corresponding explicit key wasn't set). Each row
-        // is overridable -- explicit Queue<i><Key> always wins.
+        // Preset-driven values that have NO per-queue override key: qStart/qFloor and
+        // MaxLiabilityGap are fixed entirely by whether Preset=casual is set. (The individually
+        // tunable knobs -- RelaxTime, HoldWindow, QualityCeiling, etc. -- are resolved above via
+        // their Read* helpers; relaxTime here is the already-resolved Queue<i>RelaxTime value.)
         var quality = new PartitionQualityPolicy(
             qStart: casual ? 0.4 : 0.6,
             qFloor: casual ? 0.10 : 0.30,
@@ -183,9 +185,11 @@ internal static class QueueParser
     /// <summary>
     /// Reads the optional <c>Queue&lt;i&gt;Preset</c> shortcut. <c>casual</c> is the only legal
     /// value today and expands into the lenient bundle of defaults (q-bands, MaxLiabilityGap,
-    /// RelaxTime, RatingWeight, griefing threshold). Each individual knob can still be
-    /// overridden by an explicit per-key setting. Unknown preset values log a Warn and apply
-    /// nothing.
+    /// RelaxTime, RatingWeight, griefing threshold). Of these, only <c>RelaxTime</c> has a
+    /// per-queue override key (<c>Queue&lt;i&gt;RelaxTime</c>); the q-bands, MaxLiabilityGap, and
+    /// RatingWeight are set solely by this preset (the griefing threshold is settable per game
+    /// type via <c>&lt;GameType&gt;TeamkillThreshold</c>). Unknown preset values log a Warn and
+    /// apply nothing.
     /// </summary>
     private static bool ReadPreset(IConfigManager config, ConfigHandle handle, string p, ClashLog? log)
     {
