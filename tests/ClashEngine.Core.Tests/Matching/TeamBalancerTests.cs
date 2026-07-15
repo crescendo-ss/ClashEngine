@@ -222,6 +222,19 @@ public class TeamBalancerTests
     }
 
     [Fact]
+    public void MaxMuSpread_is_skipped_when_enforceMuSpread_is_false()
+    {
+        // 40,38,36,10: spread 30 fails a 15-point cap, so the enforced search forms nothing...
+        var balancer = new TeamBalancer();
+        var candidates = new[] { E("A", 40), E("B", 38), E("C", 36), E("D", 10) };
+        var shape = new MatchShape(2, 2, maxMuSpread: 15);
+
+        Assert.Null(balancer.FindBest(candidates, shape, Quality, enforceMuSpread: true));
+        // ...but the relaxation escape hatch forgoes the cap and forms the best available split.
+        Assert.NotNull(balancer.FindBest(candidates, shape, Quality, enforceMuSpread: false));
+    }
+
+    [Fact]
     public void Three_team_partition_works()
     {
         var balancer = new TeamBalancer();

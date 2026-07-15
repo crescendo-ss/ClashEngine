@@ -28,7 +28,8 @@ public sealed class TeamBalancer
         IMatchQualityFunction quality,
         bool requireGroupsTogether = false,
         IReadOnlyDictionary<GroupId, int>? fullGroupSizes = null,
-        bool requireLongestWaiter = true)
+        bool requireLongestWaiter = true,
+        bool enforceMuSpread = true)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(shape);
@@ -67,7 +68,9 @@ public sealed class TeamBalancer
             // every other selected player must be within MaxMuSpread of them. A subset that spans
             // too far in raw mu is not an eligible match roster at all, so a too-weak player is
             // never pulled into a much stronger match -- independent of how teams would be split.
-            if (shape.MaxMuSpread is double muCap && SubsetMuSpread(pool, subset) > muCap)
+            // enforceMuSpread=false is the caller's relaxation escape hatch (see the Matcher's
+            // RelaxTime-driven fallback): it forgoes this cap so a long-waiting pool can still form.
+            if (enforceMuSpread && shape.MaxMuSpread is double muCap && SubsetMuSpread(pool, subset) > muCap)
                 continue;
 
             // Party integrity: a group is selected all-or-nothing. Skip any subset that includes

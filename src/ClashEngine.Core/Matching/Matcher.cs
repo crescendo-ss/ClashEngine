@@ -181,7 +181,20 @@ public sealed class Matcher
             var longestWait = now - snapshot[0].EnqueuedAt;
             double minQuality = def.QualityPolicy.MinQuality(longestWait);
 
-            var (current, bestEffort) = FindBestWithDiagnostics(snapshot, def, minQuality, fullGroupSizes);
+            var (current, bestEffort) = FindBestWithDiagnostics(snapshot, def, minQuality, fullGroupSizes, enforceMuSpread: true);
+
+            // MaxMuSpread relaxation: once the longest waiter has been queued past the same
+            // RelaxTime window that decays the quality floor, forgo the mu-spread eligibility cap if
+            // it's why nothing could form. Trades the "don't mix these skill tiers" guarantee for
+            // "don't leave someone stuck forever" once they've waited it out. The quality floor
+            // (already at qFloor by now) still applies, so a truly lopsided roster stays blocked.
+            if (current is null
+                && def.Shape.MaxMuSpread is not null
+                && longestWait >= def.QualityPolicy.RelaxTime)
+            {
+                (current, bestEffort) = FindBestWithDiagnostics(snapshot, def, minQuality, fullGroupSizes, enforceMuSpread: false);
+            }
+
             if (current is null)
             {
                 // Enough players, but nothing poppable: either every partition is too imbalanced
@@ -273,17 +286,17 @@ public sealed class Matcher
     /// </summary>
     private (BalanceResult? Chosen, BalanceResult? BestEffort) FindBestWithDiagnostics(
         IReadOnlyList<QueueEntry> snapshot, QueueDefinition def, double minQuality,
-        IReadOnlyDictionary<GroupId, int>? fullGroupSizes)
+        IReadOnlyDictionary<GroupId, int>? fullGroupSizes, bool enforceMuSpread)
     {
         var grouped = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: true, fullGroupSizes,
-            requireLongestWaiter: def.AlwaysChooseLongestWaiter);
+            requireLongestWaiter: def.AlwaysChooseLongestWaiter, enforceMuSpread: enforceMuSpread);
         if (grouped is not null && grouped.Quality >= minQuality) return (grouped, grouped);
 
         // The split search is strictly less constrained than the grouped one, so its best is the
         // true ceiling on achievable quality; it is null only when even unconstrained no subset
         // survives the spread/liability/party filters (then grouped is null too).
         var split = _balancer.FindBest(snapshot, def.Shape, _quality, requireGroupsTogether: false, fullGroupSizes,
-            requireLongestWaiter: def.AlwaysChooseLongestWaiter);
+            requireLongestWaiter: def.AlwaysChooseLongestWaiter, enforceMuSpread: enforceMuSpread);
         var bestEffort = split ?? grouped;
         if (split is not null && split.Quality >= minQuality) return (split, bestEffort);
         return (null, bestEffort);
