@@ -501,7 +501,7 @@ public sealed class ClashModule : IAsyncModule, IAsyncModuleLoaderAware, IAsyncA
         listeners.Add(_listener);
         listeners.Add(_lvzAdapter);
         listeners.Add(_freqAdvisor);
-        _engine.SetTelemetry(new CompositeTelemetry(listeners.ToArray()));
+        _engine.SetTelemetry(new CompositeTelemetry(_log, listeners.ToArray()));
 
         _observer = new PlayerStateObserver(broker, _engine, _resolver, _clock, _clashLog);
         // Ratings coordinator: pull-on-first-connect. Match envelopes carry post-match

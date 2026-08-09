@@ -933,7 +933,13 @@ public sealed class MatchOrchestrator
         {
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
-                if (_resolver.Resolve(_proposal.Teams[t][j]) is not { } p) continue;
+                var key = _proposal.Teams[t][j];
+                // A participant we eliminated may already be playing in a newer match (they're
+                // released from the engine index at elimination and can re-queue while we run).
+                // They're still on our roster for rating purposes, but specing them now would
+                // yank them out of a live match mid-fight.
+                if (IsPlayingElsewhere(key)) continue;
+                if (_resolver.Resolve(key) is not { } p) continue;
                 if (p.Arena != arena) continue;
                 if (p.Ship != ShipType.Spec || p.Freq != specFreq)
                     _game.SetShipAndFreq(p, ShipType.Spec, specFreq);
@@ -978,11 +984,23 @@ public sealed class MatchOrchestrator
     /// <summary>Specs the victim if they're still resolvable and not already in spec.</summary>
     private void ForceSpec(PlayerKey victim)
     {
+        if (IsPlayingElsewhere(victim)) return;
         if (_resolver.Resolve(victim) is { } p && p.Ship != ShipType.Spec)
         {
             _game.SetShip(p, ShipType.Spec);
         }
     }
+
+    /// <summary>
+    /// True when the engine now has <paramref name="key"/> in a <em>different</em> in-flight
+    /// match than ours. Our own roster is not proof of ownership: an eliminated participant is
+    /// released from the engine index and may be picked into a new match while we're still
+    /// running (or while our deferred knockout-spec timer is in flight), yet they stay on
+    /// <c>_proposal.Teams</c> for the end-of-match rating update. Guards every path that would
+    /// physically move them.
+    /// </summary>
+    private bool IsPlayingElsewhere(PlayerKey key) =>
+        _engine.MatchIdOf(key) is Guid live && live != _matchId;
 
     /// <summary>
     /// Deferred-spec timer body. One-shot (returns false). Cleanup() and the typed

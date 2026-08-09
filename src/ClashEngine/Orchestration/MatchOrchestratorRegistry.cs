@@ -24,6 +24,10 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
 {
     private readonly Dictionary<Guid, MatchOrchestrator> _orchestrators = new();
     private readonly Dictionary<PlayerKey, MatchOrchestrator> _stagingPlayers = new();
+    /// <summary>Formation order per live match, used to break roster ties in
+    /// <see cref="OrchestratorFor"/> in favour of the most recently formed match.</summary>
+    private readonly Dictionary<Guid, long> _formationSeq = new();
+    private long _nextFormationSeq;
     private readonly IComponentBroker _broker;
     private readonly MatchmakingEngine _engine;
     private readonly IGame _game;
@@ -121,6 +125,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
             noAntiwarpApplier: _noAntiwarpApplier, lastShips: _lastShips,
             freqAdvisor: _freqAdvisor);
         _orchestrators[matchId] = orchestrator;
+        _formationSeq[matchId] = ++_nextFormationSeq;
 
         // Track players for position-packet routing during staging.
         for (int t = 0; t < proposal.Teams.Count; t++)
@@ -132,6 +137,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
 
     public void OnMatchEnded(MatchOutcome outcome)
     {
+        _formationSeq.Remove(outcome.MatchId);
         if (!_orchestrators.Remove(outcome.MatchId, out var orchestrator)) return;
 
         // Clear staging-tracking entries for this match.
@@ -201,14 +207,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     public void OnKill(Arena arena, Player killer, Player killed, short bounty, short flagCount, short points, Prize green)
     {
         if (_resolver.KeyOf(killed) is not PlayerKey victim) return;
-        foreach (var orchestrator in _orchestrators.Values)
-        {
-            if (orchestrator.OwnsPlayer(victim))
-            {
-                orchestrator.OnKill(victim);
-                return;
-            }
-        }
+        OrchestratorFor(victim)?.OnKill(victim);
     }
 
     /// <summary>
@@ -247,11 +246,38 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
     /// active orchestrator has them on a roster. Used by the <c>?return</c> command to dispatch
     /// the re-placement call.
     /// </summary>
+    /// <remarks>
+    /// A player can sit on two live rosters at once: elimination releases them from their old
+    /// match's index while leaving them on its Teams list, so they can be picked into a new match
+    /// before the old one finishes. The engine's own index is the authority on which match they
+    /// are actually playing, so consult it first -- a bare roster scan resolves in
+    /// <see cref="Dictionary{TKey,TValue}"/> order and would hand the victim's kills (and their
+    /// knockout-spec) to whichever match happened to enumerate first.
+    /// </remarks>
     public MatchOrchestrator? OrchestratorFor(PlayerKey key)
     {
-        foreach (var orchestrator in _orchestrators.Values)
-            if (orchestrator.OwnsPlayer(key)) return orchestrator;
-        return null;
+        if (_engine.MatchIdOf(key) is Guid live && _orchestrators.TryGetValue(live, out var owner))
+            return owner;
+
+        // No index entry. That is the normal state on the kill path -- MatchKillRouter runs
+        // engine.OnKill first, and a lives-out kill releases the victim before we get here -- so
+        // fall back to the roster. A bare scan resolves in Dictionary order, which is arbitrary
+        // and can hand the kill to an older match the player was already eliminated from (they
+        // stay on its roster for rating purposes). The most recently formed match is the one
+        // they are actually playing, so break the tie on formation order.
+        MatchOrchestrator? newest = null;
+        long newestSeq = long.MinValue;
+        foreach (var (matchId, orchestrator) in _orchestrators)
+        {
+            if (!orchestrator.OwnsPlayer(key)) continue;
+            long seq = _formationSeq.TryGetValue(matchId, out var s) ? s : long.MinValue;
+            if (newest is null || seq > newestSeq)
+            {
+                newest = orchestrator;
+                newestSeq = seq;
+            }
+        }
+        return newest;
     }
 
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt)

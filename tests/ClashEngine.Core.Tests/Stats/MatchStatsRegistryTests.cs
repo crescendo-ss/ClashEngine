@@ -134,6 +134,67 @@ public class MatchStatsRegistryTests
     }
 
     [Fact]
+    public void Ending_old_match_keeps_the_index_of_a_player_already_in_a_newer_match()
+    {
+        // Continuation of the elim+requeue path above: the OLD match ends while the released
+        // player is mid-fight in the new one. EndMatch used to clear the index for everyone in
+        // its recorder, which severed dispatch for the match the player was actually playing --
+        // no recorder meant no new lives opened, so their recorded play time stopped dead at the
+        // instant the old match ended, and every later kill/damage event was dropped.
+        var reg = new MatchStatsRegistry(new DamageDecay());
+        var old = Guid.NewGuid();
+        var current = Guid.NewGuid();
+        reg.BeginMatch(old);
+        reg.AddPlayer(old, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 0);
+        reg.AddPlayer(old, K("teammate"), 0, 1000, 1.0, Energy(), atTick: 0);
+        reg.OnPlayerReleased(old, K("happy_004"), atTick: 500);
+
+        reg.BeginMatch(current);
+        reg.AddPlayer(current, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 600);
+
+        var final = reg.EndMatch(old, atTick: 1000);
+
+        // The re-queued player keeps dispatching into the live match...
+        Assert.Equal(current, reg.MatchIdOf(K("happy_004")));
+        Assert.Same(reg.ActiveRecorders[current], reg.RecorderFor(K("happy_004")));
+        // ...while their stats from the old match still ship with its upload.
+        Assert.Contains(K("happy_004"), final!.Stats.Keys);
+        // A player the old match really did own is still released.
+        Assert.Null(reg.MatchIdOf(K("teammate")));
+    }
+
+    [Fact]
+    public void Player_in_a_newer_match_keeps_recording_lives_after_the_old_match_ends()
+    {
+        var reg = new MatchStatsRegistry(new DamageDecay());
+        var old = Guid.NewGuid();
+        var current = Guid.NewGuid();
+        reg.BeginMatch(old);
+        reg.AddPlayer(old, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 0);
+        reg.OnPlayerReleased(old, K("happy_004"), atTick: 500);
+        reg.BeginMatch(current);
+        reg.AddPlayer(current, K("happy_004"), 0, 1000, 1.0, Energy(), atTick: 600);
+        reg.AddPlayer(current, K("opponent"), 1, 1000, 1.0, Energy(), atTick: 600);
+        reg.RecorderFor(K("happy_004"))!.OnSpawn(K("happy_004"), atTick: 600);
+
+        reg.EndMatch(old, atTick: 1000);
+
+        // Everything past this point routes the way StatsListener does -- via RecorderFor, whose
+        // null result is a silent drop. Pre-fix the index was gone, so the death and the respawn
+        // never reached the live recorder and the player's last life was whatever was open when
+        // the old match ended.
+        reg.RecorderFor(K("happy_004"))?.OnKill(K("happy_004"), K("opponent"), atTick: 1200);
+        reg.RecorderFor(K("happy_004"))?.OnSpawn(K("happy_004"), atTick: 1300);
+        var live = reg.EndMatch(current, atTick: 2000);
+
+        var lives = live!.Stats[K("happy_004")].Lives;
+        Assert.Equal(2, lives.Count);
+        Assert.Equal(1200u, lives[0].EndTick);
+        Assert.Equal(LifeEndReason.MatchEnded, lives[^1].EndReason);
+        Assert.Equal(2000u, lives[^1].EndTick);
+    }
+
+    [Fact]
     public void Releasing_player_not_in_match_is_a_noop()
     {
         var reg = new MatchStatsRegistry(new DamageDecay());
