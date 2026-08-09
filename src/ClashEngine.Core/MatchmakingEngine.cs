@@ -165,6 +165,16 @@ public sealed class MatchmakingEngine
 
     public bool IsInActiveMatch(PlayerKey player) => _matchOf.ContainsKey(player);
 
+    /// <summary>
+    /// The in-flight match <paramref name="player"/> is currently playing in, or
+    /// <see langword="null"/> if they are in none. Distinct from a roster scan over
+    /// <see cref="ActiveMatches"/>: a player eliminated mid-match stays on their old match's
+    /// roster (for rating purposes) while this returns the newer match they were since picked
+    /// into, so host-side dispatch that must not act on a stale roster should anchor here.
+    /// </summary>
+    public Guid? MatchIdOf(PlayerKey player) =>
+        _matchOf.TryGetValue(player, out var matchId) ? matchId : null;
+
     public bool IsConnected(PlayerKey player) => _connected.Contains(player);
 
     public EligibilityResult CheckEligibility(PlayerKey player) =>
@@ -190,7 +200,8 @@ public sealed class MatchmakingEngine
         {
             var m = _matches[matchId];
             var prev = SnapshotCollapsed(m);
-            m.OnPlayerLeft(player, at);
+            if (m.OnPlayerLeft(player, at))
+                _telemetry.OnPlayerDeparted(m, player, at + m.GraceWindow, at);
             DiffCollapsedAndEmit(m, prev);
         }
     }
@@ -229,7 +240,8 @@ public sealed class MatchmakingEngine
         {
             var m = _matches[matchId];
             var prev = SnapshotCollapsed(m);
-            m.OnPlayerLeft(player, at);
+            if (m.OnPlayerLeft(player, at))
+                _telemetry.OnPlayerDeparted(m, player, at + m.GraceWindow, at);
             DiffCollapsedAndEmit(m, prev);
         }
     }
@@ -247,7 +259,8 @@ public sealed class MatchmakingEngine
         if (!_matchOf.TryGetValue(player, out var matchId)) return;
         var m = _matches[matchId];
         var prev = SnapshotCollapsed(m);
-        m.OnPlayerLeft(player, at);
+        if (m.OnPlayerLeft(player, at))
+            _telemetry.OnPlayerDeparted(m, player, at + m.GraceWindow, at);
         DiffCollapsedAndEmit(m, prev);
     }
 
@@ -839,6 +852,10 @@ public sealed class MatchmakingEngine
             DiffCollapsedAndEmit(match, prev);
             match.ExcludeFromAbandonment(player);
             _matchOf.Remove(player);
+            // Mirror the elimination path's release notification: dropping the index entry
+            // without telling the adapter leaves the stats registry still holding the player
+            // against this match, and their next match start throws "already in match".
+            _telemetry.OnPlayerReleasedFromMatch(player, matchId, at);
             removedFromMatch = true;
         }
 
@@ -1258,7 +1275,16 @@ public sealed class MatchmakingEngine
             for (int j = 0; j < m.Teams[t].Count; j++)
             {
                 var p = m.Teams[t][j];
-                _matchOf.Remove(p);
+                // Only drop the index entry if it still points at THIS match. An eliminated
+                // player is released mid-match (see OnKill) and may already be rostered into a
+                // newer, still-live match by the time this one finalizes -- they stay on our
+                // Teams list for rating purposes, so an unconditional Remove here would delete
+                // their mapping to the match they are actually playing. That left them
+                // un-killable (OnKill anchors on _matchOf, so deaths never decremented lives),
+                // defeated the IsInActiveMatch guards on the re-enqueue paths below, and let a
+                // third match pick them up while the second was still running.
+                if (_matchOf.TryGetValue(p, out var currentMatch) && currentMatch == m.MatchId)
+                    _matchOf.Remove(p);
                 // Match is over -- release any active elimination cooldown so eliminated players
                 // don't sit idle longer than the match itself ran.
                 if (_penalties.HasPolicy(PenaltyKind.EliminationCooldown))

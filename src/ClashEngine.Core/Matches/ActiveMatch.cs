@@ -523,11 +523,19 @@ public sealed class ActiveMatch
     /// caught -- their grace expires and the join-timeout cancellation collects them all the same.
     /// </para>
     /// </summary>
-    public void OnPlayerLeft(PlayerKey player, DateTimeOffset at)
+    /// <returns>
+    /// <see langword="true"/> when the departure took effect (the player flipped from Active into
+    /// <see cref="PlayerStatus.InGrace"/>); <see langword="false"/> for a no-op -- an unknown
+    /// player, a match that is neither Forming nor Live, or a player who had already departed.
+    /// Mirrors <see cref="OnPlayerReturned"/>, so callers can announce a real departure exactly
+    /// once no matter how many times the host reports it (spec, then leave-arena, then disconnect
+    /// all funnel here).
+    /// </returns>
+    public bool OnPlayerLeft(PlayerKey player, DateTimeOffset at)
     {
-        if (!_status.TryGetValue(player, out var s)) return;
-        if (State != MatchState.Forming && State != MatchState.Live) return;
-        if (s != PlayerStatus.Active) return;
+        if (!_status.TryGetValue(player, out var s)) return false;
+        if (State != MatchState.Forming && State != MatchState.Live) return false;
+        if (s != PlayerStatus.Active) return false;
 
         _status[player] = PlayerStatus.InGrace;
         _leftAt[player] = at;
@@ -537,6 +545,7 @@ public sealed class ActiveMatch
 
         // Stamp team-collapse start at the actual departure time (not at the next Tick).
         UpdateTeamCollapseTimers(at);
+        return true;
     }
 
     /// <summary>

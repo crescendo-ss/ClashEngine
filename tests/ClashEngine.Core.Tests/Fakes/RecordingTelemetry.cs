@@ -24,6 +24,7 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
     public List<(IReadOnlyCollection<PlayerKey> Survivors, PlayerKey Abandoner, Guid MatchId, DateTimeOffset At)> TeammateAbandoned { get; } = new();
     public List<(Guid MatchId, PlayerKey Voter, ForfeitVote Vote)> ForfeitVotes { get; } = new();
     public List<(PlayerKey Player, Guid MatchId, DateTimeOffset At)> PlayerReleases { get; } = new();
+    public List<(PlayerKey Player, Guid MatchId, DateTimeOffset ReturnBy, DateTimeOffset At)> PlayerDepartures { get; } = new();
     public List<(PlayerKey Player, Guid MatchId, DateTimeOffset At)> PlayerReturns { get; } = new();
     public List<(Guid MatchId, int TeamIdx, DateTimeOffset Since, DateTimeOffset ForfeitAt)> TeamsCollapsing { get; } = new();
     public List<(Guid MatchId, int TeamIdx)> TeamsRecovered { get; } = new();
@@ -75,6 +76,8 @@ public sealed class RecordingTelemetry : IMatchmakingTelemetry
         ForfeitVotes.Add((match.MatchId, voter, vote));
     public void OnPlayerReleasedFromMatch(PlayerKey player, Guid matchId, DateTimeOffset at) =>
         PlayerReleases.Add((player, matchId, at));
+    public void OnPlayerDeparted(ActiveMatch match, PlayerKey player, DateTimeOffset returnBy, DateTimeOffset at) =>
+        PlayerDepartures.Add((player, match.MatchId, returnBy, at));
     public void OnPlayerReturnedToMatch(PlayerKey player, Guid matchId, DateTimeOffset at) =>
         PlayerReturns.Add((player, matchId, at));
     public void OnTeamCollapsing(ActiveMatch m, int teamIdx, DateTimeOffset since, DateTimeOffset forfeitAt) =>

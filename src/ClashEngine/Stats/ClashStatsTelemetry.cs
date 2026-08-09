@@ -131,9 +131,25 @@ public sealed class ClashStatsTelemetry : IMatchmakingTelemetry
                     ? null
                     : ShipInventoryConfigBuilder.BuildMax(_config, ch, ship);
 
-                _registry.AddPlayer(
-                    match.MatchId, player, t, maxEnergy, recharge, energyConfig, atTick,
-                    initialInventory, maxInventory);
+                // Contain a per-player registration failure to that player. AddPlayer throws when
+                // the registry still holds them against another match (a stale index entry -- see
+                // MatchStatsRegistry.EndMatch / MatchmakingEngine.FinalizeMatch, which only
+                // release entries that still point at the match being torn down). Letting it
+                // escape here would abort the roster loop AND the rest of the telemetry fan-out,
+                // leaving the match with no LVZ, no freq/ship lock, and half its damage watches.
+                // One player loses stats; the match still runs.
+                try
+                {
+                    _registry.AddPlayer(
+                        match.MatchId, player, t, maxEnergy, recharge, energyConfig, atTick,
+                        initialInventory, maxInventory);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogM(LogLevel.Error, LogCategory,
+                        $"Match {match.MatchId:N}: could not register {player.Name} for stats; " +
+                        $"their stats will be missing from this match: {ex}");
+                }
             }
         }
 

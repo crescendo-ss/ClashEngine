@@ -10,6 +10,7 @@ using ClashEngine.Core.Matches;
 using ClashEngine.Core.Matching;
 using ClashEngine.Core.Queue;
 using ClashEngine.Core.Stats;
+using ClashEngine.Stats;
 using SS.Core;
 using SS.Core.ComponentInterfaces;
 using SS.Matchmaking;
@@ -933,7 +934,13 @@ public sealed class MatchOrchestrator
         {
             for (int j = 0; j < _proposal.Teams[t].Count; j++)
             {
-                if (_resolver.Resolve(_proposal.Teams[t][j]) is not { } p) continue;
+                var key = _proposal.Teams[t][j];
+                // A participant we eliminated may already be playing in a newer match (they're
+                // released from the engine index at elimination and can re-queue while we run).
+                // They're still on our roster for rating purposes, but specing them now would
+                // yank them out of a live match mid-fight.
+                if (IsPlayingElsewhere(key)) continue;
+                if (_resolver.Resolve(key) is not { } p) continue;
                 if (p.Arena != arena) continue;
                 if (p.Ship != ShipType.Spec || p.Freq != specFreq)
                     _game.SetShipAndFreq(p, ShipType.Spec, specFreq);
@@ -978,11 +985,23 @@ public sealed class MatchOrchestrator
     /// <summary>Specs the victim if they're still resolvable and not already in spec.</summary>
     private void ForceSpec(PlayerKey victim)
     {
+        if (IsPlayingElsewhere(victim)) return;
         if (_resolver.Resolve(victim) is { } p && p.Ship != ShipType.Spec)
         {
             _game.SetShip(p, ShipType.Spec);
         }
     }
+
+    /// <summary>
+    /// True when the engine now has <paramref name="key"/> in a <em>different</em> in-flight
+    /// match than ours. Our own roster is not proof of ownership: an eliminated participant is
+    /// released from the engine index and may be picked into a new match while we're still
+    /// running (or while our deferred knockout-spec timer is in flight), yet they stay on
+    /// <c>_proposal.Teams</c> for the end-of-match rating update. Guards every path that would
+    /// physically move them.
+    /// </summary>
+    private bool IsPlayingElsewhere(PlayerKey key) =>
+        _engine.MatchIdOf(key) is Guid live && live != _matchId;
 
     /// <summary>
     /// Deferred-spec timer body. One-shot (returns false). Cleanup() and the typed
@@ -1170,6 +1189,39 @@ public sealed class MatchOrchestrator
                 if (_resolver.Resolve(_proposal.Teams[t][j]) is { } p)
                     list.Add(p);
         return list;
+    }
+
+    /// <summary>
+    /// A participant departed mid-match (specced out, left the arena, or dropped). Announces it
+    /// to the match with the return window, so the rest of the players know why someone vanished
+    /// and whether to expect them back -- the counterpart to the "returned to the match" line in
+    /// <see cref="TryReturn"/>, which used to be the only half of the pair anyone saw.
+    /// <para>Live only: during Setup/Staging/Countdown the no-show and cancellation paths do
+    /// their own tailored messaging, and after Cleanup there is no match left to tell.</para>
+    /// <para>The wording stays neutral on cause. The host cannot distinguish a deliberate spec
+    /// from a network drop, so "left the match" covers both without accusing a player who
+    /// actually lagged out.</para>
+    /// </summary>
+    public void OnPlayerDeparted(PlayerKey key, TimeSpan returnWindow)
+    {
+        if (Phase != MatchPhase.Live) return;
+        int seconds = (int)Math.Ceiling(returnWindow.TotalSeconds);
+        BroadcastToAll(seconds > 0
+            ? $"{key.Name} left the match -- {seconds}s to return."
+            : $"{key.Name} left the match.");
+    }
+
+    /// <summary>
+    /// A participant changed ships mid-match -- only possible inside the post-death grace window
+    /// the freq advisor opens (<see cref="MatchFreqAdvisor"/> locks the ship for the rest of the
+    /// life), so this is the "came back in a different ship" case and everyone in the match has
+    /// a stake in knowing. Pre-GO ship picks are not announced: during staging and countdown
+    /// everyone is choosing at once and the countdown already tells them to.
+    /// </summary>
+    public void OnPlayerChangedShip(PlayerKey key, ShipType ship)
+    {
+        if (Phase != MatchPhase.Live) return;
+        BroadcastToAll($"{key.Name} changed to {ShipSection.Of(ship)}.");
     }
 
     /// <summary>

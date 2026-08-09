@@ -118,13 +118,22 @@ public sealed class MatchStatsRegistry
 
     /// <summary>Close the match's accounting: any open lives are closed with
     /// <see cref="LifeEndReason.MatchEnded"/>, then the recorder is removed.</summary>
+    /// <remarks>
+    /// Index entries are only dropped for players still mapped to <paramref name="matchId"/>.
+    /// A player released mid-match (<see cref="OnPlayerReleased"/>, e.g. lives-out elimination)
+    /// can be registered into a newer match that is still live while their stats remain in this
+    /// recorder for the upload -- dropping their entry unconditionally would sever the dispatch
+    /// index for the match they are actually playing, silently discarding every subsequent event
+    /// (no new lives open, so their recorded play time stops at this instant).
+    /// </remarks>
     public StatsRecorder? EndMatch(Guid matchId, uint atTick)
     {
         if (!_recorders.TryGetValue(matchId, out var recorder)) return null;
         recorder.OnMatchEnded(atTick);
         _recorders.Remove(matchId);
         foreach (var p in recorder.Stats.Keys)
-            _matchOf.Remove(p);
+            if (_matchOf.TryGetValue(p, out var currentMatch) && currentMatch == matchId)
+                _matchOf.Remove(p);
         return recorder;
     }
 
