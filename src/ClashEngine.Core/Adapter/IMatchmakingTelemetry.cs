@@ -171,6 +171,18 @@ public interface IMatchmakingTelemetry
     void OnPlayerReleasedFromMatch(PlayerKey player, Guid matchId, DateTimeOffset at) { }
 
     /// <summary>
+    /// A participant departed mid-match -- specced, left the arena, or dropped. The host cannot
+    /// tell a deliberate quit from a network drop at this layer, so this is one event for all
+    /// three and the adapter should word it neutrally. Fires only on a real Active -&gt; InGrace
+    /// transition, so the repeat reports a single departure generates (a disconnect arrives as a
+    /// spec *and* a leave-arena *and* a disconnect) announce once.
+    /// <paramref name="returnBy"/> is the deadline for a penalty-free return
+    /// (<c>at + ActiveMatch.GraceWindow</c>); missing it is what flags an abandon and fires
+    /// <see cref="OnTeammateAbandoned"/>.
+    /// </summary>
+    void OnPlayerDeparted(ActiveMatch match, PlayerKey player, DateTimeOffset returnBy, DateTimeOffset at) { }
+
+    /// <summary>
     /// A participant who had departed mid-match (specced, left the arena, or disconnected) is
     /// Active in the match again. Fires only when the return actually took effect -- the player
     /// was in a returnable status and the match is still Forming/Live; no-op returns (knocked-out

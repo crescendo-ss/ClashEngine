@@ -99,6 +99,9 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         // would otherwise be processed before the snapshot was taken, and the returner would get
         // the slot's default ship instead of whichever ship they were last on.
         PreShipFreqChangeCallback.Register(_broker, OnShipFreqChange);
+        // The post-change callback is the right one for the ship-swap announcement: it reports
+        // what the player actually ended up in, after the freq advisor has had its say.
+        ShipFreqChangeCallback.Register(_broker, OnShipFreqChanged);
         _registeredCallback = true;
     }
 
@@ -108,6 +111,7 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         PlayerPositionPacketCallback.Unregister(_broker, OnPositionPacket);
         PlayerActionCallback.Unregister(_broker, OnPlayerAction);
         PreShipFreqChangeCallback.Unregister(_broker, OnShipFreqChange);
+        ShipFreqChangeCallback.Unregister(_broker, OnShipFreqChanged);
         _registeredCallback = false;
     }
 
@@ -197,6 +201,31 @@ public sealed class MatchOrchestratorRegistry : IMatchmakingTelemetry
         var orchestrator = OrchestratorFor(key);
         if (orchestrator is null) return;
         orchestrator.OnPlayerSpecced(key, oldShip);
+    }
+
+    /// <summary>
+    /// Routes a completed ship change to the owning orchestrator so it can announce the swap to
+    /// the match. Only player-initiated ship-to-ship changes are interesting: transitions into
+    /// or out of spec are the placement, knockout-spec and cleanup paths the orchestrator drives
+    /// itself (and a departure to spec has its own announcement), and a freq-only change is not
+    /// a ship change at all.
+    /// </summary>
+    private void OnShipFreqChanged(Player player, ShipType newShip, ShipType oldShip, short newFreq, short oldFreq)
+    {
+        if (newShip == ShipType.Spec || oldShip == ShipType.Spec) return;
+        if (newShip == oldShip) return;
+        if (_resolver.KeyOf(player) is not PlayerKey key) return;
+        OrchestratorFor(key)?.OnPlayerChangedShip(key, newShip);
+    }
+
+    /// <summary>
+    /// Announces a mid-match departure (spec, arena exit or drop) to the match. Routed by match
+    /// id rather than by roster: the engine fires this for the match the player was actually in.
+    /// </summary>
+    public void OnPlayerDeparted(ActiveMatch match, PlayerKey player, DateTimeOffset returnBy, DateTimeOffset at)
+    {
+        if (_orchestrators.TryGetValue(match.MatchId, out var orchestrator))
+            orchestrator.OnPlayerDeparted(player, returnBy - at);
     }
 
     /// <summary>

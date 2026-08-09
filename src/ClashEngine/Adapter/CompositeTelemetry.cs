@@ -136,6 +136,10 @@ public sealed class CompositeTelemetry : IMatchmakingTelemetry
     {
         Fan(l => l.OnPlayerReleasedFromMatch(p, matchId, at), nameof(OnPlayerReleasedFromMatch));
     }
+    public void OnPlayerDeparted(ActiveMatch match, PlayerKey p, DateTimeOffset returnBy, DateTimeOffset at)
+    {
+        Fan(l => l.OnPlayerDeparted(match, p, returnBy, at), nameof(OnPlayerDeparted));
+    }
     public void OnPlayerReturnedToMatch(PlayerKey p, Guid matchId, DateTimeOffset at)
     {
         Fan(l => l.OnPlayerReturnedToMatch(p, matchId, at), nameof(OnPlayerReturnedToMatch));

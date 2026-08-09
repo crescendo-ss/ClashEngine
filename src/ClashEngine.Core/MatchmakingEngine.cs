@@ -200,7 +200,8 @@ public sealed class MatchmakingEngine
         {
             var m = _matches[matchId];
             var prev = SnapshotCollapsed(m);
-            m.OnPlayerLeft(player, at);
+            if (m.OnPlayerLeft(player, at))
+                _telemetry.OnPlayerDeparted(m, player, at + m.GraceWindow, at);
             DiffCollapsedAndEmit(m, prev);
         }
     }
@@ -239,7 +240,8 @@ public sealed class MatchmakingEngine
         {
             var m = _matches[matchId];
             var prev = SnapshotCollapsed(m);
-            m.OnPlayerLeft(player, at);
+            if (m.OnPlayerLeft(player, at))
+                _telemetry.OnPlayerDeparted(m, player, at + m.GraceWindow, at);
             DiffCollapsedAndEmit(m, prev);
         }
     }
@@ -257,7 +259,8 @@ public sealed class MatchmakingEngine
         if (!_matchOf.TryGetValue(player, out var matchId)) return;
         var m = _matches[matchId];
         var prev = SnapshotCollapsed(m);
-        m.OnPlayerLeft(player, at);
+        if (m.OnPlayerLeft(player, at))
+            _telemetry.OnPlayerDeparted(m, player, at + m.GraceWindow, at);
         DiffCollapsedAndEmit(m, prev);
     }
 
