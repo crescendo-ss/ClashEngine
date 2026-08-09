@@ -112,13 +112,20 @@ public sealed class MatchOrchestrator
     /// <summary>Seconds remaining in the live countdown. Decrements on each <see cref="OnCountdownTick"/>.</summary>
     private int _countdownSecondsRemaining;
 
-    /// <summary>Per-player placement that's still pending arena-entry. Populated for every
-    /// participant in BeginSetup; the entry is removed once the player has been placed onto
-    /// their assigned ship (either immediately if already in the right arena, or via
-    /// <see cref="OnPlayerEnteredArena"/> after the SendToArena transfer completes).</summary>
+    /// <summary>Per-player placement info, keyed by participant. Populated for every participant
+    /// in BeginSetup and drained by <see cref="PlacePlayerOnShip"/>, which reads the assigned
+    /// ship / freq / start out of it. Since placement is now synchronous (no arena transfer to
+    /// wait on), entries never outlive the BeginSetup loop.</summary>
     private readonly Dictionary<PlayerKey, PlacementInfo> _pendingPlacement = new();
 
     private readonly record struct PlacementInfo(ShipType Ship, short Freq, int TeamIdx, short StartX, short StartY);
+
+    /// <summary>The arena this match is actually being played in. Captured from the first
+    /// participant placed in <see cref="PlacePlayerOnShip"/> -- setup places players where they
+    /// already stand instead of relocating them, so the match's arena is a fact about its
+    /// participants rather than something config declares. <see cref="TryReturn"/> measures a
+    /// returning player against this. Null only if nobody was ever successfully placed.</summary>
+    private string? _playArenaName;
 
     public MatchOrchestrator(
         Guid matchId,
@@ -208,8 +215,10 @@ public sealed class MatchOrchestrator
     }
 
     /// <summary>
-    /// Place every matched player: warp to match arena (or in-place), set ship+freq, lock,
+    /// Place every matched player in place -- set ship+freq, warp to the team's start, lock --
     /// then enter the staging window during which we detect AFK players via position packets.
+    /// Players are never moved between arenas; whichever arena a participant is standing in when
+    /// the match forms is the arena they play it in.
     /// </summary>
     public void BeginSetup()
     {
@@ -241,23 +250,11 @@ public sealed class MatchOrchestrator
                 var ship = PreferredShip(key);
                 _pendingPlacement[key] = new PlacementInfo(ship, freq, t, start.X, start.Y);
 
-                if (arenaName is not null && !IsInArena(player, arenaName))
-                {
-                    // Different arena (or no arena yet): transfer asynchronously. The placement
-                    // (ship + freq + warp + lock) finishes when EnterArena fires for them, via
-                    // the registry's PlayerActionCallback dispatcher -> OnPlayerEnteredArena.
-                    // SendToArena's start args are tile coords (and it silently ignores any >=
-                    // 1024); StartPoint is tiles, so TileX/TileY hand it the value directly.
-                    _arenaManager.SendToArena(player, arenaName, start.TileX, start.TileY);
-                    if (_verbose.IsDebug)
-                        _verbose.Debug(LogCategory,
-                            $"Match {_matchId:N}: sending {key.Name} to arena '{arenaName}'; placement deferred.");
-                }
-                else
-                {
-                    // Already in target arena (or no arena configured): place now.
-                    PlacePlayerOnShip(key, player);
-                }
+                // Place players where they already stand -- a match never relocates anyone. Queue
+                // ids are arena-qualified and ?play only resolves queues owned by the arena the
+                // player is standing in, so participants are normally already together in the
+                // queue's own arena by the time a match forms.
+                PlacePlayerOnShip(key, player);
             }
         }
 
@@ -281,6 +278,10 @@ public sealed class MatchOrchestrator
     /// enters an arena (<c>PlayerActionCallback</c> with <c>EnterArena</c>). If they entered the
     /// configured match arena AND the orchestrator still has a pending placement for them, this
     /// finishes the setup: ship + freq + warp + lock.
+    /// <para>Retained as a safety net only. Now that BeginSetup places everyone synchronously
+    /// rather than transferring them between arenas, <see cref="_pendingPlacement"/> is always
+    /// empty by the time any EnterArena fires, so this returns at the pending-placement guard.
+    /// </para>
     /// </summary>
     public void OnPlayerEnteredArena(PlayerKey key, Arena arena)
     {
@@ -322,6 +323,11 @@ public sealed class MatchOrchestrator
     private void PlacePlayerOnShip(PlayerKey key, Player player)
     {
         if (!_pendingPlacement.Remove(key, out var info)) return;
+
+        // The first player placed fixes the arena the match is played in; everyone else is placed
+        // where they stand, which is normally the same arena (queue ids are arena-qualified, so
+        // participants queued from here).
+        _playArenaName ??= player.Arena?.Name;
 
         // Push the client-settings overrides BEFORE the ship-up so the client already has the
         // match's [Spawn] box (and zeroed item maxes in no-items mode) when it spawns the ship.
@@ -479,7 +485,8 @@ public sealed class MatchOrchestrator
     /// recover a participant who specced themselves out and would otherwise be blocked by
     /// <see cref="ClashEngine.Adapter.MatchFreqAdvisor"/> from getting back to their team's
     /// (private) freq. No-op for unknown players, players already on a ship, knocked-out players
-    /// (lives exhausted), or once the match has reached Cleanup.
+    /// (lives exhausted), once the match has reached Cleanup, or when the player is not in the
+    /// arena the match is being played in.
     /// </summary>
     public ReturnResult TryReturn(PlayerKey key)
     {
@@ -491,8 +498,11 @@ public sealed class MatchOrchestrator
         var player = _resolver.Resolve(key);
         if (player is null) return ReturnResult.UnresolvedPlayer;
 
-        var arenaName = _queue.MatchArenaName;
-        if (!string.IsNullOrEmpty(arenaName) && !IsInArena(player, arenaName))
+        // A match is played in one arena, and ?return only works from inside it. Measured against
+        // where the match actually is -- not any config key -- so a player standing where their
+        // match is being played always gets back in. From anywhere else this no-ops; walking back
+        // to the right arena is on the player.
+        if (_playArenaName is { } playArena && !IsInArena(player, playArena))
             return ReturnResult.NotInArena;
 
         if (player.Ship != ShipType.Spec)
