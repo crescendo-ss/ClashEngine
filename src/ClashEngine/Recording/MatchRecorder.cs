@@ -50,7 +50,7 @@ public sealed class MatchRecorder
     private readonly INetwork _network;
     private readonly ISecuritySeedSync _securitySeedSync;
 
-    // All access from the mainloop thread.
+    // All access from the mainloop thread (see IgnoreOffMainloop).
     private readonly Dictionary<Arena, List<Session>> _arenaSessions = new(Constants.TargetArenaCount);
 
     private bool _registered;
@@ -170,8 +170,22 @@ public sealed class MatchRecorder
 
     #region Callbacks
 
+    /// <summary>
+    /// Guard for every server-driven entry point below. Session bookkeeping (the arena map, each
+    /// session's player set) is mainloop-only, but the server does not fire every callback on the
+    /// mainloop: <c>SS.Replay.ReplayModule</c>'s playback worker sends its arena notifications and
+    /// forces watchers to spec straight off its own thread, so an arena chat message / ship change
+    /// lands here on a thread pool thread. Such an event is dropped rather than raced on -- it is
+    /// synthetic (a replay of a past match, not something happening in a live one) and has no place
+    /// in a recording. Previously this was a <see cref="Debug.Assert"/>, which fails fast and took
+    /// the whole server down the moment anyone started a playback.
+    /// </summary>
+    private bool IgnoreOffMainloop => !_mainloop.IsMainloop;
+
     private void Callback_ArenaAction(Arena arena, ArenaAction action)
     {
+        if (IgnoreOffMainloop) return;
+
         if (action != ArenaAction.Destroy)
             return;
 
@@ -187,7 +201,7 @@ public sealed class MatchRecorder
 
     private void Callback_PlayerAction(Player player, PlayerAction action, Arena? arena)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
 
         if (arena is null) return;
         if (action != PlayerAction.LeaveArena) return;
@@ -209,7 +223,7 @@ public sealed class MatchRecorder
 
     private void Callback_ShipFreqChange(Player player, ShipType newShip, ShipType oldShip, short newFreq, short oldFreq)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
         Arena? arena = player.Arena;
         if (arena is null || !_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
 
@@ -228,7 +242,7 @@ public sealed class MatchRecorder
 
     private void Callback_Kill(Arena arena, Player killer, Player killed, short bounty, short flagCount, short points, Prize green)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
         if (arena is null || !_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
 
         for (int i = 0; i < list.Count; i++)
@@ -245,7 +259,7 @@ public sealed class MatchRecorder
 
     private void Callback_BricksPlaced(Arena arena, Player? player, IReadOnlyList<BrickData> bricks)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
 
         // Only record bricks placed by a player tracked in a session. A brick belongs to the
         // match its placer is in, so this keeps a per-match recording scoped to its own
@@ -273,7 +287,7 @@ public sealed class MatchRecorder
 
     private void Callback_ChatMessage(Arena? arena, Player? player, ChatMessageType type, ChatSound sound, Player? toPlayer, short freq, ReadOnlySpan<char> message)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
         if (arena is null || player is null) return;
         if (!_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
 
@@ -293,7 +307,7 @@ public sealed class MatchRecorder
 
     private void Callback_CrownToggled(Player player, bool on)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
         Arena? arena = player.Arena;
         if (arena is null || !_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
 
@@ -308,7 +322,7 @@ public sealed class MatchRecorder
 
     private void Callback_Attach(Player player, Player? to)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
         Arena? arena = player.Arena;
         if (arena is null || !_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
 
@@ -328,7 +342,7 @@ public sealed class MatchRecorder
 
     private void Callback_TurretKickoff(Player player)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
         Arena? arena = player.Arena;
         if (arena is null || !_arenaSessions.TryGetValue(arena, out List<Session>? list)) return;
 
@@ -343,7 +357,7 @@ public sealed class MatchRecorder
 
     private void Callback_SecuritySeedChanged(uint greenSeed, uint doorSeed, ServerTick timestamp)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
 
         // Security seed changes are arena-independent; fan out to all active sessions.
         foreach (List<Session> list in _arenaSessions.Values)
@@ -361,7 +375,7 @@ public sealed class MatchRecorder
 
     private void Packet_Position(Player player, ReadOnlySpan<byte> data, NetReceiveFlags flags)
     {
-        Debug.Assert(_mainloop.IsMainloop);
+        if (IgnoreOffMainloop) return;
 
         int length = data.Length;
         if (length != C2S_PositionPacket.Length && length != C2S_PositionPacket.LengthWithExtra)
